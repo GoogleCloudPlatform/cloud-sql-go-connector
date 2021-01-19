@@ -15,8 +15,13 @@
 package instance
 
 import (
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"os"
 	"testing"
+
+	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 var (
@@ -51,4 +56,30 @@ func TestParseConnName(t *testing.T) {
 			t.Errorf("ParseConnName(%s) failed: want %v, got %v", tc.name, tc.want, err)
 		}
 	}
+}
+
+func TestConnect(t *testing.T) {
+	ctx := context.Background()
+
+	client, err := sqladmin.NewService(ctx)
+	if err != nil {
+		t.Fatalf("client init failed: %s", err)
+	}
+
+	// Step 0: Generate Keys
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate keys: %v", err)
+	}
+
+	im, err := NewInstanceManager(instConnName, client, key)
+	if err != nil {
+		t.Fatalf("failed to initialize Instance Manager: %v", err)
+	}
+
+	conn, err := im.Connect(ctx)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	conn.Close()
 }
