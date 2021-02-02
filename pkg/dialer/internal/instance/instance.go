@@ -81,9 +81,9 @@ func (i *refreshResult) Wait(ctx context.Context) error {
 	}
 }
 
-// InstanceManager manages the information used to connect to the Cloud SQL instance by periodically calling
+// Instance manages the information used to connect to the Cloud SQL instance by periodically calling
 // the Cloud SQL Admin API. It automatically refreshes the required information every 55 minutes.
-type instanceManager struct {
+type Instance struct {
 	connName
 	client *sqladmin.Service
 	key    *rsa.PrivateKey
@@ -95,13 +95,13 @@ type instanceManager struct {
 	// TODO: add a way to close
 }
 
-// NewInstanceManager initializes a new InstanceManager given an instance conneciton name
-func NewInstanceManager(instanceConnName string, client *sqladmin.Service, key *rsa.PrivateKey) (*instanceManager, error) {
+// NewInstance initializes a new Instance given an instance conneciton name
+func NewInstance(instanceConnName string, client *sqladmin.Service, key *rsa.PrivateKey) (*Instance, error) {
 	cn, err := parseConnName(instanceConnName)
 	if err != nil {
 		return nil, err
 	}
-	i := &instanceManager{cn, client, key, &sync.RWMutex{}, nil, nil}
+	i := &Instance{cn, client, key, &sync.RWMutex{}, nil, nil}
 	// Kick off the inital refresh asynchronously
 	i.resultGuard.Lock()
 	i.cur = i.scheduleRefresh(0)
@@ -111,7 +111,7 @@ func NewInstanceManager(instanceConnName string, client *sqladmin.Service, key *
 }
 
 // Connect returns a connection to a Cloud SQL instance.
-func (im *instanceManager) Connect(ctx context.Context) (net.Conn, error) {
+func (im *Instance) Connect(ctx context.Context) (net.Conn, error) {
 	im.resultGuard.RLock()
 	res := im.cur
 	im.resultGuard.RUnlock()
@@ -146,7 +146,7 @@ func (im *instanceManager) Connect(ctx context.Context) (net.Conn, error) {
 
 // scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned resultRefresh operation
 // can be used to Cancel or Wait for the results of the operation.
-func (im *instanceManager) scheduleRefresh(d time.Duration) *refreshResult {
+func (im *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 	res := &refreshResult{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
@@ -168,7 +168,7 @@ func (im *instanceManager) scheduleRefresh(d time.Duration) *refreshResult {
 }
 
 // performRefresh immediately perfoms a full refresh operation using the Cloud SQL Admin API.
-func performRefresh(im instanceManager, res *refreshResult, d time.Duration) {
+func performRefresh(im Instance, res *refreshResult, d time.Duration) {
 	// TODO: consider adding an opt for configuratble timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

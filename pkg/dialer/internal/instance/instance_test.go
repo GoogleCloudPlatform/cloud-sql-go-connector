@@ -72,7 +72,7 @@ func TestConnect(t *testing.T) {
 		t.Fatalf("failed to generate keys: %v", err)
 	}
 
-	im, err := NewInstanceManager(instConnName, client, key)
+	im, err := NewInstance(instConnName, client, key)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance Manager: %v", err)
 	}
