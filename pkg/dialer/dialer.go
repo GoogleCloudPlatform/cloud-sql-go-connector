@@ -21,7 +21,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/kurtisvg/cloud-sql-connector-go/pkg/dialer/internal/instance"
+	"github.com/kurtisvg/cloud-sql-go-connector/pkg/dialer/internal/instance"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
