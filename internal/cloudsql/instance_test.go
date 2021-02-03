@@ -12,36 +12,74 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package instance
+package cloudsql
 
 import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"os"
 	"testing"
 
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
-func TestFetchEmpheralCert(t *testing.T){
+var (
+	instConnName = os.Getenv("POSTGRES_CONNECTION_NAME")
+)
+
+func TestParseConnName(t *testing.T) {
+	tests := []struct {
+		name string
+		want connName
+	}{
+		{
+			"project:region:instance",
+			connName{"project", "region", "instance"},
+		},
+		{
+			"google.com:project:region:instance",
+			connName{"google.com:project", "region", "instance"},
+		},
+		{
+			"project:instance",
+			connName{},
+		},
+	}
+
+	for _, tc := range tests {
+		c, err := parseConnName(tc.name)
+		if err != nil && tc.want != (connName{}) {
+			t.Errorf("unexpected error: %e", err)
+		}
+		if c != tc.want {
+			t.Errorf("ParseConnName(%s) failed: want %v, got %v", tc.name, tc.want, err)
+		}
+	}
+}
+
+func TestConnect(t *testing.T) {
 	ctx := context.Background()
 
 	client, err := sqladmin.NewService(ctx)
 	if err != nil {
 		t.Fatalf("client init failed: %s", err)
 	}
-	inst, err := parseConnName(instConnName)
-	if err != nil {
-		t.Fatalf("%s", err)
-	}
 
+	// Step 0: Generate Keys
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate keys: %v", err)
 	}
 
-	_, err = fetchEphemeralCert(ctx, client, inst, key)
+	im, err := NewInstance(instConnName, client, key)
 	if err != nil {
-		t.Fatalf("failed to fetch ephemeral cert: %v", err)
+		t.Fatalf("failed to initialize Instance Manager: %v", err)
 	}
+
+	conn, err := im.Connect(ctx)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	conn.Close()
 }

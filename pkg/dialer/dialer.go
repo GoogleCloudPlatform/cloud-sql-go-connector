@@ -21,7 +21,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/kurtisvg/cloud-sql-go-connector/pkg/dialer/internal/instance"
+	"github.com/kurtisvg/cloud-sql-go-connector/internal/cloudsql"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
@@ -50,7 +50,7 @@ func getDialer() *dialManager {
 		}
 		d = &dialManager{
 			lock:     &sync.RWMutex{},
-			imap:     make(map[string]*instance.Instance),
+			imap:     make(map[string]*cloudsql.Instance),
 			sqladmin: client,
 			key:      key,
 		}
@@ -61,13 +61,13 @@ func getDialer() *dialManager {
 
 type dialManager struct {
 	lock *sync.RWMutex
-	imap map[string]*instance.Instance
+	imap map[string]*cloudsql.Instance
 
 	sqladmin *sqladmin.Service
 	key      *rsa.PrivateKey
 }
 
-func (d *dialManager) instance(cn string) (i *instance.Instance, err error) {
+func (d *dialManager) instance(cn string) (i *cloudsql.Instance, err error) {
 	// Check instance cache
 	d.lock.RLock()
 	i, ok := d.imap[cn]
@@ -75,7 +75,7 @@ func (d *dialManager) instance(cn string) (i *instance.Instance, err error) {
 	if !ok {
 		d.lock.Lock()
 		// Create a new instance and store it in the map
-		i, err = instance.NewInstance(cn, d.sqladmin, d.key)
+		i, err = cloudsql.NewInstance(cn, d.sqladmin, d.key)
 		if err != nil {
 			d.imap[cn] = i
 		}

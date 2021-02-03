@@ -12,19 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package instance
+package cloudsql
 
 import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"net"
 	"testing"
 
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
-func TestAll(t *testing.T) {
+func TestFetchMetadata(t *testing.T) {
+	ctx := context.Background()
+	client, err := sqladmin.NewService(ctx)
+	if err != nil {
+		t.Fatalf("client init failed: %s", err)
+	}
+
+	cn, err := parseConnName(instConnName)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+
+	_, err = fetchMetadata(ctx, client, cn)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+}
+func TestFetchEmpheralCert(t *testing.T) {
 	ctx := context.Background()
 
 	client, err := sqladmin.NewService(ctx)
@@ -36,32 +52,13 @@ func TestAll(t *testing.T) {
 		t.Fatalf("%s", err)
 	}
 
-	// Step 0: Generate Keys
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate keys: %v", err)
 	}
 
-	// Step 1a: Fetch Metadata
-	m, err := fetchMetadata(ctx, client, inst)
-	if err != nil {
-		t.Fatalf("failed to fetch metadata: %v", err)
-	}
-
-	// Step 1b: Fetch Ephemeral Certificate
-	cert, err := fetchEphemeralCert(ctx, client, inst, key)
+	_, err = fetchEphemeralCert(ctx, client, inst, key)
 	if err != nil {
 		t.Fatalf("failed to fetch ephemeral cert: %v", err)
 	}
-
-	// Step 3: Create TLS config
-	cfg := createTLSConfig(inst, m, cert)
-
-	// Step 4: Connect to instance
-	addr := net.JoinHostPort(m.ipAddrs["PUBLIC"], "3307")
-	conn, err := connect(ctx, addr, cfg)
-	if err != nil {
-		t.Fatalf("failed to connect: %v", err)
-	}
-	conn.Close()
 }

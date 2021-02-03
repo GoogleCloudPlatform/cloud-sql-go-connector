@@ -27,19 +27,22 @@ import (
 )
 
 var (
-	instConnName = os.Getenv("INSTANCE_CONNECTION_NAME")
+	postgresConnName = os.Getenv("POSTGRES_CONNECTION_NAME") // "Cloud SQL Postgres instance connection name, in the form of 'project:region:instance'.
+	postgresUser     = os.Getenv("POSTGRES_USER")            // Name of database user.
+	postgresPass     = os.Getenv("POSTGRES_PASS")            // Password for the database user; be careful when entering a password on the command line (it may go into your terminal's history).
+	postgresDb       = os.Getenv("POSTGRES_DB")              // Name of the database to connect to.
 )
 
-func TestConnect(t *testing.T) {
+func TestPgxConnect(t *testing.T) {
 	ctx := context.Background()
 
-	dsn := fmt.Sprintf("host=127.0.0.1 user=%s password=%s dbname=%s sslmode=disable", "my-user", "my-password", "my_db")
+	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDb)
 	config, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("failed to parse pgx config: %s", err)
 	}
 	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
-		return dialer.Dial(ctx, instConnName)
+		return dialer.Dial(ctx, postgresConnName)
 	}
 
 	conn, connErr := pgx.ConnectConfig(ctx, config)
