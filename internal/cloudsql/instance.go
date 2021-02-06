@@ -35,7 +35,7 @@ var (
 )
 
 // connName represents the "instance connection name", in the format "project:region:name". Use the
-// "parseConnName" method to initalize this struct. 
+// "parseConnName" method to initialize this struct.
 type connName struct {
 	project string
 	region  string
@@ -56,8 +56,8 @@ func parseConnName(cn string) (connName, error) {
 	return connName{string(m[1]), string(m[3]), string(m[4])}, nil
 }
 
-// refreshResult is a pending result of a refresh opeartion of data used to connect securely. It should 
-// only be intialalized by an Instance struct as part of a refresh cycle..  
+// refreshResult is a pending result of a refresh opeartion of data used to connect securely. It should
+// only be intialalized by the Instance struct as part of a refresh cycle.
 type refreshResult struct {
 	md     metadata
 	tlsCfg *tls.Config
@@ -69,7 +69,7 @@ type refreshResult struct {
 	ready chan struct{}
 }
 
-// Cancel prevents the instanceInfo from starting, if it hasn't already started. Returns true if timer 
+// Cancel prevents the instanceInfo from starting, if it hasn't already started. Returns true if timer
 // was stopped successfully, or false if it has already started.
 func (i *refreshResult) Cancel() bool {
 	return i.timer.Stop()
