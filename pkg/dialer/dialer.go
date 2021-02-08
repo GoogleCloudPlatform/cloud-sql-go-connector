@@ -84,7 +84,7 @@ func (d *dialManager) instance(connName string) (i *cloudsql.Instance, err error
 				d.instances[connName] = i
 			}
 		}
-		d.lock.Unlock()	
+		d.lock.Unlock()
 	}
 	return i, err
 }

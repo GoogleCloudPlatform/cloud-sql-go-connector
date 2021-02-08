@@ -123,7 +123,8 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey)
 		cur:         nil,
 		next:        nil,
 	}
-	// Kick off the inital refresh op asynchronously
+	// For the inital refresh operation, set cur = next so that connection requests block
+	// until the first refresh is complete.
 	i.resultGuard.Lock()
 	i.cur = i.scheduleRefresh(0)
 	i.next = i.cur
