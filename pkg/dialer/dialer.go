@@ -75,12 +75,16 @@ func (d *dialManager) instance(connName string) (i *cloudsql.Instance, err error
 	d.lock.RUnlock()
 	if !ok {
 		d.lock.Lock()
-		// Create a new instance and store it in the map
-		i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key)
-		if err != nil {
-			d.instances[connName] = i
+		// Recheck to ensure instance wasn't created between locks
+		i, ok := d.instances[connName]
+		if !ok {
+			// Create a new instance
+			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key)
+			if err == nil { // if successful, store it in the map
+				d.instances[connName] = i
+			}
 		}
-		d.lock.Unlock()
+		d.lock.Unlock()	
 	}
 	return i, err
 }
