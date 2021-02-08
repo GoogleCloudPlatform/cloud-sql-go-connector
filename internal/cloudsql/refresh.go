@@ -73,7 +73,13 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 		return metadata{}, fmt.Errorf("failed to parse as x509 cert: %s", err)
 	}
 
-	return metadata{ipAddrs, cert, db.DatabaseVersion}, nil
+	m := metadata{
+		ipAddrs:      ipAddrs,
+		serverCaCert: cert,
+		version:      db.DatabaseVersion,
+	}
+
+	return m, nil
 }
 
 // fetchEphemeralCert uses the Cloud SQL Admin API's createEphemeral method to create a signed TLS
@@ -152,7 +158,7 @@ func genVerifyPeerCertificateFunc(cn connName, pool *x509.CertPool) func(rawCert
 			return err
 		}
 
-		certInstanceName := cn.project + ":" + cn.name
+		certInstanceName := fmt.Sprintf("%s:%s", cn.project, cn.name)
 		if cert.Subject.CommonName != certInstanceName {
 			return fmt.Errorf("certificate had CN %q, expected %q", cert.Subject.CommonName, certInstanceName)
 		}

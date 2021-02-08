@@ -39,7 +39,7 @@ func TestPgxConnect(t *testing.T) {
 	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDb)
 	config, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		t.Fatalf("failed to parse pgx config: %s", err)
+		t.Fatalf("failed to parse pgx config: %v", err)
 	}
 	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
 		return dialer.Dial(ctx, postgresConnName)

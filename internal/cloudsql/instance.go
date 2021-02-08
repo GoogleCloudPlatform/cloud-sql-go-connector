@@ -32,6 +32,9 @@ var (
 	// Instance connection name is the format <PROJECT>:<REGION>:<INSTANCE>
 	// Additionally, we have to support legacy "domain-scoped" projects (e.g. "google.com:PROJECT")
 	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+)")
+
+	// defaultKeepAlive is the default keep alive value on connections created in this package.
+	defaultKeepAlive = 30 * time.Second
 )
 
 // connName represents the "instance connection name", in the format "project:region:name". Use the
@@ -42,8 +45,8 @@ type connName struct {
 	name    string
 }
 
-func (i *connName) String() string {
-	return fmt.Sprintf("%s:%s:%s", i.project, i.region, i.name)
+func (c *connName) String() string {
+	return fmt.Sprintf("%s:%s:%s", c.project, c.region, c.name)
 }
 
 // parseConnName initializes a new connName struct.
@@ -53,11 +56,17 @@ func parseConnName(cn string) (connName, error) {
 	if m == nil {
 		return connName{}, fmt.Errorf("invalid instance connection name - expected PROJECT:REGION:ID")
 	}
-	return connName{string(m[1]), string(m[3]), string(m[4])}, nil
+
+	c := connName{
+		project: string(m[1]),
+		region:  string(m[3]),
+		name:    string(m[4]),
+	}
+	return c, nil
 }
 
-// refreshResult is a pending result of a refresh opeartion of data used to connect securely. It should
-// only be intialalized by the Instance struct as part of a refresh cycle.
+// refreshResult is a pending result of a refresh operation of data used to connect securely. It should
+// only be initialized by the Instance struct as part of a refresh cycle.
 type refreshResult struct {
 	md     metadata
 	tlsCfg *tls.Config
@@ -86,7 +95,8 @@ func (i *refreshResult) Wait(ctx context.Context) error {
 }
 
 // Instance manages the information used to connect to the Cloud SQL instance by periodically calling
-// the Cloud SQL Admin API. It automatically refreshes the required information every 55 minutes.
+// the Cloud SQL Admin API. It automatically refreshes the required information approximately 5 minutes
+// before the previous certificate expires (every 55 minutes).
 type Instance struct {
 	connName
 	client *sqladmin.Service
@@ -99,13 +109,20 @@ type Instance struct {
 	// TODO: add a way to close
 }
 
-// NewInstance initializes a new Instance given an instance conneciton name
-func NewInstance(instanceConnName string, client *sqladmin.Service, key *rsa.PrivateKey) (*Instance, error) {
-	cn, err := parseConnName(instanceConnName)
+// NewInstance initializes a new Instance given an instance connection name
+func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey) (*Instance, error) {
+	cn, err := parseConnName(instance)
 	if err != nil {
 		return nil, err
 	}
-	i := &Instance{cn, client, key, &sync.RWMutex{}, nil, nil}
+	i := &Instance{
+		connName:    cn,
+		client:      client,
+		key:         key,
+		resultGuard: &sync.RWMutex{},
+		cur:         nil,
+		next:        nil,
+	}
 	// Kick off the inital refresh op asynchronously
 	i.resultGuard.Lock()
 	i.cur = i.scheduleRefresh(0)
@@ -115,10 +132,10 @@ func NewInstance(instanceConnName string, client *sqladmin.Service, key *rsa.Pri
 }
 
 // Connect returns a secure, authorized net.Conn to a Cloud SQL instance.
-func (im *Instance) Connect(ctx context.Context) (net.Conn, error) {
-	im.resultGuard.RLock()
-	res := im.cur
-	im.resultGuard.RUnlock()
+func (i *Instance) Connect(ctx context.Context) (net.Conn, error) {
+	i.resultGuard.RLock()
+	res := i.cur
+	i.resultGuard.RUnlock()
 	err := res.Wait(ctx)
 	if err != nil {
 		return nil, err
@@ -134,7 +151,7 @@ func (im *Instance) Connect(ctx context.Context) (net.Conn, error) {
 		if err := c.SetKeepAlive(true); err != nil {
 			return nil, fmt.Errorf("failed to set keep-alive: %w", err)
 		}
-		if err := c.SetKeepAlivePeriod(30 * time.Second); err != nil {
+		if err := c.SetKeepAlivePeriod(defaultKeepAlive); err != nil {
 			return nil, fmt.Errorf("failed to set keep-alive period: %w", err)
 		}
 	}
@@ -149,44 +166,44 @@ func (im *Instance) Connect(ctx context.Context) (net.Conn, error) {
 
 // scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned resultRefresh
 // can be used to either Cancel or Wait for the operations result.
-func (im *Instance) scheduleRefresh(d time.Duration) *refreshResult {
+func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 	res := &refreshResult{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		performRefresh(*im, res, d)
+		performRefresh(*i, res, d)
 		// Once the refresh has been performed, replace "current" with the most recent result and schedule a new refresh
-		im.resultGuard.Lock()
+		i.resultGuard.Lock()
 		if res.err == nil {
-			im.cur = res
-			im.next = im.scheduleRefresh(55 * time.Minute)
+			i.cur = res
+			i.next = i.scheduleRefresh(55 * time.Minute)
 		} else {
 			// If something went wrong, schedule the next refresh immediately instead
 			// TODO: only replace cur result if it's still valid
-			im.cur = res
-			im.next = im.scheduleRefresh(0)
+			i.cur = res
+			i.next = i.scheduleRefresh(0)
 		}
-		im.resultGuard.Unlock()
+		i.resultGuard.Unlock()
 	})
 	return res
 }
 
 // performRefresh immediately perfoms a full refresh operation using the Cloud SQL Admin API.
-func performRefresh(im Instance, res *refreshResult, d time.Duration) {
+func performRefresh(i Instance, res *refreshResult, d time.Duration) {
 	// TODO: consider adding an opt for configurable timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	defer close(res.ready)
 
 	// TODO: perform these steps asyncronously and return the results
-	res.md, res.err = fetchMetadata(ctx, im.client, im.connName)
+	res.md, res.err = fetchMetadata(ctx, i.client, i.connName)
 	if res.err != nil {
 		return
 	}
 	var ec tls.Certificate
-	ec, res.err = fetchEphemeralCert(ctx, im.client, im.connName, im.key)
+	ec, res.err = fetchEphemeralCert(ctx, i.client, i.connName, i.key)
 	if res.err != nil {
 		return
 	}
-	res.tlsCfg = createTLSConfig(im.connName, res.md, ec)
+	res.tlsCfg = createTLSConfig(i.connName, res.md, ec)
 	return
 }

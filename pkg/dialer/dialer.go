@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package dialer contains methods and structs for creating secure, authorized connections to a Cloud SQL instance.
 package dialer
 
 import (
@@ -30,7 +31,7 @@ var (
 	d    *dialManager
 )
 
-// Dial returns a net.Conn connected to the Cloud SQL instance specified. The instance argument must be the
+// Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
 // instance's connection name, which is in the format "project-name:region:instance-name".
 func Dial(ctx context.Context, instance string) (net.Conn, error) {
 	return getDialer().dial(ctx, instance)
@@ -39,7 +40,7 @@ func Dial(ctx context.Context, instance string) (net.Conn, error) {
 // defaultDialer provides the singleton dialer as a default for dial functinons.
 func getDialer() *dialManager {
 	once.Do(func() {
-		// TODO: Do this better
+		// TODO: Provide functionality for customizing the dialer and getting errors returned.
 		key, err := rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			panic(err)
@@ -49,10 +50,10 @@ func getDialer() *dialManager {
 			panic(err)
 		}
 		d = &dialManager{
-			lock:     &sync.RWMutex{},
-			imap:     make(map[string]*cloudsql.Instance),
-			sqladmin: client,
-			key:      key,
+			lock:      &sync.RWMutex{},
+			instances: make(map[string]*cloudsql.Instance),
+			sqladmin:  client,
+			key:       key,
 		}
 
 	})
@@ -60,24 +61,24 @@ func getDialer() *dialManager {
 }
 
 type dialManager struct {
-	lock *sync.RWMutex
-	imap map[string]*cloudsql.Instance
+	lock      *sync.RWMutex
+	instances map[string]*cloudsql.Instance
 
 	sqladmin *sqladmin.Service
 	key      *rsa.PrivateKey
 }
 
-func (d *dialManager) instance(cn string) (i *cloudsql.Instance, err error) {
+func (d *dialManager) instance(connName string) (i *cloudsql.Instance, err error) {
 	// Check instance cache
 	d.lock.RLock()
-	i, ok := d.imap[cn]
+	i, ok := d.instances[connName]
 	d.lock.RUnlock()
 	if !ok {
 		d.lock.Lock()
 		// Create a new instance and store it in the map
-		i, err = cloudsql.NewInstance(cn, d.sqladmin, d.key)
+		i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key)
 		if err != nil {
-			d.imap[cn] = i
+			d.instances[connName] = i
 		}
 		d.lock.Unlock()
 	}
