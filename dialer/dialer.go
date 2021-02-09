@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"fmt"
 	"net"
 	"sync"
 
@@ -29,35 +30,26 @@ import (
 var (
 	once sync.Once
 	d    *dialManager
+	dErr error
 )
 
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
 // instance's connection name, which is in the format "project-name:region:instance-name".
 func Dial(ctx context.Context, instance string) (net.Conn, error) {
-	return getDialer().dial(ctx, instance)
+	d, err := defaultDialer()
+	if err != nil {
+		return nil, err
+	}
+	return d.dial(ctx, instance)
 }
 
 // defaultDialer provides the singleton dialer as a default for dial functinons.
-func getDialer() *dialManager {
+func defaultDialer() (*dialManager, error) {
+	// TODO: Provide functionality for customizing/setting the default dialer
 	once.Do(func() {
-		// TODO: Provide functionality for customizing the dialer and getting errors returned.
-		key, err := rsa.GenerateKey(rand.Reader, 2048)
-		if err != nil {
-			panic(err)
-		}
-		client, err := sqladmin.NewService(context.Background())
-		if err != nil {
-			panic(err)
-		}
-		d = &dialManager{
-			lock:      &sync.RWMutex{},
-			instances: make(map[string]*cloudsql.Instance),
-			sqladmin:  client,
-			key:       key,
-		}
-
+		d, dErr = newDialManager()
 	})
-	return d
+	return d, dErr
 }
 
 type dialManager struct {
@@ -66,6 +58,25 @@ type dialManager struct {
 
 	sqladmin *sqladmin.Service
 	key      *rsa.PrivateKey
+}
+
+func newDialManager() (*dialManager, error) {
+	// TODO: Add ability to customize keys / clients
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate rsa keys: %v", dErr)
+	}
+	client, err := sqladmin.NewService(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create sqladmin client: %v", dErr)
+	}
+	d = &dialManager{
+		lock:      &sync.RWMutex{},
+		instances: make(map[string]*cloudsql.Instance),
+		sqladmin:  client,
+		key:       key,
+	}
+	return d, nil
 }
 
 func (d *dialManager) instance(connName string) (i *cloudsql.Instance, err error) {
