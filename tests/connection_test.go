@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v4"
-	"github.com/kurtisvg/cloud-sql-go-connector/pkg/dialer"
+	"github.com/kurtisvg/cloud-sql-go-connector/dialer"
 )
 
 var (

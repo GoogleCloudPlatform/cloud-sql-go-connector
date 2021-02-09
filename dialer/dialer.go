@@ -76,7 +76,7 @@ func (d *dialManager) instance(connName string) (i *cloudsql.Instance, err error
 	if !ok {
 		d.lock.Lock()
 		// Recheck to ensure instance wasn't created between locks
-		i, ok := d.instances[connName]
+		i, ok = d.instances[connName]
 		if !ok {
 			// Create a new instance
 			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key)
