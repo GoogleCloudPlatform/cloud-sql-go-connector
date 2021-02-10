@@ -33,7 +33,22 @@ var (
 	postgresDb       = os.Getenv("POSTGRES_DB")              // Name of the database to connect to.
 )
 
+func requirePostgresVars(t *testing.T) {
+	switch "" {
+	case postgresConnName:
+		t.Fatal("'POSTGRES_CONNECTION_NAME' env var not set")
+	case postgresUser:
+		t.Fatal("'POSTGRES_USER' env var not set")
+	case postgresPass:
+		t.Fatal("'POSTGRES_PASS' env var not set")
+	case postgresDb:
+		t.Fatal("'POSTGRES_DB' env var not set")
+	}
+}
+
 func TestPgxConnect(t *testing.T) {
+	requirePostgresVars(t)
+
 	ctx := context.Background()
 
 	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDb)
