@@ -53,7 +53,7 @@ func defaultDialer() (*dialManager, error) {
 }
 
 type dialManager struct {
-	lock      *sync.RWMutex
+	lock      sync.RWMutex
 	instances map[string]*cloudsql.Instance
 
 	sqladmin *sqladmin.Service
@@ -71,7 +71,6 @@ func newDialManager() (*dialManager, error) {
 		return nil, fmt.Errorf("failed to create sqladmin client: %v", dErr)
 	}
 	d = &dialManager{
-		lock:      &sync.RWMutex{},
 		instances: make(map[string]*cloudsql.Instance),
 		sqladmin:  client,
 		key:       key,

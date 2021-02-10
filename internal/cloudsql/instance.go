@@ -102,7 +102,7 @@ type Instance struct {
 	client *sqladmin.Service
 	key    *rsa.PrivateKey
 
-	resultGuard *sync.RWMutex
+	resultGuard sync.RWMutex
 	cur         *refreshResult
 	next        *refreshResult
 
@@ -116,12 +116,11 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey)
 		return nil, err
 	}
 	i := &Instance{
-		connName:    cn,
-		client:      client,
-		key:         key,
-		resultGuard: &sync.RWMutex{},
-		cur:         nil,
-		next:        nil,
+		connName: cn,
+		client:   client,
+		key:      key,
+		cur:      nil,
+		next:     nil,
 	}
 	// For the inital refresh operation, set cur = next so that connection requests block
 	// until the first refresh is complete.
@@ -171,7 +170,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 	res := &refreshResult{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		performRefresh(*i, res, d)
+		performRefresh(i, res, d)
 		// Once the refresh has been performed, replace "current" with the most recent result and schedule a new refresh
 		i.resultGuard.Lock()
 		if res.err == nil {
@@ -189,7 +188,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 }
 
 // performRefresh immediately perfoms a full refresh operation using the Cloud SQL Admin API.
-func performRefresh(i Instance, res *refreshResult, d time.Duration) {
+func performRefresh(i *Instance, res *refreshResult, d time.Duration) {
 	// TODO: consider adding an opt for configurable timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
