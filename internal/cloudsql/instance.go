@@ -168,8 +168,9 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 	res := &refreshResult{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		performRefresh(i, res, d)
-		// Once the refresh has been performed, replace "current" with the most recent result and schedule a new refresh
+		res.md, res.tlsCfg, res.err = performRefresh(i.client, i.connName, i.key, d)
+		close(res.ready)
+		// Once the refresh is complete, update "current" with working result and schedule a new refresh
 		i.resultGuard.Lock()
 		if res.err == nil {
 			i.cur = res
@@ -186,22 +187,20 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 }
 
 // performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
-func performRefresh(i *Instance, res *refreshResult, d time.Duration) {
+func performRefresh(client *sqladmin.Service, cn connName, k *rsa.PrivateKey, d time.Duration) (metadata, *tls.Config, error) {
 	// TODO: consider adding an opt for configurable timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	defer close(res.ready)
 
 	// TODO: perform these steps asynchronously and return the results
-	res.md, res.err = fetchMetadata(ctx, i.client, i.connName)
-	if res.err != nil {
-		return
+	md, err := fetchMetadata(ctx, client, cn)
+	if err != nil {
+		return md, nil, fmt.Errorf("fetch metadata failed: %w", err)
 	}
 	var ec tls.Certificate
-	ec, res.err = fetchEphemeralCert(ctx, i.client, i.connName, i.key)
-	if res.err != nil {
-		return
+	ec, err = fetchEphemeralCert(ctx, client, cn, k)
+	if err != nil {
+		return md, nil, fmt.Errorf("fetch ephemeral cert failed: %w", err)
 	}
-	res.tlsCfg = createTLSConfig(i.connName, res.md, ec)
-	return
+	return md, createTLSConfig(cn, md, ec), err
 }
