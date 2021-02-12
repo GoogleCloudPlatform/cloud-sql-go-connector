@@ -173,9 +173,11 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh
 		i.resultGuard.Lock()
 		defer i.resultGuard.Unlock()
-		// TODO: only replace cur result if it's still valid
+		// TODO: only replace cur result if it's not valid
 		i.cur = res
 		if res.err != nil {
+			// TODO: add a backoff on retries
+			// if failed, scheduled the next refresh immediately
 			i.next = i.scheduleRefresh(0)
 			return
 		}
