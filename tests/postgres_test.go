@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package tests contains end to end tests for verifying compatibility of examples with external resources.
 package tests
 
 import (
@@ -22,8 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/cloudsqlconn"
 	"github.com/jackc/pgx/v4"
-	"github.com/kurtisvg/cloud-sql-go-connector/dialer"
 )
 
 var (
@@ -57,7 +58,7 @@ func TestPgxConnect(t *testing.T) {
 		t.Fatalf("failed to parse pgx config: %v", err)
 	}
 	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
-		return dialer.Dial(ctx, postgresConnName)
+		return cloudsqlconn.Dial(ctx, postgresConnName)
 	}
 
 	conn, connErr := pgx.ConnectConfig(ctx, config)

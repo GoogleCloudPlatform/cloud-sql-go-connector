@@ -1,4 +1,4 @@
-module github.com/kurtisvg/cloud-sql-go-connector
+module cloud.google.com/cloudsqlconn
 
 go 1.14
 

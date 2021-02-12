@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package dialer contains methods and structs for creating secure, authorized connections to a Cloud SQL instance.
-package dialer
+// Package cloudsqlconn contains methods for creating secure, authorized connections to a Cloud SQL instance.
+package cloudsqlconn
 
 import (
 	"context"
@@ -23,7 +23,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/kurtisvg/cloud-sql-go-connector/internal/cloudsql"
+	"cloud.google.com/cloudsqlconn/internal/cloudsql"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
