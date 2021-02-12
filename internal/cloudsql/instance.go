@@ -172,16 +172,14 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 		close(res.ready)
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh
 		i.resultGuard.Lock()
-		if res.err == nil {
-			i.cur = res
-			i.next = i.scheduleRefresh(55 * time.Minute)
-		} else {
-			// If something went wrong, schedule the next refresh immediately instead
-			// TODO: only replace cur result if it's still valid
-			i.cur = res
+		defer i.resultGuard.Unlock()
+		// TODO: only replace cur result if it's still valid
+		i.cur = res
+		if res.err != nil {
 			i.next = i.scheduleRefresh(0)
+			return
 		}
-		i.resultGuard.Unlock()
+		i.next = i.scheduleRefresh(55 * time.Minute)
 	})
 	return res
 }
