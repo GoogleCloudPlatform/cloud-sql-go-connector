@@ -29,7 +29,7 @@ import (
 
 var (
 	once sync.Once
-	d    *dialManager
+	dm   *dialManager
 	dErr error
 )
 
@@ -43,13 +43,13 @@ func Dial(ctx context.Context, instance string) (net.Conn, error) {
 	return d.dial(ctx, instance)
 }
 
-// defaultDialer provides the singleton dialer as a default for dial functinons.
+// defaultDialer provides the singleton dialer as a default for dial functions.
 func defaultDialer() (*dialManager, error) {
 	// TODO: Provide functionality for customizing/setting the default dialer
 	once.Do(func() {
-		d, dErr = newDialManager()
+		dm, dErr = newDialManager()
 	})
-	return d, dErr
+	return dm, dErr
 }
 
 type dialManager struct {
@@ -64,13 +64,13 @@ func newDialManager() (*dialManager, error) {
 	// TODO: Add ability to customize keys / clients
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate rsa keys: %v", dErr)
+		return nil, fmt.Errorf("failed to generate rsa keys: %v", err)
 	}
 	client, err := sqladmin.NewService(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("failed to create sqladmin client: %v", dErr)
+		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)
 	}
-	d = &dialManager{
+	d := &dialManager{
 		instances: make(map[string]*cloudsql.Instance),
 		sqladmin:  client,
 		key:       key,

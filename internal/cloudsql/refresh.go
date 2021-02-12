@@ -33,7 +33,7 @@ type metadata struct {
 	version      string
 }
 
-// fetchMetadata uses the Cloud SQL Admin API's get method to retreive the information about a Cloud SQL instance
+// fetchMetadata uses the Cloud SQL Admin APIs get method to retreive the information about a Cloud SQL instance
 // that is used to create secure connections.
 func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName) (metadata, error) {
 	db, err := client.Instances.Get(inst.project, inst.name).Context(ctx).Do()

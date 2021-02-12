@@ -119,10 +119,8 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey)
 		connName: cn,
 		client:   client,
 		key:      key,
-		cur:      nil,
-		next:     nil,
 	}
-	// For the inital refresh operation, set cur = next so that connection requests block
+	// For the initial refresh operation, set cur = next so that connection requests block
 	// until the first refresh is complete.
 	i.resultGuard.Lock()
 	i.cur = i.scheduleRefresh(0)
@@ -164,7 +162,7 @@ func (i *Instance) Connect(ctx context.Context) (net.Conn, error) {
 	return tlsConn, err
 }
 
-// scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned resultRefresh
+// scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshResult
 // can be used to either Cancel or Wait for the operations result.
 func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 	res := &refreshResult{}
@@ -187,14 +185,14 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 	return res
 }
 
-// performRefresh immediately perfoms a full refresh operation using the Cloud SQL Admin API.
+// performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
 func performRefresh(i *Instance, res *refreshResult, d time.Duration) {
 	// TODO: consider adding an opt for configurable timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	defer close(res.ready)
 
-	// TODO: perform these steps asyncronously and return the results
+	// TODO: perform these steps asynchronously and return the results
 	res.md, res.err = fetchMetadata(ctx, i.client, i.connName)
 	if res.err != nil {
 		return
