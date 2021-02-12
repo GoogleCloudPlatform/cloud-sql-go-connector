@@ -105,10 +105,10 @@ type Instance struct {
 	resultGuard sync.RWMutex
 	// cur represents the current refreshResult that will be used to create connections. If a valid complete
 	// refreshResult isn't available it's possible for cur to be equal to next.
-	cur         *refreshResult
+	cur *refreshResult
 	// next represents a future or ongoing refreshResult. Once complete, it will replace cur and schedule a
-	// replacement to occur.  
-	next        *refreshResult
+	// replacement to occur.
+	next *refreshResult
 
 	// TODO: add a way to close
 }
