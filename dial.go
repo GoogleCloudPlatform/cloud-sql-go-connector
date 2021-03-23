@@ -78,7 +78,7 @@ func newDialManager() (*dialManager, error) {
 	return d, nil
 }
 
-func (d *dialManager) instance(connName string) (i *cloudsql.Instance, err error) {
+func (d *dialManager) instance(connName string) (*cloudsql.Instance, error) {
 	// Check instance cache
 	d.lock.RLock()
 	i, ok := d.instances[connName]
@@ -89,6 +89,7 @@ func (d *dialManager) instance(connName string) (i *cloudsql.Instance, err error
 		i, ok = d.instances[connName]
 		if !ok {
 			// Create a new instance
+			var err error
 			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key)
 			if err != nil {
 				d.lock.Unlock()
@@ -98,7 +99,7 @@ func (d *dialManager) instance(connName string) (i *cloudsql.Instance, err error
 		}
 		d.lock.Unlock()
 	}
-	return i, err
+	return i, nil
 }
 
 func (d *dialManager) dial(ctx context.Context, instance string) (net.Conn, error) {
