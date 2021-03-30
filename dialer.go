@@ -41,6 +41,8 @@ type Dialer struct {
 	key       *rsa.PrivateKey
 
 	sqladmin *sqladmin.Service
+
+	defaultDialCfg dialCfg
 }
 
 // NewDialer creates a new Dialer.
@@ -55,25 +57,31 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	for _, opt := range opts {
 		opt(cfg)
 	}
-
 	client, err := sqladmin.NewService(context.Background(), cfg.sqladminOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)
 	}
+
+	dialCfg := dialCfg{
+		ipType:       cloudsql.IP_TYPE_PUBLIC,
+		tcpKeepAlive: defaultTCPKeepAlive,
+	}
+	for _, opt := range cfg.dialOpts {
+		opt(&dialCfg)
+	}
+
 	d := &Dialer{
-		instances: make(map[string]*cloudsql.Instance),
-		sqladmin:  client,
-		key:       key,
+		instances:      make(map[string]*cloudsql.Instance),
+		sqladmin:       client,
+		key:            key,
+		defaultDialCfg: dialCfg,
 	}
 	return d, nil
 }
 
 // Dial creates an authorized connection to a Cloud SQL instance specified by it's instance connection name.
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (net.Conn, error) {
-	cfg := dialCfg{
-		ipType:       cloudsql.IP_TYPE_PUBLIC,
-		tcpKeepAlive: defaultTCPKeepAlive,
-	}
+	cfg := d.defaultDialCfg
 	for _, opt := range opts {
 		opt(&cfg)
 	}

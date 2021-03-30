@@ -27,6 +27,7 @@ type DialerOption func(d *dialerConfig)
 
 type dialerConfig struct {
 	sqladminOpts []apiopt.ClientOption
+	dialOpts     []DialOption
 }
 
 // DialerOptions turns a list of DialerOption instances into an DialerOption.
@@ -52,6 +53,13 @@ func WithCredentialsJSON(p []byte) DialerOption {
 	}
 }
 
+// WithDefaultDialOption returns a DialerOption that specifies the default DialOptions used.
+func WithDefaultDialOptions(opts ...DialOption) DialerOption {
+	return func(d *dialerConfig) {
+		d.dialOpts = append(d.dialOpts, opts...)
+	}
+}
+
 // WithTokenSource returns a DialerOption that specifies an OAuth2 token source to be used as the basis for authentication.
 func WithTokenSource(s oauth2.TokenSource) DialerOption {
 	return func(d *dialerConfig) {
@@ -64,7 +72,7 @@ type DialOption func(d *dialCfg)
 
 type dialCfg struct {
 	tcpKeepAlive time.Duration
-	ipType string
+	ipType       string
 }
 
 // DialOptions turns a list of DialOption instances into an DialOption.

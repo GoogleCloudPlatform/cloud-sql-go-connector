@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	IP_TYPE_PUBLIC = "PUBLIC"
+	IP_TYPE_PUBLIC  = "PUBLIC"
 	IP_TYPE_PRIVATE = "PRIVATE"
 )
 
