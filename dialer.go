@@ -23,24 +23,37 @@ import (
 	"sync"
 
 	"cloud.google.com/cloudsqlconn/internal/cloudsql"
+	apiopt "google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
+type dialerConfig struct {
+	sqladminOpts []apiopt.ClientOption
+}
+
+// A Dialer is used to create connections to Cloud SQL instances.
 type Dialer struct {
 	lock      sync.RWMutex
 	instances map[string]*cloudsql.Instance
+	key       *rsa.PrivateKey
 
 	sqladmin *sqladmin.Service
-	key      *rsa.PrivateKey
 }
 
-func NewDialer() (*Dialer, error) {
-	// TODO: Add ability to customize keys / clients
+// NewDialer creates a new Dialer.
+func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
+	// TODO: Add shared / async key generation
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate rsa keys: %v", err)
 	}
-	client, err := sqladmin.NewService(context.Background())
+
+	var cfg dialerConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	client, err := sqladmin.NewService(context.Background(), cfg.sqladminOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)
 	}
@@ -52,6 +65,7 @@ func NewDialer() (*Dialer, error) {
 	return d, nil
 }
 
+// Dial creates an authorized connection to a Cloud SQL instance specified by it's instance connection name.
 func (d *Dialer) Dial(ctx context.Context, instance string) (net.Conn, error) {
 	i, err := d.instance(instance)
 	if err != nil {

@@ -41,7 +41,7 @@ func Dial(ctx context.Context, instance string) (net.Conn, error) {
 func defaultDialer() (*Dialer, error) {
 	// TODO: Provide functionality for customizing/setting the default dialer
 	once.Do(func() {
-		dm, dErr = NewDialer()
+		dm, dErr = NewDialer(context.Background())
 	})
 	return dm, dErr
 }
