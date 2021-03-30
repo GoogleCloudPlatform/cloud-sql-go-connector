@@ -16,7 +16,7 @@ package cloudsqlconn
 
 import (
 	"golang.org/x/oauth2"
-	"google.golang.org/api/option"
+	apiopt "google.golang.org/api/option"
 )
 
 // A DialerOption is an option for configuring a Dialer.
@@ -34,20 +34,20 @@ func DialerOptions(opts ...DialerOption) DialerOption {
 // WithCredentialsFile returns a DialerOption that specifies a service account or refresh token JSON credentials file to be used as the basis for authentication.
 func WithCredentialsFile(filename string) DialerOption {
 	return func(d *dialerConfig) {
-		d.sqladminOpts = append(d.sqladminOpts, option.WithCredentialsFile(filename))
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentialsFile(filename))
 	}
 }
 
 // WithCredentialsFile returns a DialerOption that specifies a service account or refresh token JSON credentials to be used as the basis for authentication.
 func WithCredentialsJSON(p []byte) DialerOption {
 	return func(d *dialerConfig) {
-		d.sqladminOpts = append(d.sqladminOpts, option.WithCredentialsJSON(p))
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentialsJSON(p))
 	}
 }
 
 // WithTokenSource returns a DialerOption that specifies an OAuth2 token source to be used as the basis for authentication.
 func WithTokenSource(s oauth2.TokenSource) DialerOption {
 	return func(d *dialerConfig) {
-		d.sqladminOpts = append(d.sqladminOpts, option.WithTokenSource(s))
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
 	}
 }
