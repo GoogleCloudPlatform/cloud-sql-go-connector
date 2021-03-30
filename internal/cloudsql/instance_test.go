@@ -58,7 +58,7 @@ func TestParseConnName(t *testing.T) {
 	}
 }
 
-func TestConnect(t *testing.T) {
+func TestConnectInfo(t *testing.T) {
 	ctx := context.Background()
 
 	client, err := sqladmin.NewService(ctx)
@@ -77,9 +77,8 @@ func TestConnect(t *testing.T) {
 		t.Fatalf("failed to initialize Instance Manager: %v", err)
 	}
 
-	conn, err := im.Connect(ctx)
+	_, _, err = im.ConnectInfo(ctx)
 	if err != nil {
-		t.Fatalf("failed to connect: %v", err)
+		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
-	conn.Close()
 }

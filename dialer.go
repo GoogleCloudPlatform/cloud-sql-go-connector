@@ -18,18 +18,21 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"cloud.google.com/cloudsqlconn/internal/cloudsql"
-	apiopt "google.golang.org/api/option"
+	"golang.org/x/net/proxy"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
-type dialerConfig struct {
-	sqladminOpts []apiopt.ClientOption
-}
+const (
+	// defaultTCPKeepAlive is the default keep alive value used on connections to a Cloud SQL instance.
+	defaultTCPKeepAlive = 30 * time.Second
+)
 
 // A Dialer is used to create connections to Cloud SQL instances.
 type Dialer struct {
@@ -66,12 +69,43 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 }
 
 // Dial creates an authorized connection to a Cloud SQL instance specified by it's instance connection name.
-func (d *Dialer) Dial(ctx context.Context, instance string) (net.Conn, error) {
+func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (net.Conn, error) {
+	cfg := dialCfg{
+		tcpKeepAlive: defaultTCPKeepAlive,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	i, err := d.instance(instance)
 	if err != nil {
 		return nil, err
 	}
-	return i.Connect(ctx)
+	ipAddrs, tlsCfg, err := i.ConnectInfo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: Take option for IP type
+	addr := net.JoinHostPort(ipAddrs["PUBLIC"], "3307")
+
+	conn, err := proxy.Dial(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	if c, ok := conn.(*net.TCPConn); ok {
+		if err := c.SetKeepAlive(true); err != nil {
+			return nil, fmt.Errorf("failed to set keep-alive: %w", err)
+		}
+		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
+			return nil, fmt.Errorf("failed to set keep-alive period: %w", err)
+		}
+	}
+	tlsConn := tls.Client(conn, tlsCfg)
+	if err := tlsConn.Handshake(); err != nil {
+		tlsConn.Close()
+		return nil, fmt.Errorf("handshake failed: %w", err)
+	}
+	return tlsConn, err
 }
 
 func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
