@@ -71,6 +71,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 // Dial creates an authorized connection to a Cloud SQL instance specified by it's instance connection name.
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (net.Conn, error) {
 	cfg := dialCfg{
+		ipType:       cloudsql.IP_TYPE_PUBLIC,
 		tcpKeepAlive: defaultTCPKeepAlive,
 	}
 	for _, opt := range opts {
@@ -85,8 +86,11 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if err != nil {
 		return nil, err
 	}
-	// TODO: Take option for IP type
-	addr := net.JoinHostPort(ipAddrs["PUBLIC"], "3307")
+	addr, ok := ipAddrs[cfg.ipType]
+	if !ok {
+		return nil, fmt.Errorf("instance '%s' does not have IP of type '%s'", instance, cfg.ipType)
+	}
+	addr = net.JoinHostPort(addr, "3307")
 
 	conn, err := proxy.Dial(ctx, "tcp", addr)
 	if err != nil {

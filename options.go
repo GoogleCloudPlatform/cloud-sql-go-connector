@@ -17,6 +17,7 @@ package cloudsqlconn
 import (
 	"time"
 
+	"cloud.google.com/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/oauth2"
 	apiopt "google.golang.org/api/option"
 )
@@ -63,6 +64,7 @@ type DialOption func(d *dialCfg)
 
 type dialCfg struct {
 	tcpKeepAlive time.Duration
+	ipType string
 }
 
 // DialOptions turns a list of DialOption instances into an DialOption.
@@ -74,8 +76,23 @@ func DialOptions(opts ...DialOption) DialOption {
 	}
 }
 
+// WithTCPKeepAlive returns a DialOption that specifies the tcp keep alive period for the connection returned by Dial.
 func WithTCPKeepAlive(d time.Duration) DialOption {
 	return func(cfg *dialCfg) {
 		cfg.tcpKeepAlive = d
+	}
+}
+
+// WithPublicIP returns a DialOption that specifies a public IP will be used to connect.
+func WithPublicIP() DialOption {
+	return func(cfg *dialCfg) {
+		cfg.ipType = cloudsql.IP_TYPE_PUBLIC
+	}
+}
+
+// WithPrivateIP returns a DialOption that specifies a private IP (VPC) will be used to connect.
+func WithPrivateIP() DialOption {
+	return func(cfg *dialCfg) {
+		cfg.ipType = cloudsql.IP_TYPE_PRIVATE
 	}
 }
