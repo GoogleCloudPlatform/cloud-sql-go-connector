@@ -22,7 +22,7 @@ import (
 // A DialerOption is an option for configuring a Dialer.
 type DialerOption func(d *dialerConfig)
 
-// DialerOptions turns a list of DialerOption instances into an DialerOption.
+// DialerOptions turns a list of DialerOption instances into a DialerOption.
 func DialerOptions(opts ...DialerOption) DialerOption {
 	return func(d *dialerConfig) {
 		for _, opt := range opts {
@@ -38,7 +38,7 @@ func WithCredentialsFile(filename string) DialerOption {
 	}
 }
 
-// WithCredentialsFile returns a DialerOption that specifies a service account or refresh token JSON credentials to be used as the basis for authentication.
+// WithCredentialsJSON returns a DialerOption that specifies a service account or refresh token JSON credentials to be used as the basis for authentication.
 func WithCredentialsJSON(p []byte) DialerOption {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentialsJSON(p))

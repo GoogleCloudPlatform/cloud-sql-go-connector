@@ -48,9 +48,9 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		return nil, fmt.Errorf("failed to generate rsa keys: %v", err)
 	}
 
-	var cfg dialerConfig
+	cfg := &dialerConfig{}
 	for _, opt := range opts {
-		opt(&cfg)
+		opt(cfg)
 	}
 
 	client, err := sqladmin.NewService(context.Background(), cfg.sqladminOpts...)
