@@ -22,26 +22,26 @@ import (
 )
 
 var (
-	once sync.Once
-	dm   *Dialer
-	dErr error
+	once          sync.Once
+	defaultDialer *Dialer
+	dErr          error
 )
 
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
 // instance's connection name, which is in the format "project-name:region:instance-name".
 func Dial(ctx context.Context, instance string) (net.Conn, error) {
-	d, err := defaultDialer()
+	d, err := getDefaultDialer()
 	if err != nil {
 		return nil, err
 	}
 	return d.Dial(ctx, instance)
 }
 
-// defaultDialer provides the singleton dialer as a default for dial functions.
-func defaultDialer() (*Dialer, error) {
+// getDefaultDialer provides the singleton dialer as a default for dial functions.
+func getDefaultDialer() (*Dialer, error) {
 	// TODO: Provide functionality for customizing/setting the default dialer
 	once.Do(func() {
-		dm, dErr = NewDialer(context.Background())
+		defaultDialer, dErr = NewDialer(context.Background())
 	})
-	return dm, dErr
+	return defaultDialer, dErr
 }
