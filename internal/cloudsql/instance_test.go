@@ -74,7 +74,7 @@ func TestConnectInfo(t *testing.T) {
 
 	im, err := NewInstance(instConnName, client, key)
 	if err != nil {
-		t.Fatalf("failed to initialize Instance Manager: %v", err)
+		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 
 	_, _, err = im.ConnectInfo(ctx)

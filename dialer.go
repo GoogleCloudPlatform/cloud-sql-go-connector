@@ -32,6 +32,8 @@ import (
 const (
 	// defaultTCPKeepAlive is the default keep alive value used on connections to a Cloud SQL instance.
 	defaultTCPKeepAlive = 30 * time.Second
+	// serverProxyPort is the port the server-side proxy receives connections on.
+	serverProxyPort = "3307"
 )
 
 // A Dialer is used to create connections to Cloud SQL instances.
@@ -42,6 +44,8 @@ type Dialer struct {
 
 	sqladmin *sqladmin.Service
 
+	// defaultDialCfg holds the constructor level DialOptions, so that it can
+	// be copied and mutated by the Dial function.
 	defaultDialCfg dialCfg
 }
 
@@ -63,7 +67,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	}
 
 	dialCfg := dialCfg{
-		ipType:       cloudsql.IP_TYPE_PUBLIC,
+		ipType:       cloudsql.PublicIP,
 		tcpKeepAlive: defaultTCPKeepAlive,
 	}
 	for _, opt := range cfg.dialOpts {
@@ -79,7 +83,8 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	return d, nil
 }
 
-// Dial creates an authorized connection to a Cloud SQL instance specified by it's instance connection name.
+// Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
+// instance's connection name, which is in the format "project-name:region:instance-name".
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (net.Conn, error) {
 	cfg := d.defaultDialCfg
 	for _, opt := range opts {
@@ -98,7 +103,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if !ok {
 		return nil, fmt.Errorf("instance '%s' does not have IP of type '%s'", instance, cfg.ipType)
 	}
-	addr = net.JoinHostPort(addr, "3307")
+	addr = net.JoinHostPort(addr, serverProxyPort)
 
 	conn, err := proxy.Dial(ctx, "tcp", addr)
 	if err != nil {
@@ -106,10 +111,10 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
-			return nil, fmt.Errorf("failed to set keep-alive: %w", err)
+			return nil, fmt.Errorf("failed to set keep-alive: %v", err)
 		}
 		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
-			return nil, fmt.Errorf("failed to set keep-alive period: %w", err)
+			return nil, fmt.Errorf("failed to set keep-alive period: %v", err)
 		}
 	}
 	tlsConn := tls.Client(conn, tlsCfg)

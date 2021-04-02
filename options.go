@@ -94,13 +94,13 @@ func WithTCPKeepAlive(d time.Duration) DialOption {
 // WithPublicIP returns a DialOption that specifies a public IP will be used to connect.
 func WithPublicIP() DialOption {
 	return func(cfg *dialCfg) {
-		cfg.ipType = cloudsql.IP_TYPE_PUBLIC
+		cfg.ipType = cloudsql.PublicIP
 	}
 }
 
 // WithPrivateIP returns a DialOption that specifies a private IP (VPC) will be used to connect.
 func WithPrivateIP() DialOption {
 	return func(cfg *dialCfg) {
-		cfg.ipType = cloudsql.IP_TYPE_PRIVATE
+		cfg.ipType = cloudsql.PrivateIP
 	}
 }

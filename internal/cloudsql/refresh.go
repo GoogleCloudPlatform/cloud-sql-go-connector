@@ -27,8 +27,8 @@ import (
 )
 
 const (
-	IP_TYPE_PUBLIC  = "PUBLIC"
-	IP_TYPE_PRIVATE = "PRIVATE"
+	PublicIP  = "PUBLIC"
+	PrivateIP = "PRIVATE"
 )
 
 // metadata contains information about a Cloud SQL instance needed to create connections.
@@ -59,9 +59,9 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 	for _, ip := range db.IpAddresses {
 		switch ip.Type {
 		case "PRIMARY":
-			ipAddrs[IP_TYPE_PUBLIC] = ip.IpAddress
+			ipAddrs[PublicIP] = ip.IpAddress
 		case "PRIVATE":
-			ipAddrs[IP_TYPE_PRIVATE] = ip.IpAddress
+			ipAddrs[PrivateIP] = ip.IpAddress
 		}
 	}
 	if len(ipAddrs) == 0 {
