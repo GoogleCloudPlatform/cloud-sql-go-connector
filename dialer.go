@@ -53,7 +53,7 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 
 // A Dialer is used to create connections to Cloud SQL instances.
 //
-// Dialer objects should only intialized using NewDialer.
+// Use NewDialer to initialize a Dialer.
 type Dialer struct {
 	lock      sync.RWMutex
 	instances map[string]*cloudsql.Instance
@@ -80,7 +80,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	if cfg.rsaKey == nil {
 		key, err := getDefaultKeys()
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate rsa keys: %v", err)
+			return nil, fmt.Errorf("failed to generate RSA keys: %v", err)
 		}
 		cfg.rsaKey = key
 	}
