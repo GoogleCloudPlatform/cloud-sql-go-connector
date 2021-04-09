@@ -52,6 +52,8 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 }
 
 // A Dialer is used to create connections to Cloud SQL instances.
+//
+// Dialer objects should only intialized using NewDialer.
 type Dialer struct {
 	lock      sync.RWMutex
 	instances map[string]*cloudsql.Instance
@@ -65,16 +67,24 @@ type Dialer struct {
 }
 
 // NewDialer creates a new Dialer.
+//
+// Initial calls to NewDialer make take longer than normal because generation of an
+// RSA keypair is performed. Calls with a WithRSAKeyPair DialOption or after a default
+// RSA keypair is generated will be faster.
 func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	cfg := &dialerConfig{}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	key, err := getDefaultKeys()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate rsa keys: %v", err)
+	if cfg.rsaKey == nil {
+		key, err := getDefaultKeys()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate rsa keys: %v", err)
+		}
+		cfg.rsaKey = key
 	}
+
 	client, err := sqladmin.NewService(context.Background(), cfg.sqladminOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)
@@ -91,7 +101,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	d := &Dialer{
 		instances:      make(map[string]*cloudsql.Instance),
 		sqladmin:       client,
-		key:            key,
+		key:            cfg.rsaKey,
 		defaultDialCfg: dialCfg,
 	}
 	return d, nil

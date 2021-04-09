@@ -15,6 +15,7 @@
 package cloudsqlconn
 
 import (
+	"crypto/rsa"
 	"time"
 
 	"cloud.google.com/cloudsqlconn/internal/cloudsql"
@@ -26,6 +27,7 @@ import (
 type DialerOption func(d *dialerConfig)
 
 type dialerConfig struct {
+	rsaKey       *rsa.PrivateKey
 	sqladminOpts []apiopt.ClientOption
 	dialOpts     []DialOption
 }
@@ -64,6 +66,13 @@ func WithDefaultDialOptions(opts ...DialOption) DialerOption {
 func WithTokenSource(s oauth2.TokenSource) DialerOption {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
+	}
+}
+
+// WithRSAKey returns a DialerOption that specifies the RSA keypair that's used to represent the client.
+func WithRSAKey(k *rsa.PrivateKey) DialerOption {
+	return func(d *dialerConfig) {
+		d.rsaKey = k
 	}
 }
 
