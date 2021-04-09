@@ -26,6 +26,11 @@ import (
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
+const (
+	PublicIP  = "PUBLIC"
+	PrivateIP = "PRIVATE"
+)
+
 // metadata contains information about a Cloud SQL instance needed to create connections.
 type metadata struct {
 	ipAddrs      map[string]string
@@ -54,9 +59,9 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 	for _, ip := range db.IpAddresses {
 		switch ip.Type {
 		case "PRIMARY":
-			ipAddrs["PUBLIC"] = ip.IpAddress
+			ipAddrs[PublicIP] = ip.IpAddress
 		case "PRIVATE":
-			ipAddrs["PRIVATE"] = ip.IpAddress
+			ipAddrs[PrivateIP] = ip.IpAddress
 		}
 	}
 	if len(ipAddrs) == 0 {
@@ -84,7 +89,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 
 // fetchEphemeralCert uses the Cloud SQL Admin API's createEphemeral method to create a signed TLS
 // certificate that authorized to connect via the Cloud SQL instance's serverside proxy. The cert
-// if valid for aproximately one hour.
+// if valid for approximately one hour.
 func fetchEphemeralCert(ctx context.Context, client *sqladmin.Service, inst connName, key *rsa.PrivateKey) (tls.Certificate, error) {
 	clientPubKey, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	if err != nil {

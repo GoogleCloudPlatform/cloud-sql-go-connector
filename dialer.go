@@ -18,18 +18,23 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"cloud.google.com/cloudsqlconn/internal/cloudsql"
-	apiopt "google.golang.org/api/option"
+	"golang.org/x/net/proxy"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
-type dialerConfig struct {
-	sqladminOpts []apiopt.ClientOption
-}
+const (
+	// defaultTCPKeepAlive is the default keep alive value used on connections to a Cloud SQL instance.
+	defaultTCPKeepAlive = 30 * time.Second
+	// serverProxyPort is the port the server-side proxy receives connections on.
+	serverProxyPort = "3307"
+)
 
 // A Dialer is used to create connections to Cloud SQL instances.
 type Dialer struct {
@@ -38,6 +43,10 @@ type Dialer struct {
 	key       *rsa.PrivateKey
 
 	sqladmin *sqladmin.Service
+
+	// defaultDialCfg holds the constructor level DialOptions, so that it can
+	// be copied and mutated by the Dial function.
+	defaultDialCfg dialCfg
 }
 
 // NewDialer creates a new Dialer.
@@ -52,26 +61,68 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	for _, opt := range opts {
 		opt(cfg)
 	}
-
 	client, err := sqladmin.NewService(context.Background(), cfg.sqladminOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)
 	}
+
+	dialCfg := dialCfg{
+		ipType:       cloudsql.PublicIP,
+		tcpKeepAlive: defaultTCPKeepAlive,
+	}
+	for _, opt := range cfg.dialOpts {
+		opt(&dialCfg)
+	}
+
 	d := &Dialer{
-		instances: make(map[string]*cloudsql.Instance),
-		sqladmin:  client,
-		key:       key,
+		instances:      make(map[string]*cloudsql.Instance),
+		sqladmin:       client,
+		key:            key,
+		defaultDialCfg: dialCfg,
 	}
 	return d, nil
 }
 
-// Dial creates an authorized connection to a Cloud SQL instance specified by it's instance connection name.
-func (d *Dialer) Dial(ctx context.Context, instance string) (net.Conn, error) {
+// Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
+// instance's connection name, which is in the format "project-name:region:instance-name".
+func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (net.Conn, error) {
+	cfg := d.defaultDialCfg
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	i, err := d.instance(instance)
 	if err != nil {
 		return nil, err
 	}
-	return i.Connect(ctx)
+	ipAddrs, tlsCfg, err := i.ConnectInfo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	addr, ok := ipAddrs[cfg.ipType]
+	if !ok {
+		return nil, fmt.Errorf("instance '%s' does not have IP of type '%s'", instance, cfg.ipType)
+	}
+	addr = net.JoinHostPort(addr, serverProxyPort)
+
+	conn, err := proxy.Dial(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	if c, ok := conn.(*net.TCPConn); ok {
+		if err := c.SetKeepAlive(true); err != nil {
+			return nil, fmt.Errorf("failed to set keep-alive: %v", err)
+		}
+		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
+			return nil, fmt.Errorf("failed to set keep-alive period: %v", err)
+		}
+	}
+	tlsConn := tls.Client(conn, tlsCfg)
+	if err := tlsConn.Handshake(); err != nil {
+		tlsConn.Close()
+		return nil, fmt.Errorf("handshake failed: %w", err)
+	}
+	return tlsConn, err
 }
 
 func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {

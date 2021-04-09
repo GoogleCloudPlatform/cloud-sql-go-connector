@@ -15,6 +15,9 @@
 package cloudsqlconn
 
 import (
+	"time"
+
+	"cloud.google.com/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/oauth2"
 	apiopt "google.golang.org/api/option"
 )
@@ -22,7 +25,12 @@ import (
 // A DialerOption is an option for configuring a Dialer.
 type DialerOption func(d *dialerConfig)
 
-// DialerOptions turns a list of DialerOption instances into a DialerOption.
+type dialerConfig struct {
+	sqladminOpts []apiopt.ClientOption
+	dialOpts     []DialOption
+}
+
+// DialerOptions turns a list of DialerOption instances into an DialerOption.
 func DialerOptions(opts ...DialerOption) DialerOption {
 	return func(d *dialerConfig) {
 		for _, opt := range opts {
@@ -45,9 +53,54 @@ func WithCredentialsJSON(p []byte) DialerOption {
 	}
 }
 
+// WithDefaultDialOption returns a DialerOption that specifies the default DialOptions used.
+func WithDefaultDialOptions(opts ...DialOption) DialerOption {
+	return func(d *dialerConfig) {
+		d.dialOpts = append(d.dialOpts, opts...)
+	}
+}
+
 // WithTokenSource returns a DialerOption that specifies an OAuth2 token source to be used as the basis for authentication.
 func WithTokenSource(s oauth2.TokenSource) DialerOption {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
+	}
+}
+
+// A DialOption is an option for configuring how a Dialer's Dial call is executed.
+type DialOption func(d *dialCfg)
+
+type dialCfg struct {
+	tcpKeepAlive time.Duration
+	ipType       string
+}
+
+// DialOptions turns a list of DialOption instances into an DialOption.
+func DialOptions(opts ...DialOption) DialOption {
+	return func(cfg *dialCfg) {
+		for _, opt := range opts {
+			opt(cfg)
+		}
+	}
+}
+
+// WithTCPKeepAlive returns a DialOption that specifies the tcp keep alive period for the connection returned by Dial.
+func WithTCPKeepAlive(d time.Duration) DialOption {
+	return func(cfg *dialCfg) {
+		cfg.tcpKeepAlive = d
+	}
+}
+
+// WithPublicIP returns a DialOption that specifies a public IP will be used to connect.
+func WithPublicIP() DialOption {
+	return func(cfg *dialCfg) {
+		cfg.ipType = cloudsql.PublicIP
+	}
+}
+
+// WithPrivateIP returns a DialOption that specifies a private IP (VPC) will be used to connect.
+func WithPrivateIP() DialOption {
+	return func(cfg *dialCfg) {
+		cfg.ipType = cloudsql.PrivateIP
 	}
 }

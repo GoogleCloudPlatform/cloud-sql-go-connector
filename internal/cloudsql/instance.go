@@ -19,12 +19,10 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"fmt"
-	"net"
 	"regexp"
 	"sync"
 	"time"
 
-	"golang.org/x/net/proxy"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
@@ -32,9 +30,6 @@ var (
 	// Instance connection name is the format <PROJECT>:<REGION>:<INSTANCE>
 	// Additionally, we have to support legacy "domain-scoped" projects (e.g. "google.com:PROJECT")
 	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+)")
-
-	// defaultKeepAlive is the default keep alive value on connections created in this package.
-	defaultKeepAlive = 30 * time.Second
 )
 
 // connName represents the "instance connection name", in the format "project:region:name". Use the
@@ -133,37 +128,16 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey)
 	return i, nil
 }
 
-// Connect returns a secure, authorized net.Conn to a Cloud SQL instance.
-func (i *Instance) Connect(ctx context.Context) (net.Conn, error) {
+// ConnectInfo returns a map of IP types and a TLS config that can be used to connect to a Cloud SQL instance.
+func (i *Instance) ConnectInfo(ctx context.Context) (map[string]string, *tls.Config, error) {
 	i.resultGuard.RLock()
 	res := i.cur
 	i.resultGuard.RUnlock()
 	err := res.Wait(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
-	// TODO: Add better ipType support, including an opt to specify.
-	addr := net.JoinHostPort(res.md.ipAddrs["PUBLIC"], "3307")
-	conn, err := proxy.Dial(ctx, "tcp", addr)
-	if err != nil {
-		return nil, err
-	}
-	if c, ok := conn.(*net.TCPConn); ok {
-		if err := c.SetKeepAlive(true); err != nil {
-			return nil, fmt.Errorf("failed to set keep-alive: %w", err)
-		}
-		if err := c.SetKeepAlivePeriod(defaultKeepAlive); err != nil {
-			return nil, fmt.Errorf("failed to set keep-alive period: %w", err)
-		}
-	}
-
-	tlsConn := tls.Client(conn, res.tlsCfg)
-	if err := tlsConn.Handshake(); err != nil {
-		tlsConn.Close()
-		return nil, fmt.Errorf("handshake failed: %w", err)
-	}
-	return tlsConn, err
+	return res.md.ipAddrs, res.tlsCfg, nil
 }
 
 // scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshResult
