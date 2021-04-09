@@ -36,6 +36,21 @@ const (
 	serverProxyPort = "3307"
 )
 
+var (
+	// defaultKeys is the default pub/priv encryption keypair for the client, and is
+	// shared between all Dialers that don't provide a different key
+	defaultKeys    *rsa.PrivateKey
+	defaultKeysErr error
+	keysOnce       sync.Once
+)
+
+func getDefaultKeys() (*rsa.PrivateKey, error) {
+	keysOnce.Do(func() {
+		defaultKeys, defaultKeysErr = rsa.GenerateKey(rand.Reader, 2048)
+	})
+	return defaultKeys, defaultKeysErr
+}
+
 // A Dialer is used to create connections to Cloud SQL instances.
 type Dialer struct {
 	lock      sync.RWMutex
@@ -51,15 +66,14 @@ type Dialer struct {
 
 // NewDialer creates a new Dialer.
 func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
-	// TODO: Add shared / async key generation
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate rsa keys: %v", err)
-	}
-
 	cfg := &dialerConfig{}
 	for _, opt := range opts {
 		opt(cfg)
+	}
+
+	key, err := getDefaultKeys()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate rsa keys: %v", err)
 	}
 	client, err := sqladmin.NewService(context.Background(), cfg.sqladminOpts...)
 	if err != nil {
