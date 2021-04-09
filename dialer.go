@@ -36,7 +36,23 @@ const (
 	serverProxyPort = "3307"
 )
 
+var (
+	// defaultKey is the default RSA public/private keypair used by the clients.
+	defaultKey    *rsa.PrivateKey
+	defaultKeyErr error
+	keyOnce       sync.Once
+)
+
+func getDefaultKeys() (*rsa.PrivateKey, error) {
+	keyOnce.Do(func() {
+		defaultKey, defaultKeyErr = rsa.GenerateKey(rand.Reader, 2048)
+	})
+	return defaultKey, defaultKeyErr
+}
+
 // A Dialer is used to create connections to Cloud SQL instances.
+//
+// Use NewDialer to initialize a Dialer.
 type Dialer struct {
 	lock      sync.RWMutex
 	instances map[string]*cloudsql.Instance
@@ -50,17 +66,24 @@ type Dialer struct {
 }
 
 // NewDialer creates a new Dialer.
+//
+// Initial calls to NewDialer make take longer than normal because generation of an
+// RSA keypair is performed. Calls with a WithRSAKeyPair DialOption or after a default
+// RSA keypair is generated will be faster.
 func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
-	// TODO: Add shared / async key generation
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate rsa keys: %v", err)
-	}
-
 	cfg := &dialerConfig{}
 	for _, opt := range opts {
 		opt(cfg)
 	}
+
+	if cfg.rsaKey == nil {
+		key, err := getDefaultKeys()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate RSA keys: %v", err)
+		}
+		cfg.rsaKey = key
+	}
+
 	client, err := sqladmin.NewService(context.Background(), cfg.sqladminOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)
@@ -77,7 +100,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	d := &Dialer{
 		instances:      make(map[string]*cloudsql.Instance),
 		sqladmin:       client,
-		key:            key,
+		key:            cfg.rsaKey,
 		defaultDialCfg: dialCfg,
 	}
 	return d, nil
