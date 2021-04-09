@@ -37,18 +37,17 @@ const (
 )
 
 var (
-	// defaultKeys is the default pub/priv encryption keypair for the client, and is
-	// shared between all Dialers that don't provide a different key
-	defaultKeys    *rsa.PrivateKey
-	defaultKeysErr error
-	keysOnce       sync.Once
+	// defaultKey is the default RSA public/private keypair used by the clients.
+	defaultKey    *rsa.PrivateKey
+	defaultKeyErr error
+	keyOnce       sync.Once
 )
 
 func getDefaultKeys() (*rsa.PrivateKey, error) {
-	keysOnce.Do(func() {
-		defaultKeys, defaultKeysErr = rsa.GenerateKey(rand.Reader, 2048)
+	keyOnce.Do(func() {
+		defaultKey, defaultKeyErr = rsa.GenerateKey(rand.Reader, 2048)
 	})
-	return defaultKeys, defaultKeysErr
+	return defaultKey, defaultKeyErr
 }
 
 // A Dialer is used to create connections to Cloud SQL instances.
