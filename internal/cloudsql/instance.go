@@ -194,7 +194,7 @@ func performRefresh(client *sqladmin.Service, cn connName, k *rsa.PrivateKey, d 
 		ecC <- ecRes{ec, err}
 	}()
 
-	// wait for the result of async operations
+	// wait for the results of each operations
 	var md metadata
 	select {
 	case r := <-mdC:
