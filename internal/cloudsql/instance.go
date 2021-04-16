@@ -170,15 +170,51 @@ func performRefresh(client *sqladmin.Service, cn connName, k *rsa.PrivateKey, d 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// TODO: perform these steps asynchronously and return the results
-	md, err := fetchMetadata(ctx, client, cn)
-	if err != nil {
-		return md, nil, fmt.Errorf("fetch metadata failed: %w", err)
+	// start async fetching the instance's metadata
+	type mdRes struct {
+		md  metadata
+		err error
+	}
+	mdC := make(chan mdRes, 1)
+	go func() {
+		defer close(mdC)
+		md, err := fetchMetadata(ctx, client, cn)
+		mdC <- mdRes{md, err}
+	}()
+
+	// start async fetching the certs
+	type ecRes struct {
+		ec  tls.Certificate
+		err error
+	}
+	ecC := make(chan ecRes, 1)
+	go func() {
+		defer close(ecC)
+		ec, err := fetchEphemeralCert(ctx, client, cn, k)
+		ecC <- ecRes{ec, err}
+	}()
+
+	// wait for the results of each operations
+	var md metadata
+	select {
+	case r := <-mdC:
+		if r.err != nil {
+			return md, nil, fmt.Errorf("fetch metadata failed: %w", r.err)
+		}
+		md = r.md
+	case <-ctx.Done():
+		return md, nil, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 	var ec tls.Certificate
-	ec, err = fetchEphemeralCert(ctx, client, cn, k)
-	if err != nil {
-		return md, nil, fmt.Errorf("fetch ephemeral cert failed: %w", err)
+	select {
+	case r := <-ecC:
+		if r.err != nil {
+			return md, nil, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
+		}
+		ec = r.ec
+	case <-ctx.Done():
+		return md, nil, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
-	return md, createTLSConfig(cn, md, ec), err
+
+	return md, createTLSConfig(cn, md, ec), nil
 }
