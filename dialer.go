@@ -54,9 +54,10 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
-	lock      sync.RWMutex
-	instances map[string]*cloudsql.Instance
-	key       *rsa.PrivateKey
+	lock           sync.RWMutex
+	instances      map[string]*cloudsql.Instance
+	key            *rsa.PrivateKey
+	refreshTimeout time.Duration
 
 	sqladmin *sqladmin.Service
 
@@ -71,7 +72,9 @@ type Dialer struct {
 // RSA keypair is performed. Calls with a WithRSAKeyPair DialOption or after a default
 // RSA keypair is generated will be faster.
 func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
-	cfg := &dialerConfig{}
+	cfg := &dialerConfig{
+		refreshTimeout: 30 * time.Second,
+	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -99,8 +102,9 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 
 	d := &Dialer{
 		instances:      make(map[string]*cloudsql.Instance),
-		sqladmin:       client,
 		key:            cfg.rsaKey,
+		refreshTimeout: cfg.refreshTimeout,
+		sqladmin:       client,
 		defaultDialCfg: dialCfg,
 	}
 	return d, nil
@@ -160,7 +164,7 @@ func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
 		if !ok {
 			// Create a new instance
 			var err error
-			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key)
+			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout)
 			if err != nil {
 				d.lock.Unlock()
 				return nil, err

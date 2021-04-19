@@ -27,9 +27,10 @@ import (
 type DialerOption func(d *dialerConfig)
 
 type dialerConfig struct {
-	rsaKey       *rsa.PrivateKey
-	sqladminOpts []apiopt.ClientOption
-	dialOpts     []DialOption
+	rsaKey         *rsa.PrivateKey
+	sqladminOpts   []apiopt.ClientOption
+	dialOpts       []DialOption
+	refreshTimeout time.Duration
 }
 
 // DialerOptions turns a list of DialerOption instances into an DialerOption.
@@ -73,6 +74,13 @@ func WithTokenSource(s oauth2.TokenSource) DialerOption {
 func WithRSAKey(k *rsa.PrivateKey) DialerOption {
 	return func(d *dialerConfig) {
 		d.rsaKey = k
+	}
+}
+
+// WithRefreshTimeout returns a DialerOption that sets a timeout on refresh operations. Defaults to 30s.
+func WithRefreshTimeout(t time.Duration) DialerOption {
+	return func(d *dialerConfig) {
+		d.refreshTimeout = t
 	}
 }
 
