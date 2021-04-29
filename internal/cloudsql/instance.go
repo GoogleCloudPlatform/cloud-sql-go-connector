@@ -94,8 +94,9 @@ func (i *refreshResult) Wait(ctx context.Context) error {
 // before the previous certificate expires (every 55 minutes).
 type Instance struct {
 	connName
-	client *sqladmin.Service
-	key    *rsa.PrivateKey
+	client         *sqladmin.Service
+	key            *rsa.PrivateKey
+	refreshTimeout time.Duration
 
 	resultGuard sync.RWMutex
 	// cur represents the current refreshResult that will be used to create connections. If a valid complete
@@ -109,15 +110,16 @@ type Instance struct {
 }
 
 // NewInstance initializes a new Instance given an instance connection name
-func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey) (*Instance, error) {
+func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey, refreshTimeout time.Duration) (*Instance, error) {
 	cn, err := parseConnName(instance)
 	if err != nil {
 		return nil, err
 	}
 	i := &Instance{
-		connName: cn,
-		client:   client,
-		key:      key,
+		connName:       cn,
+		client:         client,
+		key:            key,
+		refreshTimeout: refreshTimeout,
 	}
 	// For the initial refresh operation, set cur = next so that connection requests block
 	// until the first refresh is complete.
@@ -146,7 +148,9 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 	res := &refreshResult{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		res.md, res.tlsCfg, res.err = performRefresh(i.client, i.connName, i.key, d)
+		ctx, cancel := context.WithTimeout(context.Background(), i.refreshTimeout)
+		res.md, res.tlsCfg, res.err = performRefresh(ctx, i.client, i.connName, i.key)
+		cancel()
 		close(res.ready)
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh
 		i.resultGuard.Lock()
@@ -165,11 +169,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 }
 
 // performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
-func performRefresh(client *sqladmin.Service, cn connName, k *rsa.PrivateKey, d time.Duration) (metadata, *tls.Config, error) {
-	// TODO: consider adding an opt for configurable timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
+func performRefresh(ctx context.Context, client *sqladmin.Service, cn connName, k *rsa.PrivateKey) (metadata, *tls.Config, error) {
 	// start async fetching the instance's metadata
 	type mdRes struct {
 		md  metadata

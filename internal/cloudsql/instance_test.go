@@ -18,8 +18,10 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"errors"
 	"os"
 	"testing"
+	"time"
 
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -72,13 +74,39 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("failed to generate keys: %v", err)
 	}
 
-	im, err := NewInstance(instConnName, client, key)
+	im, err := NewInstance(instConnName, client, key, 30*time.Second)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 
 	_, _, err = im.ConnectInfo(ctx)
 	if err != nil {
+		t.Fatalf("failed to retrieve connect info: %v", err)
+	}
+}
+
+func TestRefreshTimeout(t *testing.T) {
+	ctx := context.Background()
+
+	client, err := sqladmin.NewService(ctx)
+	if err != nil {
+		t.Fatalf("client init failed: %s", err)
+	}
+
+	// Step 0: Generate Keys
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate keys: %v", err)
+	}
+
+	// Use a timeout that should fail instantly
+	im, err := NewInstance(instConnName, client, key, 0)
+	if err != nil {
+		t.Fatalf("failed to initialize Instance: %v", err)
+	}
+
+	_, _, err = im.ConnectInfo(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
 }
