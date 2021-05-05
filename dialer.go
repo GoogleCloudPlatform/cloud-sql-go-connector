@@ -26,10 +26,15 @@ import (
 
 	"cloud.google.com/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/net/proxy"
+	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 const (
+	// versionString indicates the version of this library.
+	versionString = "0.1.0-dev"
+	userAgent     = "cloud-sql-go-connector/" + versionString
+
 	// defaultTCPKeepAlive is the default keep alive value used on connections to a Cloud SQL instance.
 	defaultTCPKeepAlive = 30 * time.Second
 	// serverProxyPort is the port the server-side proxy receives connections on.
@@ -74,6 +79,7 @@ type Dialer struct {
 func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	cfg := &dialerConfig{
 		refreshTimeout: 30 * time.Second,
+		sqladminOpts:   []option.ClientOption{option.WithUserAgent(userAgent)},
 	}
 	for _, opt := range opts {
 		opt(cfg)
