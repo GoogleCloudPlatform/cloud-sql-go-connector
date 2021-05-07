@@ -147,6 +147,18 @@ func (i *Instance) ConnectInfo(ctx context.Context) (map[string]string, *tls.Con
 	return res.md.ipAddrs, res.tlsCfg, nil
 }
 
+// ForceRefresh triggers an immediate refresh operation to be scheduled and used for future connection attempts.
+func (i *Instance) ForceRefresh() {
+	i.resultGuard.Lock()
+	defer i.resultGuard.Unlock()
+	// If the next refresh hasn't started yet, we can cancel it and start an immediate one
+	if i.next.Cancel() {
+		i.next = i.scheduleRefresh(0)
+	}
+	// block all sequential connection attempts on the next refresh result
+	i.cur = i.next 
+}
+
 // scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshResult
 // can be used to either Cancel or Wait for the operations result.
 func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
