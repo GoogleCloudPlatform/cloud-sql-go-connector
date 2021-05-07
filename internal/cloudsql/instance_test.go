@@ -107,6 +107,6 @@ func TestRefreshTimeout(t *testing.T) {
 
 	_, _, err = im.ConnectInfo(ctx)
 	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("failed to retrieve connect info: %v", err)
+		t.Fatalf("connect info did not context timeout: %v", err)
 	}
 }
