@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
@@ -94,6 +96,8 @@ func (i *refreshResult) Wait(ctx context.Context) error {
 // before the previous certificate expires (every 55 minutes).
 type Instance struct {
 	connName
+
+	clientLimiter  *rate.Limiter
 	client         *sqladmin.Service
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
@@ -117,6 +121,7 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey,
 	}
 	i := &Instance{
 		connName:       cn,
+		clientLimiter:  rate.NewLimiter(rate.Every(30*time.Second), 2),
 		client:         client,
 		key:            key,
 		refreshTimeout: refreshTimeout,
@@ -149,8 +154,9 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), i.refreshTimeout)
-		res.md, res.tlsCfg, res.err = performRefresh(ctx, i.client, i.connName, i.key)
+		res.md, res.tlsCfg, res.err = performRefresh(ctx, i.client, i.clientLimiter, i.connName, i.key)
 		cancel()
+
 		close(res.ready)
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh
 		i.resultGuard.Lock()
@@ -169,7 +175,13 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 }
 
 // performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
-func performRefresh(ctx context.Context, client *sqladmin.Service, cn connName, k *rsa.PrivateKey) (metadata, *tls.Config, error) {
+func performRefresh(ctx context.Context, client *sqladmin.Service, l *rate.Limiter, cn connName, k *rsa.PrivateKey) (metadata, *tls.Config, error) {
+	// avoid refreshing too often to try not to tax the SQL Admin API quotas
+	err := l.Wait(ctx)
+	if err != nil {
+		return metadata{}, nil, fmt.Errorf("refresh was throttled until context expired: %v", err)
+	}
+
 	// start async fetching the instance's metadata
 	type mdRes struct {
 		md  metadata
