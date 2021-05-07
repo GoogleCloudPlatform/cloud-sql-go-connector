@@ -140,6 +140,8 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 
 	conn, err := proxy.Dial(ctx, "tcp", addr)
 	if err != nil {
+		// refresh the instance info in case it caused the connection failure
+		i.ForceRefresh()
 		return nil, err
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
@@ -152,6 +154,8 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	tlsConn := tls.Client(conn, tlsCfg)
 	if err := tlsConn.Handshake(); err != nil {
+		// refresh the instance info in case it caused the handshake failure
+		i.ForceRefresh()
 		tlsConn.Close()
 		return nil, fmt.Errorf("handshake failed: %w", err)
 	}

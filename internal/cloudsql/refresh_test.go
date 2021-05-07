@@ -40,7 +40,7 @@ func TestFetchMetadata(t *testing.T) {
 		t.Fatalf("%s", err)
 	}
 }
-func TestFetchEmpheralCert(t *testing.T) {
+func TestFetchEphemeralCert(t *testing.T) {
 	ctx := context.Background()
 
 	client, err := sqladmin.NewService(ctx)
