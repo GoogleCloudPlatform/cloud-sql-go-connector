@@ -179,7 +179,7 @@ func performRefresh(ctx context.Context, client *sqladmin.Service, l *rate.Limit
 	// avoid refreshing too often to try not to tax the SQL Admin API quotas
 	err := l.Wait(ctx)
 	if err != nil {
-		return metadata{}, nil, fmt.Errorf("refresh was throttled until context expired: %s", err)
+		return metadata{}, nil, fmt.Errorf("refresh was throttled until context expired: %v", err)
 	}
 
 	// start async fetching the instance's metadata
