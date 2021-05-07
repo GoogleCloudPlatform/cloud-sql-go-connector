@@ -156,7 +156,7 @@ func (i *Instance) ForceRefresh() {
 		i.next = i.scheduleRefresh(0)
 	}
 	// block all sequential connection attempts on the next refresh result
-	i.cur = i.next 
+	i.cur = i.next
 }
 
 // scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshResult
