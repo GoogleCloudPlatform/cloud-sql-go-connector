@@ -20,19 +20,30 @@ import (
 	"crypto/rsa"
 	"testing"
 
+	"cloud.google.com/cloudsqlconn/internal/mock"
+	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 func TestFetchMetadata(t *testing.T) {
 	ctx := context.Background()
-	client, err := sqladmin.NewService(ctx)
-	if err != nil {
-		t.Fatalf("client init failed: %s", err)
-	}
 
-	cn, err := parseConnName(instConnName)
+	cn, err := parseConnName("my-proj:my-region:my-inst")
 	if err != nil {
 		t.Fatalf("%s", err)
+	}
+
+	mc, url, cleanup := mock.HttpClient(
+		mock.InstanceGetSuccess(cn.project, cn.region, cn.name, 1),
+	)
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+	client, err := sqladmin.NewService(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("client init failed: %s", err)
 	}
 
 	_, err = fetchMetadata(ctx, client, cn)
