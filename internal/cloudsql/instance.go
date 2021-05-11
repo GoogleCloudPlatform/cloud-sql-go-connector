@@ -196,8 +196,10 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 		// if failed, scheduled the next refresh immediately
 		if res.err != nil {
 			i.next = i.scheduleRefresh(0)
-			// keep using current info unless it's no longer valid
-			// TODO: consider how to avoid supressing errors here
+			// If the latest result is bad, avoid replacing the used result while it's
+			// still valid and potentially able to provide successful connections.
+			// TODO: This means that errors while the current result is still valid are
+			// surpressed. We should try to surface errors in a more meaningful way.
 			if !i.cur.IsValid() {
 				i.cur = res
 			}
