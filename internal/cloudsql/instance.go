@@ -83,32 +83,32 @@ type refreshResult struct {
 
 // Cancel prevents the instanceInfo from starting, if it hasn't already started. Returns true if timer
 // was stopped successfully, or false if it has already started.
-func (i *refreshResult) Cancel() bool {
-	return i.timer.Stop()
+func (r *refreshResult) Cancel() bool {
+	return r.timer.Stop()
 }
 
 // Wait blocks until the refreshResult attempt is completed.
-func (i *refreshResult) Wait(ctx context.Context) error {
+func (r *refreshResult) Wait(ctx context.Context) error {
 	select {
-	case <-i.ready:
-		return i.err
+	case <-r.ready:
+		return r.err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
 // IsValid returns true if this result is complete, successful, and is still valid.
-func (i *refreshResult) IsValid() bool {
+func (r *refreshResult) IsValid() bool {
 	// verify the result has finished running
 	select {
 	default:
 		return false
-	case <-i.ready:
+	case <-r.ready:
+		if r.err != nil || time.Now().After(r.expiry) {
+			return false
+		}
+		return true
 	}
-	if i.err != nil || time.Now().After(i.expiry) {
-		return false
-	}
-	return true
 }
 
 // Instance manages the information used to connect to the Cloud SQL instance by periodically calling
@@ -213,12 +213,10 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 
 // performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
 func performRefresh(ctx context.Context, client *sqladmin.Service, l *rate.Limiter, cn connName, k *rsa.PrivateKey) (metadata, *tls.Config, time.Time, error) {
-	// default as currently expired
-	expiry := time.Now()
 	// avoid refreshing too often to try not to tax the SQL Admin API quotas
 	err := l.Wait(ctx)
 	if err != nil {
-		return metadata{}, nil, expiry, fmt.Errorf("refresh was throttled until context expired: %w", err)
+		return metadata{}, nil, time.Time{}, fmt.Errorf("refresh was throttled until context expired: %w", err)
 	}
 
 	// start async fetching the instance's metadata
@@ -250,24 +248,26 @@ func performRefresh(ctx context.Context, client *sqladmin.Service, l *rate.Limit
 	select {
 	case r := <-mdC:
 		if r.err != nil {
-			return md, nil, expiry, fmt.Errorf("fetch metadata failed: %w", r.err)
+			return md, nil, time.Time{}, fmt.Errorf("fetch metadata failed: %w", r.err)
 		}
 		md = r.md
 	case <-ctx.Done():
-		return md, nil, expiry, fmt.Errorf("refresh failed: %w", ctx.Err())
+		return md, nil, time.Time{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 	var ec tls.Certificate
 	select {
 	case r := <-ecC:
 		if r.err != nil {
-			return md, nil, expiry, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
+			return md, nil, time.Time{}, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
 		}
 		ec = r.ec
 	case <-ctx.Done():
-		return md, nil, expiry, fmt.Errorf("refresh failed: %w", ctx.Err())
+		return md, nil, time.Time{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
 	c := createTLSConfig(cn, md, ec)
+	// This should never not be the case, but we check to avoid a potential nil-pointer
+	expiry := time.Time{}
 	if len(c.Certificates) > 0 {
 		expiry = c.Certificates[0].Leaf.NotAfter
 	}
