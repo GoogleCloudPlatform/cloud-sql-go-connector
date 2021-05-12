@@ -111,16 +111,22 @@ func (r *refreshResult) IsValid() bool {
 	}
 }
 
+type refreshCfg struct {
+	refreshTimeout time.Duration
+
+	clientLimiter *rate.Limiter
+	client        *sqladmin.Service
+}
+
 // Instance manages the information used to connect to the Cloud SQL instance by periodically calling
 // the Cloud SQL Admin API. It automatically refreshes the required information approximately 5 minutes
 // before the previous certificate expires (every 55 minutes).
 type Instance struct {
 	connName
+	key *rsa.PrivateKey
 
-	clientLimiter  *rate.Limiter
-	client         *sqladmin.Service
-	key            *rsa.PrivateKey
-	refreshTimeout time.Duration
+	// refreshCfg contains the config for how refresh operations are handled.
+	refreshCfg refreshCfg
 
 	resultGuard sync.RWMutex
 	// cur represents the current refreshResult that will be used to create connections. If a valid complete
@@ -140,11 +146,13 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey,
 		return nil, err
 	}
 	i := &Instance{
-		connName:       cn,
-		clientLimiter:  rate.NewLimiter(rate.Every(30*time.Second), 2),
-		client:         client,
-		key:            key,
-		refreshTimeout: refreshTimeout,
+		connName: cn,
+		key:      key,
+		refreshCfg: refreshCfg{
+			refreshTimeout: refreshTimeout,
+			clientLimiter:  rate.NewLimiter(rate.Every(30*time.Second), 2),
+			client:         client,
+		},
 	}
 	// For the initial refresh operation, set cur = next so that connection requests block
 	// until the first refresh is complete.
@@ -185,8 +193,8 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 	res := &refreshResult{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), i.refreshTimeout)
-		res.md, res.tlsCfg, res.expiry, res.err = performRefresh(ctx, i.client, i.clientLimiter, i.connName, i.key)
+		ctx, cancel := context.WithTimeout(context.Background(), i.refreshCfg.refreshTimeout)
+		res.md, res.tlsCfg, res.expiry, res.err = performRefresh(ctx, i.connName, i.key, i.refreshCfg)
 		cancel()
 
 		close(res.ready)
@@ -214,9 +222,9 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 }
 
 // performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
-func performRefresh(ctx context.Context, client *sqladmin.Service, l *rate.Limiter, cn connName, k *rsa.PrivateKey) (metadata, *tls.Config, time.Time, error) {
+func performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey, cfg refreshCfg) (metadata, *tls.Config, time.Time, error) {
 	// avoid refreshing too often to try not to tax the SQL Admin API quotas
-	err := l.Wait(ctx)
+	err := cfg.clientLimiter.Wait(ctx)
 	if err != nil {
 		return metadata{}, nil, time.Time{}, fmt.Errorf("refresh was throttled until context expired: %w", err)
 	}
@@ -229,7 +237,7 @@ func performRefresh(ctx context.Context, client *sqladmin.Service, l *rate.Limit
 	mdC := make(chan mdRes, 1)
 	go func() {
 		defer close(mdC)
-		md, err := fetchMetadata(ctx, client, cn)
+		md, err := fetchMetadata(ctx, cfg.client, cn)
 		mdC <- mdRes{md, err}
 	}()
 
@@ -241,7 +249,7 @@ func performRefresh(ctx context.Context, client *sqladmin.Service, l *rate.Limit
 	ecC := make(chan ecRes, 1)
 	go func() {
 		defer close(ecC)
-		ec, err := fetchEphemeralCert(ctx, client, cn, k)
+		ec, err := fetchEphemeralCert(ctx, cfg.client, cn, k)
 		ecC <- ecRes{ec, err}
 	}()
 
