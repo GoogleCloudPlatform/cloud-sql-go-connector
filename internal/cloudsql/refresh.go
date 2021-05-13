@@ -22,7 +22,9 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"time"
 
+	"golang.org/x/time/rate"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
@@ -169,4 +171,81 @@ func genVerifyPeerCertificateFunc(cn connName, pool *x509.CertPool) func(rawCert
 		}
 		return nil
 	}
+}
+
+type refresher struct {
+	// timeout is the maximum amount of time a refresh operation should be allowed to take.
+	timeout time.Duration
+
+	clientLimiter *rate.Limiter
+	client        *sqladmin.Service
+}
+
+// performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
+func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (metadata, *tls.Config, time.Time, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+	if ctx.Err() == context.Canceled {
+		return metadata{}, nil, time.Time{}, ctx.Err()
+	}
+
+	// avoid refreshing too often to try not to tax the SQL Admin API quotas
+	err := r.clientLimiter.Wait(ctx)
+	if err != nil {
+		return metadata{}, nil, time.Time{}, fmt.Errorf("refresh was throttled until context expired: %w", err)
+	}
+
+	// start async fetching the instance's metadata
+	type mdRes struct {
+		md  metadata
+		err error
+	}
+	mdC := make(chan mdRes, 1)
+	go func() {
+		defer close(mdC)
+		md, err := fetchMetadata(ctx, r.client, cn)
+		mdC <- mdRes{md, err}
+	}()
+
+	// start async fetching the certs
+	type ecRes struct {
+		ec  tls.Certificate
+		err error
+	}
+	ecC := make(chan ecRes, 1)
+	go func() {
+		defer close(ecC)
+		ec, err := fetchEphemeralCert(ctx, r.client, cn, k)
+		ecC <- ecRes{ec, err}
+	}()
+
+	// wait for the results of each operations
+	var md metadata
+	select {
+	case r := <-mdC:
+		if r.err != nil {
+			return md, nil, time.Time{}, fmt.Errorf("fetch metadata failed: %w", r.err)
+		}
+		md = r.md
+	case <-ctx.Done():
+		return md, nil, time.Time{}, fmt.Errorf("refresh failed: %w", ctx.Err())
+	}
+	var ec tls.Certificate
+	select {
+	case r := <-ecC:
+		if r.err != nil {
+			return md, nil, time.Time{}, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
+		}
+		ec = r.ec
+	case <-ctx.Done():
+		return md, nil, time.Time{}, fmt.Errorf("refresh failed: %w", ctx.Err())
+	}
+
+	c := createTLSConfig(cn, md, ec)
+	// This should never not be the case, but we check to avoid a potential nil-pointer
+	expiry := time.Time{}
+	if len(c.Certificates) > 0 {
+		expiry = c.Certificates[0].Leaf.NotAfter
+	}
+	return md, c, expiry, nil
 }
