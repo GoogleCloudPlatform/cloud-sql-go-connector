@@ -93,7 +93,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		cfg.rsaKey = key
 	}
 
-	client, err := sqladmin.NewService(context.Background(), cfg.sqladminOpts...)
+	client, err := sqladmin.NewService(ctx, cfg.sqladminOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)
 	}
