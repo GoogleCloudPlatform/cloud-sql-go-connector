@@ -19,17 +19,12 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
 	"cloud.google.com/cloudsqlconn/internal/mock"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
-)
-
-var (
-	instConnName = os.Getenv("POSTGRES_CONNECTION_NAME")
 )
 
 func TestParseConnName(t *testing.T) {
@@ -97,7 +92,7 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("failed to generate keys: %v", err)
 	}
 
-	im, err := NewInstance(instConnName, client, key, 30*time.Second)
+	im, err := NewInstance(cn.String(), client, key, 30*time.Second)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
@@ -130,7 +125,7 @@ func TestRefreshTimeout(t *testing.T) {
 	}
 
 	// Use a timeout that should fail instantly
-	im, err := NewInstance(instConnName, client, key, 0)
+	im, err := NewInstance("my-proj:my-region:my-inst", client, key, 0)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
