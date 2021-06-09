@@ -23,10 +23,10 @@ import (
 	"time"
 )
 
-// CloudSQLInstance represents settings for a specific Cloud SQL instance.
+// CloudSQLInst represents settings for a specific Cloud SQL instance.
 //
 // Use NewCloudSQLInstance to instantiate.
-type CloudSQLInstance struct {
+type CloudSQLInst struct {
 	project string
 	region  string
 	name    string
@@ -37,14 +37,15 @@ type CloudSQLInstance struct {
 	cert    *x509.Certificate
 }
 
-// NewCloudSQLInstance returns a CloudSQLInstance object for configuring mocks
-func NewCloudSQLInstance(project, region, name string) (CloudSQLInstance, error) {
+// NewCloudSQLInst returns a CloudSQLInst object for configuring mocks.
+func NewCloudSQLInst(project, region, name string) (CloudSQLInst, error) {
+	// TODO: consider options for this? 
 	privKey, cert, err := generateInstanceCerts()
 	if err != nil {
-		return CloudSQLInstance{}, err
+		return CloudSQLInst{}, err
 	}
 
-	c := CloudSQLInstance{
+	c := CloudSQLInst{
 		project:   project,
 		region:    region,
 		name:      name,

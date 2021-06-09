@@ -28,24 +28,26 @@ import (
 func TestFetchMetadata(t *testing.T) {
 	ctx := context.Background()
 
+	// define some test instance settings
 	cn, err := parseConnName("my-proj:my-region:my-inst")
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
-
-	mI, err := mock.NewCloudSQLInstance(cn.project, cn.region, cn.name)
+	inst, err := mock.NewCloudSQLInst(cn.project, cn.region, cn.name)
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
 
+	// mock expected requests
 	mc, url, cleanup := mock.HTTPClient(
-		mock.InstanceGetSuccess(mI, 1),
+		mock.InstanceGetSuccess(inst, 1),
 	)
 	defer func() {
 		if err := cleanup(); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()
+
 	client, err := sqladmin.NewService(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
 	if err != nil {
 		t.Fatalf("client init failed: %s", err)
@@ -59,21 +61,36 @@ func TestFetchMetadata(t *testing.T) {
 func TestFetchEphemeralCert(t *testing.T) {
 	ctx := context.Background()
 
-	client, err := sqladmin.NewService(ctx)
+	// define some test instance settings
+	cn, err := parseConnName("my-proj:my-region:my-inst")
 	if err != nil {
-		t.Fatalf("client init failed: %s", err)
+		t.Fatalf("%s", err)
 	}
-	inst, err := parseConnName(instConnName)
+	inst, err := mock.NewCloudSQLInst(cn.project, cn.region, cn.name)
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
 
+	// mock expected requests
+	mc, url, cleanup := mock.HTTPClient(
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	client, err := sqladmin.NewService(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("client init failed: %s", err)
+	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate keys: %v", err)
 	}
 
-	_, err = fetchEphemeralCert(ctx, client, inst, key)
+	_, err = fetchEphemeralCert(ctx, client, cn, key)
 	if err != nil {
 		t.Fatalf("failed to fetch ephemeral cert: %v", err)
 	}

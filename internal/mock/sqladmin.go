@@ -18,11 +18,16 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io/ioutil"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"time"
 
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -43,7 +48,7 @@ func HTTPClient(requests ...*Request) (*http.Client, string, func() error) {
 				}
 			}
 			// Unexpected requests should throw an error
-			resp.WriteHeader(http.StatusInternalServerError)
+			resp.WriteHeader(http.StatusNotImplemented)
 			// TODO: follow error format better?
 			resp.Write([]byte(fmt.Sprintf("unexpected request sent to mock client: %v", req)))
 		},
@@ -97,7 +102,7 @@ func (r *Request) matches(hR *http.Request) bool {
 // endpoint. It responds with a "StatusOK" and a DatabaseInstance object.
 //
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
-func InstanceGetSuccess(i CloudSQLInstance, ct int) *Request {
+func InstanceGetSuccess(i CloudSQLInst, ct int) *Request {
 	// Turn instance keys/certs into PEM encoded versions needed for response
 	certBytes, err := x509.CreateCertificate(
 		rand.Reader, i.cert, i.cert, &i.privKey.PublicKey, i.privKey)
@@ -131,11 +136,94 @@ func InstanceGetSuccess(i CloudSQLInstance, ct int) *Request {
 		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s", i.project, i.name),
 		reqCt:     ct,
 		handle: func(resp http.ResponseWriter, req *http.Request) {
-			resp.WriteHeader(http.StatusOK)
 			b, err := db.MarshalJSON()
 			if err != nil {
-				panic(err)
+				http.Error(resp, err.Error(), http.StatusInternalServerError)
+				return
 			}
+			resp.WriteHeader(http.StatusOK)
+			resp.Write(b)
+		},
+	}
+	return r
+}
+
+// CreateEphemeralSuccess returns a MockRequest that responds to the
+// `sslCerts.createEphemeral` SQL Admin endpoint. It responds with a "StatusOK" and a
+// SslCerts object.
+//
+// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/sslCerts/createEphemeral
+func CreateEphemeralSuccess(i CloudSQLInst, ct int) *Request {
+	r := &Request{
+		reqMethod: http.MethodPost,
+		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s/createEphemeral", i.project, i.name),
+		reqCt:     ct,
+		handle: func(resp http.ResponseWriter, req *http.Request) {
+			// Read the body from the request.
+			b, err := ioutil.ReadAll(req.Body)
+			defer req.Body.Close()
+			if err != nil {
+				http.Error(resp, fmt.Errorf("unable to read body: %w", err).Error(), http.StatusBadRequest)
+				return
+			}
+			var eR sqladmin.SslCertsCreateEphemeralRequest
+			err = json.Unmarshal(b, &eR)
+			if err != nil {
+				http.Error(resp, fmt.Errorf("invalid or unexpected json: %w", err).Error(), http.StatusBadRequest)
+				return
+			}
+			// Extract the certificate from the request.
+			bl, _ := pem.Decode([]byte(eR.PublicKey))
+			if bl == nil {
+				http.Error(resp, fmt.Errorf("unable to decode PublicKey: %w", err).Error(), http.StatusBadRequest)
+				return
+			}
+			pubKey, err := x509.ParsePKIXPublicKey(bl.Bytes)
+			if err != nil {
+				http.Error(resp, fmt.Errorf("unable to decode PublicKey: %w", err).Error(), http.StatusBadRequest)
+				return
+			}
+
+			// Create a signed cert from the requests public key.
+			cert := &x509.Certificate{ // TODO: Validate this format vs API
+				SerialNumber: &big.Int{},
+				Subject: pkix.Name{
+					Country:      []string{"US"},
+					Organization: []string{"Google, Inc"},
+					CommonName:   "Google Cloud SQL Client",
+				},
+				NotBefore:             time.Now(),
+				NotAfter:              time.Now().Add(time.Hour), // 1 hour
+				ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+				KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+				BasicConstraintsValid: true,
+			}
+			certBytes, err := x509.CreateCertificate(rand.Reader, cert, i.cert, pubKey, i.privKey)
+			if err != nil {
+				http.Error(resp, fmt.Errorf("unable to decode PublicKey: %w", err).Error(), http.StatusInternalServerError)
+				return
+			}
+			certPEM := new(bytes.Buffer)
+			pem.Encode(certPEM, &pem.Block{
+				Type:  "CERTIFICATE",
+				Bytes: certBytes,
+			})
+
+			// Return the signed cert to the client.
+			c := sqladmin.SslCert{
+				Cert:             certPEM.String(),
+				CertSerialNumber: cert.SerialNumber.String(),
+				CommonName:       cert.Subject.CommonName,
+				CreateTime:       cert.NotBefore.Format(time.RFC3339),
+				ExpirationTime:   cert.NotAfter.Format(time.RFC3339),
+				Instance:         i.name,
+			}
+			b, err = c.MarshalJSON()
+			if err != nil {
+				http.Error(resp, fmt.Errorf("unable to encode response: %w", err).Error(), http.StatusInternalServerError)
+				return
+			}
+			resp.WriteHeader(http.StatusOK)
 			resp.Write(b)
 		},
 	}
