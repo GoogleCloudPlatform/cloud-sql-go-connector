@@ -39,7 +39,7 @@ type CloudSQLInst struct {
 
 // NewCloudSQLInst returns a CloudSQLInst object for configuring mocks.
 func NewCloudSQLInst(project, region, name string) (CloudSQLInst, error) {
-	// TODO: consider options for this? 
+	// TODO: consider options for this?
 	privKey, cert, err := generateInstanceCerts()
 	if err != nil {
 		return CloudSQLInst{}, err
