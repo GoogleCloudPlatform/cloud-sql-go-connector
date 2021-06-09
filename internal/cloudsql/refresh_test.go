@@ -33,8 +33,13 @@ func TestFetchMetadata(t *testing.T) {
 		t.Fatalf("%s", err)
 	}
 
-	mc, url, cleanup := mock.HttpClient(
-		mock.InstanceGetSuccess(cn.project, cn.region, cn.name, 1),
+	mI, err := mock.NewCloudSQLInstance(cn.project, cn.region, cn.name)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(mI, 1),
 	)
 	defer func() {
 		if err := cleanup(); err != nil {
