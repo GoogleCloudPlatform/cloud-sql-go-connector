@@ -23,10 +23,10 @@ import (
 	"time"
 )
 
-// CloudSQLInst represents settings for a specific Cloud SQL instance.
+// FakeCSQLInstance represents settings for a specific Cloud SQL instance.
 //
-// Use NewCloudSQLInstance to instantiate.
-type CloudSQLInst struct {
+// Use NewFakeCSQLInstance to instantiate.
+type FakeCSQLInstance struct {
 	project string
 	region  string
 	name    string
@@ -37,15 +37,15 @@ type CloudSQLInst struct {
 	cert    *x509.Certificate
 }
 
-// NewCloudSQLInst returns a CloudSQLInst object for configuring mocks.
-func NewCloudSQLInst(project, region, name string) (CloudSQLInst, error) {
+// NewFakeCSQLInstance returns a CloudSQLInst object for configuring mocks.
+func NewFakeCSQLInstance(project, region, name string) (FakeCSQLInstance, error) {
 	// TODO: consider options for this?
 	privKey, cert, err := generateInstanceCerts()
 	if err != nil {
-		return CloudSQLInst{}, err
+		return FakeCSQLInstance{}, err
 	}
 
-	c := CloudSQLInst{
+	c := FakeCSQLInstance{
 		project:   project,
 		region:    region,
 		name:      name,

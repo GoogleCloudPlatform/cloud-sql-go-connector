@@ -15,6 +15,8 @@
 // +build !skip_e2e
 // +build !skip_postgres
 
+//go:build !skip_e2e && !skip_postgres
+
 // Package tests contains end to end tests for verifying compatibility of examples with external resources.
 package cloudsqlconn_test
 

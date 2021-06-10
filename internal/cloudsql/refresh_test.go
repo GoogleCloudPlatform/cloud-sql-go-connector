@@ -33,7 +33,7 @@ func TestFetchMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
-	inst, err := mock.NewCloudSQLInst(cn.project, cn.region, cn.name)
+	inst, err := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
@@ -66,7 +66,7 @@ func TestFetchEphemeralCert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
-	inst, err := mock.NewCloudSQLInst(cn.project, cn.region, cn.name)
+	inst, err := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
 	if err != nil {
 		t.Fatalf("%s", err)
 	}

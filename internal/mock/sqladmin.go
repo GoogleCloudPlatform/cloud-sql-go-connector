@@ -81,7 +81,7 @@ type Request struct {
 	handle func(resp http.ResponseWriter, req *http.Request)
 }
 
-// matches returns true if a given http.Request should be handled by this MockRequest.
+// matches returns true if a given http.Request should be handled by this Request.
 func (r *Request) matches(hR *http.Request) bool {
 	r.Lock()
 	defer r.Unlock()
@@ -98,11 +98,11 @@ func (r *Request) matches(hR *http.Request) bool {
 	return true
 }
 
-// InstanceGetSuccess returns a MockRequest that responds to the `instance.get` SQLAdmin
+// InstanceGetSuccess returns a Request that responds to the `instance.get` SQLAdmin
 // endpoint. It responds with a "StatusOK" and a DatabaseInstance object.
 //
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
-func InstanceGetSuccess(i CloudSQLInst, ct int) *Request {
+func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 	// Turn instance keys/certs into PEM encoded versions needed for response
 	certBytes, err := x509.CreateCertificate(
 		rand.Reader, i.cert, i.cert, &i.privKey.PublicKey, i.privKey)
@@ -148,12 +148,12 @@ func InstanceGetSuccess(i CloudSQLInst, ct int) *Request {
 	return r
 }
 
-// CreateEphemeralSuccess returns a MockRequest that responds to the
+// CreateEphemeralSuccess returns a Request that responds to the
 // `sslCerts.createEphemeral` SQL Admin endpoint. It responds with a "StatusOK" and a
 // SslCerts object.
 //
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/sslCerts/createEphemeral
-func CreateEphemeralSuccess(i CloudSQLInst, ct int) *Request {
+func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 	r := &Request{
 		reqMethod: http.MethodPost,
 		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s/createEphemeral", i.project, i.name),
@@ -184,7 +184,7 @@ func CreateEphemeralSuccess(i CloudSQLInst, ct int) *Request {
 				return
 			}
 
-			// Create a signed cert from the requests public key.
+			// Create a signed cert from the client's public key.
 			cert := &x509.Certificate{ // TODO: Validate this format vs API
 				SerialNumber: &big.Int{},
 				Subject: pkix.Name{
