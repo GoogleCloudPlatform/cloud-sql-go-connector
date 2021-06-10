@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: tests
-on: 
+on:
   pull_request:
   push:
     branches:
@@ -34,4 +34,4 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Run tests
-        run: go test -v -cover --tags=skip_e2e ./...
+        run: go test -v -race -cover --tags=skip_e2e ./...
