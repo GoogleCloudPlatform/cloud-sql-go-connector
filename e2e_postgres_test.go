@@ -12,8 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// +build !skip_e2e
+// +build !skip_postgres
+
+//go:build !skip_e2e && !skip_postgres
+
 // Package tests contains end to end tests for verifying compatibility of examples with external resources.
-package tests
+package cloudsqlconn_test
 
 import (
 	"context"

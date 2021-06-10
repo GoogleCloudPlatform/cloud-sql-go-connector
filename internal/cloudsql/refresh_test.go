@@ -20,19 +20,37 @@ import (
 	"crypto/rsa"
 	"testing"
 
+	"cloud.google.com/cloudsqlconn/internal/mock"
+	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 func TestFetchMetadata(t *testing.T) {
 	ctx := context.Background()
-	client, err := sqladmin.NewService(ctx)
-	if err != nil {
-		t.Fatalf("client init failed: %s", err)
-	}
 
-	cn, err := parseConnName(instConnName)
+	// define some test instance settings
+	cn, err := parseConnName("my-proj:my-region:my-inst")
 	if err != nil {
 		t.Fatalf("%s", err)
+	}
+	inst, err := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+
+	// mock expected requests
+	mc, url, cleanup := mock.HTTPClient(
+		mock.InstanceGetSuccess(inst, 1),
+	)
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	client, err := sqladmin.NewService(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("client init failed: %s", err)
 	}
 
 	_, err = fetchMetadata(ctx, client, cn)
@@ -43,21 +61,36 @@ func TestFetchMetadata(t *testing.T) {
 func TestFetchEphemeralCert(t *testing.T) {
 	ctx := context.Background()
 
-	client, err := sqladmin.NewService(ctx)
+	// define some test instance settings
+	cn, err := parseConnName("my-proj:my-region:my-inst")
 	if err != nil {
-		t.Fatalf("client init failed: %s", err)
+		t.Fatalf("%s", err)
 	}
-	inst, err := parseConnName(instConnName)
+	inst, err := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
 
+	// mock expected requests
+	mc, url, cleanup := mock.HTTPClient(
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	client, err := sqladmin.NewService(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	if err != nil {
+		t.Fatalf("client init failed: %s", err)
+	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate keys: %v", err)
 	}
 
-	_, err = fetchEphemeralCert(ctx, client, inst, key)
+	_, err = fetchEphemeralCert(ctx, client, cn, key)
 	if err != nil {
 		t.Fatalf("failed to fetch ephemeral cert: %v", err)
 	}

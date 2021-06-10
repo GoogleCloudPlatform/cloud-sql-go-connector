@@ -67,7 +67,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 		}
 	}
 	if len(ipAddrs) == 0 {
-		return metadata{}, fmt.Errorf("unsupported instance - contains no valid ip addresses")
+		return metadata{}, fmt.Errorf("cannot connect to instance - it has no supported IP addresses")
 	}
 
 	// parse the server-side CA certificate
