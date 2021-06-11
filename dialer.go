@@ -59,7 +59,9 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
-	lock           sync.RWMutex
+	lock sync.RWMutex
+	// instances map connection names (e.g., my-project:us-central1:my-instance)
+	// to *cloudsql.Instance types.
 	instances      map[string]*cloudsql.Instance
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration

@@ -33,10 +33,7 @@ func TestFetchMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
-	inst, err := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
-	if err != nil {
-		t.Fatalf("%s", err)
-	}
+	inst := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
 
 	// mock expected requests
 	mc, url, cleanup := mock.HTTPClient(
@@ -66,10 +63,7 @@ func TestFetchEphemeralCert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
-	inst, err := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
-	if err != nil {
-		t.Fatalf("%s", err)
-	}
+	inst := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
 
 	// mock expected requests
 	mc, url, cleanup := mock.HTTPClient(

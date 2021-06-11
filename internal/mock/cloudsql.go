@@ -15,10 +15,15 @@
 package mock
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
+	"fmt"
 	"math/big"
 	"time"
 )
@@ -30,45 +35,43 @@ type FakeCSQLInstance struct {
 	project string
 	region  string
 	name    string
-
-	dbVersion string
-
-	privKey *rsa.PrivateKey
+	version string
+	key     *rsa.PrivateKey
 	cert    *x509.Certificate
+	tlsCert tls.Certificate
 }
 
 // NewFakeCSQLInstance returns a CloudSQLInst object for configuring mocks.
-func NewFakeCSQLInstance(project, region, name string) (FakeCSQLInstance, error) {
+func NewFakeCSQLInstance(project, region, name string) FakeCSQLInstance {
 	// TODO: consider options for this?
-	privKey, cert, err := generateInstanceCerts()
+	key, cert, tlsCert, err := generateCerts(project, name)
 	if err != nil {
-		return FakeCSQLInstance{}, err
+		panic(err)
 	}
 
-	c := FakeCSQLInstance{
-		project:   project,
-		region:    region,
-		name:      name,
-		dbVersion: "POSTGRES_12", // default of no particular importance
-		privKey:   privKey,
-		cert:      cert,
+	return FakeCSQLInstance{
+		project: project,
+		region:  region,
+		name:    name,
+		version: "POSTGRES_12", // default of no particular importance
+		key:     key,
+		cert:    cert,
+		tlsCert: tlsCert,
 	}
-	return c, nil
 }
 
-// generateInstanceCerts returns a key and cert for representing a Cloud SQL instance.
-func generateInstanceCerts() (*rsa.PrivateKey, *x509.Certificate, error) {
-	privKey, err := rsa.GenerateKey(rand.Reader, 4096)
+// generateCerts generates a private key, an X.509 certificate, and a TLS
+// certificate for a particular fake Cloud SQL database instance.
+func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, tls.Certificate, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, tls.Certificate{}, err
 	}
 
 	cert := &x509.Certificate{
 		SerialNumber: &big.Int{},
 		Subject: pkix.Name{
-			Country:      []string{"US"},
-			Organization: []string{"Google, Inc"},
-			CommonName:   "Google Cloud SQL Server CA",
+			CommonName: fmt.Sprintf("%s:%s", project, name),
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(0, 0, 1),
@@ -77,6 +80,57 @@ func generateInstanceCerts() (*rsa.PrivateKey, *x509.Certificate, error) {
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 	}
+	certBytes, err := x509.CreateCertificate(
+		rand.Reader, cert, cert, &key.PublicKey, key)
+	if err != nil {
+		return nil, nil, tls.Certificate{}, err
+	}
 
-	return privKey, cert, nil
+	caPEM := &bytes.Buffer{}
+	pem.Encode(caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
+
+	caKeyPEM := &bytes.Buffer{}
+	pem.Encode(caKeyPEM, &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+
+	serverCert, err := tls.X509KeyPair(caPEM.Bytes(), caKeyPEM.Bytes())
+	if err != nil {
+		return nil, nil, tls.Certificate{}, err
+	}
+
+	return key, cert, serverCert, nil
+}
+
+// StartServerProxy starts a fake server proxy and listens on the provided port
+// on all interfaces, configured with TLS as specified by the FakeCSQLInstance.
+// Callers should invoke the returned function to clean up all resources.
+func StartServerProxy(port, resp string, inst FakeCSQLInstance) func() {
+	ln, err := tls.Listen("tcp", ":"+port, &tls.Config{
+		Certificates: []tls.Certificate{inst.tlsCert},
+	})
+	if err != nil {
+		panic(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				conn.Write([]byte(resp))
+				conn.Close()
+			}
+		}
+	}()
+	return func() {
+		ln.Close()
+		cancel()
+	}
 }
