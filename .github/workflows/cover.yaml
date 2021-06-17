@@ -24,25 +24,21 @@ jobs:
         with:
           go-version: "1.16"
 
-      - name: Checkout base
+      - name: Calculate base code coverage
         uses: actions/checkout@v2
         with:
-          ref: env.GITHUB_BASE_REF
-      - name: Calculate base code coverage
+          ref: github.base_ref
         run: |
           go test -coverprofile current_cover.out ./...
           export CUR_COVER=$(go tool cover -func current_cover.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
           echo "::set-env name=CURRENT_COVER::$CUR_COVER"
-    
-      - name: Checkout PR
-        uses: actions/checkout@v2
+
       - name: Calculate PR code coverage
+        uses: actions/checkout@v2
         run: |
           go test -coverprofile pr_cover.out ./...
           export PR_COVER=$(go tool cover -func pr_cover.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
           echo "::set-env name=PR_COVER::$PR_COVER"
 
-      - name: Verify code coverage. If your reading this and the step has failed, please add tests to cover your changes. 
+      - name: Verify code coverage. If your reading this and the step has failed, please add tests to cover your changes.
         run: if [ "$a" -ge "$b" ]; then; exit 1; fi
-          
-      
