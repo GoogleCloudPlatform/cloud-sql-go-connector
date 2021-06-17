@@ -32,7 +32,7 @@ jobs:
         run: |
           go test -coverprofile current_cover.out --tags=skip_e2e ./...
           export CUR_COVER=$(go tool cover -func current_cover.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
-          echo "::set-env name=CURRENT_COVER::$CUR_COVER"
+          echo "CUR_COVER=$CUR_COVER" >> $GITHUB_ENV
 
       - name: Checkout PR branch
         uses: actions/checkout@v2
@@ -40,7 +40,7 @@ jobs:
         run: |
           go test -coverprofile pr_cover.out  --tags=skip_e2e ./...
           export PR_COVER=$(go tool cover -func pr_cover.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
-          echo "::set-env name=PR_COVER::$PR_COVER"
+          echo "PR_COVER=$PR_COVER" >> $GITHUB_ENV
 
       - name: Verify code coverage. If your reading this and the step has failed, please add tests to cover your changes.
-        run: if [ "$a" -ge "$b" ]; then; exit 1; fi
+        run: if [ "${{ env.PR_COVER }}" -ge "${{ env.CUR_COVER }}"  ]; then exit 1; fi
