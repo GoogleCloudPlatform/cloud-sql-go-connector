@@ -30,7 +30,7 @@ jobs:
           ref: ${{ github.base_ref }}
       - name: Calculate base code coverage
         run: |
-          go test -coverprofile current_cover.out ./...
+          go test -coverprofile current_cover.out --tags=skip_e2e ./...
           export CUR_COVER=$(go tool cover -func current_cover.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
           echo "::set-env name=CURRENT_COVER::$CUR_COVER"
 
@@ -38,7 +38,7 @@ jobs:
         uses: actions/checkout@v2
       - name: Calculate PR code coverage
         run: |
-          go test -coverprofile pr_cover.out ./...
+          go test -coverprofile pr_cover.out  --tags=skip_e2e ./...
           export PR_COVER=$(go tool cover -func pr_cover.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
           echo "::set-env name=PR_COVER::$PR_COVER"
 
