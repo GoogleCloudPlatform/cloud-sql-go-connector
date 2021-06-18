@@ -2,18 +2,18 @@
 *Warning*: This project is experimental, and is not an officially supported 
 Google product.
 
-The _Cloud SQL Go Connector_ provides IAM authorization to an app's connections 
-to a Cloud SQL instance. It provides connection level authorization only; it 
-_does not_ provide a network path to an instance that doesn't already exist 
-(ie. you will still be unable to connect via Private IP without access to the 
-correct VPC). For more information, see 
-[About the Cloud SQL Auth proxy][about-proxy].
+The _Cloud SQL Go Connector_ provides strong encryption and IAM authorization 
+to an application's connections to a Cloud SQL instance. It provides connection 
+level authorization only; it _does not_ provide a network path to an instance 
+that doesn't already exist (i.e. you will still be unable to connect to an 
+instance's Private IP without access to the correct VPC). For more information
+see [About the Cloud SQL Auth proxy][about-proxy].
 
 [about-proxy]: https://cloud.google.com/sql/docs/mysql/sql-proxy
 
 The _Cloud SQL Go Connector_ is an experimental new version of the 
-[Cloud SQL proxy dialer](). It's API is considered unstable and may change in 
-the future. Please use at your own risk. 
+[Cloud SQL proxy dialer](dialer). Its API is considered unstable and may change 
+in the future. Please use at your own risk. 
 
 [proxy-dialer]: https://github.com/GoogleCloudPlatform/cloudsql-proxy/tree/main/proxy#cloud-sql-proxy-dialer-for-go
 
@@ -32,8 +32,8 @@ replace cloud.google.com/cloudsqlconn => ../cloud-sql-go-connector
 ## Usage 
 
 This package provides several functions for authorizing and encrypting 
-connections on your behalf. Typically, these functions will pass these 
-connections to the driver while interacting with your database.
+connections. These functions can be used with your database driver to connect to
+your Cloud SQL instance.
 
 The instance connection name for your Cloud SQL instance is always in the 
 format "project:region:instance".
@@ -44,18 +44,19 @@ This repo uses the [Application Default Credentials (ADC)][adc] strategy for
 providing credentials. Please see the [golang.org/x/oauth2/google][google-auth] 
 documentation for more information in how these credentials are sourced. 
 
-// TODO: Mention customizing source
+To explictly set a specific source for the Credentials to use, see [Using DialerOptions](#using-dialeroptions) below.
 
 [adc]: https://cloud.google.com/docs/authentication
 [google-auth]: https://pkg.go.dev/golang.org/x/oauth2/google#hdr-Credentials
 
 ### Using the default Dialer
 
-If you don't need to customize your Dialer's behavior, it's convenient to use 
-the package's "Dial" option, which initialized a default dialer for you.  
-<details>
-  <summary>pgx for Postgres</summary>
-   Use the [pgConn.DialFunc field][pgconn-cfg] to create connections:
+If you don't need to customize your Dialer's behavior, it is convenient to use 
+the package's "Dial" option, which initializes a default dialer for you.  
+
+#### pgx for Postgres
+
+  Use the [pgConn.DialFunc field][pgconn-cfg] to create connections:
 
   ```go
   // Configure the driver to connect to the database
@@ -77,13 +78,13 @@ the package's "Dial" option, which initialized a default dialer for you.
   }
   defer conn.Close(ctx)
   ```
-[pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
-</details>
+  [pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
+
 
 
 ### Using DialerOptions
 
-If you need to customize something about the `Dialer`, can and initialize one 
+If you need to customize something about the `Dialer`, you can initialize
 directly with `NewDialer`:
 
 ```go
