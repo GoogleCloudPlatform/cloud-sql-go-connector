@@ -30,7 +30,7 @@ jobs:
           ref: ${{ github.base_ref }}
       - name: Calculate base code coverage
         run: |
-          go test --tags=skip_e2e -coverprofile current_cover.out ./...
+          go test --tags=skip_e2e -coverprofile current_cover.out ./... || true
           export CUR_COVER=$(go tool cover -func current_cover.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
           echo "CUR_COVER=$CUR_COVER" >> $GITHUB_ENV
 
@@ -38,15 +38,13 @@ jobs:
         uses: actions/checkout@v2
       - name: Calculate PR code coverage
         run: |
-          go test --tags=skip_e2e -coverprofile pr_cover.out ./...
-          export COV_OUTPUT=$(go tool cover -func pr_cover.out)
-          export PR_COVER=$(echo $COV_OUTPUT | grep total | awk '{print substr($3, 1, length($3)-1)}')
+          go test --tags=skip_e2e -coverprofile pr_cover.out ./... || true
+          export PR_COVER=$(go tool cover -func pr_cover.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
           echo "PR_COVER=$PR_COVER" >> $GITHUB_ENV
-          echo "COV_OUTPUT=$COV_OUTPUT" >> $GITHUB_ENV
 
       - name: Verify code coverage. If your reading this and the step has failed, please add tests to cover your changes.
         run: |
+          go tool cover -func pr_cover.out 
           if [ "${{ env.PR_COVER }}" -ge "${{ env.CUR_COVER }}"  ]; then 
-            echo $COV_OUTPUT;
             exit 1; 
           fi
