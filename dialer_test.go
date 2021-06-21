@@ -2,7 +2,7 @@ package cloudsqlconn
 
 import (
 	"context"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"testing"
 
@@ -51,7 +51,7 @@ func TestDialer(t *testing.T) {
 	}
 	defer conn.Close()
 
-	data, err := io.ReadAll(conn)
+	data, err := ioutil.ReadAll(conn)
 	if err != nil {
 		t.Fatalf("expected ReadAll to succeed, got error %v", err)
 	}
