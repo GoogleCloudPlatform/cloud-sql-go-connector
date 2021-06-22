@@ -103,12 +103,26 @@ func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, tl
 	return key, cert, serverCert, nil
 }
 
+type ServerProxyConfig struct {
+	// Response is the value the proxy will write back to the client.
+	Response string
+	// Instance is the Fake Cloud SQL instance used for TLS configuration.
+	Instance FakeCSQLInstance
+	// InvalidCert determines if the server proxy should start up with a known
+	// bad configuration.
+	InvalidCert bool
+}
+
 // StartServerProxy starts a fake server proxy and listens on the provided port
 // on all interfaces, configured with TLS as specified by the FakeCSQLInstance.
 // Callers should invoke the returned function to clean up all resources.
-func StartServerProxy(port, resp string, inst FakeCSQLInstance) func() {
-	ln, err := tls.Listen("tcp", ":"+port, &tls.Config{
-		Certificates: []tls.Certificate{inst.tlsCert},
+func StartServerProxy(config ServerProxyConfig) func() {
+	cert := config.Instance.tlsCert
+	if config.InvalidCert {
+		cert = tls.Certificate{}
+	}
+	ln, err := tls.Listen("tcp", ":3307", &tls.Config{
+		Certificates: []tls.Certificate{cert},
 	})
 	if err != nil {
 		panic(err)
@@ -124,7 +138,7 @@ func StartServerProxy(port, resp string, inst FakeCSQLInstance) func() {
 				if err != nil {
 					return
 				}
-				conn.Write([]byte(resp))
+				conn.Write([]byte(config.Response))
 				conn.Close()
 			}
 		}
