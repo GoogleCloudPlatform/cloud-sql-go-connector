@@ -103,6 +103,7 @@ func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, tl
 	return key, cert, serverCert, nil
 }
 
+// ServerProxyConfig holds configuration values for the proxy.
 type ServerProxyConfig struct {
 	// Response is the value the proxy will write back to the client.
 	Response string
