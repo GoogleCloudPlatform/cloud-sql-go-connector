@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/cloudsqlconn/internal/mock"
 	"google.golang.org/api/option"
@@ -47,10 +48,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 		mock.InstanceGetSuccess(inst, 1),
 		mock.CreateEphemeralSuccess(inst, 1),
 	)
-	stop := mock.StartServerProxy(mock.ServerProxyConfig{
-		Response: "server-response",
-		Instance: inst,
-	})
+	stop := mock.StartServerProxy(t, inst)
 	defer func() {
 		stop()
 		if err := cleanup(); err != nil {
@@ -74,7 +72,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected ReadAll to succeed, got error %v", err)
 	}
-	if string(data) != "server-response" {
+	if string(data) != "my-instance" {
 		t.Fatalf("expected known response from the server, but got %v", string(data))
 	}
 }
@@ -87,15 +85,16 @@ func TestDialerInstantiationErrors(t *testing.T) {
 }
 
 func errorContains(err error, want string) bool {
+	if err == nil {
+		return false
+	}
 	return strings.Contains(err.Error(), want)
 }
 
 func TestDialWithAdminAPIErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	mc, url, cleanup := mock.HTTPClient()
-	stop := mock.StartServerProxy(mock.ServerProxyConfig{
-		Instance: inst,
-	})
+	stop := mock.StartServerProxy(t, inst)
 	defer func() {
 		stop()
 		if err := cleanup(); err != nil {
@@ -160,10 +159,8 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		t.Fatalf("expected Dial to fail with connection error")
 	}
 
-	stop := mock.StartServerProxy(mock.ServerProxyConfig{
-		Instance:    inst,
-		InvalidCert: true,
-	})
+	inst.Cert.NotAfter = time.Now().Add(-time.Hour)
+	stop := mock.StartServerProxy(t, inst)
 	defer stop()
 
 	// when TLS handshake fails

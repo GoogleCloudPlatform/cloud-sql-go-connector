@@ -105,7 +105,7 @@ func (r *Request) matches(hR *http.Request) bool {
 func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 	// Turn instance keys/certs into PEM encoded versions needed for response
 	certBytes, err := x509.CreateCertificate(
-		rand.Reader, i.cert, i.cert, &i.key.PublicKey, i.key)
+		rand.Reader, i.Cert, i.Cert, &i.Key.PublicKey, i.Key)
 	if err != nil {
 		panic(err)
 	}
@@ -198,7 +198,7 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 				KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 				BasicConstraintsValid: true,
 			}
-			certBytes, err := x509.CreateCertificate(rand.Reader, cert, i.cert, pubKey, i.key)
+			certBytes, err := x509.CreateCertificate(rand.Reader, cert, i.Cert, pubKey, i.Key)
 			if err != nil {
 				http.Error(resp, fmt.Errorf("unable to decode PublicKey: %w", err).Error(), http.StatusInternalServerError)
 				return

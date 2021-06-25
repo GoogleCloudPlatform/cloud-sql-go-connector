@@ -25,6 +25,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"testing"
 	"time"
 )
 
@@ -36,15 +37,14 @@ type FakeCSQLInstance struct {
 	region    string
 	name      string
 	dbVersion string
-	key       *rsa.PrivateKey
-	cert      *x509.Certificate
-	tlsCert   tls.Certificate
+	Key       *rsa.PrivateKey
+	Cert      *x509.Certificate
 }
 
 // NewFakeCSQLInstance returns a CloudSQLInst object for configuring mocks.
 func NewFakeCSQLInstance(project, region, name string) FakeCSQLInstance {
 	// TODO: consider options for this?
-	key, cert, tlsCert, err := generateCerts(project, name)
+	key, cert, err := generateCerts(project, name)
 	if err != nil {
 		panic(err)
 	}
@@ -54,18 +54,17 @@ func NewFakeCSQLInstance(project, region, name string) FakeCSQLInstance {
 		region:    region,
 		name:      name,
 		dbVersion: "POSTGRES_12", // default of no particular importance
-		key:       key,
-		cert:      cert,
-		tlsCert:   tlsCert,
+		Key:       key,
+		Cert:      cert,
 	}
 }
 
 // generateCerts generates a private key, an X.509 certificate, and a TLS
 // certificate for a particular fake Cloud SQL database instance.
-func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, tls.Certificate, error) {
+func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return nil, nil, tls.Certificate{}, err
+		return nil, nil, err
 	}
 
 	cert := &x509.Certificate{
@@ -80,10 +79,18 @@ func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, tl
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 	}
+
+	return key, cert, nil
+}
+
+// StartServerProxy starts a fake server proxy and listens on the provided port
+// on all interfaces, configured with TLS as specified by the FakeCSQLInstance.
+// Callers should invoke the returned function to clean up all resources.
+func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 	certBytes, err := x509.CreateCertificate(
-		rand.Reader, cert, cert, &key.PublicKey, key)
+		rand.Reader, i.Cert, i.Cert, &i.Key.PublicKey, i.Key)
 	if err != nil {
-		return nil, nil, tls.Certificate{}, err
+		t.Fatalf("failed to create certificate: %v", err)
 	}
 
 	caPEM := &bytes.Buffer{}
@@ -92,41 +99,18 @@ func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, tl
 	caKeyPEM := &bytes.Buffer{}
 	pem.Encode(caKeyPEM, &pem.Block{
 		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
+		Bytes: x509.MarshalPKCS1PrivateKey(i.Key),
 	})
 
 	serverCert, err := tls.X509KeyPair(caPEM.Bytes(), caKeyPEM.Bytes())
 	if err != nil {
-		return nil, nil, tls.Certificate{}, err
-	}
-
-	return key, cert, serverCert, nil
-}
-
-// ServerProxyConfig holds configuration values for the proxy.
-type ServerProxyConfig struct {
-	// Response is the value the proxy will write back to the client.
-	Response string
-	// Instance is the Fake Cloud SQL instance used for TLS configuration.
-	Instance FakeCSQLInstance
-	// InvalidCert determines if the server proxy should start up with a known
-	// bad configuration.
-	InvalidCert bool
-}
-
-// StartServerProxy starts a fake server proxy and listens on the provided port
-// on all interfaces, configured with TLS as specified by the FakeCSQLInstance.
-// Callers should invoke the returned function to clean up all resources.
-func StartServerProxy(config ServerProxyConfig) func() {
-	cert := config.Instance.tlsCert
-	if config.InvalidCert {
-		cert = tls.Certificate{}
+		t.Fatalf("failed to create X.509 Key Pair: %v", err)
 	}
 	ln, err := tls.Listen("tcp", ":3307", &tls.Config{
-		Certificates: []tls.Certificate{cert},
+		Certificates: []tls.Certificate{serverCert},
 	})
 	if err != nil {
-		panic(err)
+		t.Fatalf("failed to start listener: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -137,9 +121,10 @@ func StartServerProxy(config ServerProxyConfig) func() {
 			default:
 				conn, err := ln.Accept()
 				if err != nil {
+					t.Logf("fake server proxy will accept after error: %v", err)
 					return
 				}
-				conn.Write([]byte(config.Response))
+				conn.Write([]byte(i.name))
 				conn.Close()
 			}
 		}
