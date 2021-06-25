@@ -34,4 +34,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Run tests
-        run: go test -v -race -cover --tags=skip_e2e ./...
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS=internal/testdata/key.json
+          go test -v -race -cover --tags=skip_e2e ./...
