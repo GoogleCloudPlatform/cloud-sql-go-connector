@@ -32,13 +32,13 @@ import (
 //
 // Use NewFakeCSQLInstance to instantiate.
 type FakeCSQLInstance struct {
-	project string
-	region  string
-	name    string
-	version string
-	key     *rsa.PrivateKey
-	cert    *x509.Certificate
-	tlsCert tls.Certificate
+	project   string
+	region    string
+	name      string
+	dbVersion string
+	key       *rsa.PrivateKey
+	cert      *x509.Certificate
+	tlsCert   tls.Certificate
 }
 
 // NewFakeCSQLInstance returns a CloudSQLInst object for configuring mocks.
@@ -50,13 +50,13 @@ func NewFakeCSQLInstance(project, region, name string) FakeCSQLInstance {
 	}
 
 	return FakeCSQLInstance{
-		project: project,
-		region:  region,
-		name:    name,
-		version: "POSTGRES_12", // default of no particular importance
-		key:     key,
-		cert:    cert,
-		tlsCert: tlsCert,
+		project:   project,
+		region:    region,
+		name:      name,
+		dbVersion: "POSTGRES_12", // default of no particular importance
+		key:       key,
+		cert:      cert,
+		tlsCert:   tlsCert,
 	}
 }
 

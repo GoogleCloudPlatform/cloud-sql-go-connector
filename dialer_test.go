@@ -1,7 +1,22 @@
+// Copyright 2020 Google LLC
+
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+
+//     https://www.apache.org/licenses/LICENSE-2.0
+
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package cloudsqlconn
 
 import (
 	"context"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -14,7 +29,7 @@ import (
 
 // replaceSQLAdminClient patches the Dialer's SQL Admin API client with one that
 // uses the provided HTTP client and endpoint.
-func replaceSQLAdminService(d *Dialer, client *http.Client, endpoint string) {
+func newMockService(client *http.Client, endpoint string) *sqladmin.Service {
 	svc, err := sqladmin.NewService(
 		context.Background(),
 		option.WithHTTPClient(client),
@@ -23,7 +38,7 @@ func replaceSQLAdminService(d *Dialer, client *http.Client, endpoint string) {
 	if err != nil {
 		panic(err)
 	}
-	d.sqladmin = svc
+	return svc
 }
 
 func TestDialerCanConnectToInstance(t *testing.T) {
@@ -47,7 +62,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
-	replaceSQLAdminService(d, mc, url)
+	d.sqladmin = newMockService(mc, url)
 
 	conn, err := d.Dial(context.Background(), "my-project:my-region:my-instance", WithPublicIP())
 	if err != nil {
@@ -83,14 +98,16 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	})
 	defer func() {
 		stop()
-		_ = cleanup() // skip mock verification of HTTP methods
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
 	}()
 
 	d, err := NewDialer(context.Background(), WithDefaultDialOptions(WithPublicIP()))
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
-	replaceSQLAdminService(d, mc, url)
+	d.sqladmin = newMockService(mc, url)
 
 	// instance name is bad
 	_, err = d.Dial(context.Background(), "bad-instance-name")
@@ -103,7 +120,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 
 	// context is canceled
 	_, err = d.Dial(ctx, "my-project:my-region:my-instance")
-	if !errorContains(err, "context canceled") {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected Dial to fail with canceled context, but it succeeded.")
 	}
 
@@ -124,7 +141,12 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
-	replaceSQLAdminService(d, mc, url)
+	d.sqladmin = newMockService(mc, url)
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
 
 	// when failing to find private IP for public-only instance
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance", WithPrivateIP())
@@ -142,10 +164,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		Instance:    inst,
 		InvalidCert: true,
 	})
-	defer func() {
-		stop()
-		_ = cleanup() // skip mock verification of HTTP methods
-	}()
+	defer stop()
 
 	// when TLS handshake fails
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")

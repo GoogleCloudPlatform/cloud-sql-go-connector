@@ -118,7 +118,7 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 	db := &sqladmin.DatabaseInstance{
 		BackendType:     "SECOND_GEN",
 		ConnectionName:  fmt.Sprintf("%s:%s:%s", i.project, i.region, i.name),
-		DatabaseVersion: i.version,
+		DatabaseVersion: i.dbVersion,
 		Project:         i.project,
 		Region:          i.region,
 		Name:            i.name,
