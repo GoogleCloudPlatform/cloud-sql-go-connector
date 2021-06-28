@@ -27,7 +27,17 @@ import (
 	"math/big"
 	"testing"
 	"time"
+
+	"golang.org/x/oauth2"
 )
+
+// EmptyTokenSource is a oauth2.TokenSource that returns empty tokens.
+type EmptyTokenSource struct{}
+
+// Token provides an empty oauth2.Token.
+func (EmptyTokenSource) Token() (*oauth2.Token, error) {
+	return &oauth2.Token{}, nil
+}
 
 // FakeCSQLInstance represents settings for a specific Cloud SQL instance.
 //

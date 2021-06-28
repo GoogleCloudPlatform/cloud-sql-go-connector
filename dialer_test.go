@@ -56,7 +56,10 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 		}
 	}()
 
-	d, err := NewDialer(context.Background(), WithDefaultDialOptions(WithPublicIP()))
+	d, err := NewDialer(context.Background(),
+		WithDefaultDialOptions(WithPublicIP()),
+		WithTokenSource(mock.EmptyTokenSource{}),
+	)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
@@ -102,7 +105,10 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 		}
 	}()
 
-	d, err := NewDialer(context.Background(), WithDefaultDialOptions(WithPublicIP()))
+	d, err := NewDialer(context.Background(),
+		WithDefaultDialOptions(WithPublicIP()),
+		WithTokenSource(mock.EmptyTokenSource{}),
+	)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
@@ -136,7 +142,10 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		mock.InstanceGetSuccess(inst, 2),
 		mock.CreateEphemeralSuccess(inst, 2),
 	)
-	d, err := NewDialer(context.Background(), WithDefaultDialOptions(WithPublicIP()))
+	d, err := NewDialer(context.Background(),
+		WithDefaultDialOptions(WithPublicIP()),
+		WithTokenSource(mock.EmptyTokenSource{}),
+	)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
