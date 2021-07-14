@@ -59,7 +59,9 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
-	lock           sync.RWMutex
+	lock sync.RWMutex
+	// instances map connection names (e.g., my-project:us-central1:my-instance)
+	// to *cloudsql.Instance types.
 	instances      map[string]*cloudsql.Instance
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
@@ -156,10 +158,10 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if err := tlsConn.Handshake(); err != nil {
 		// refresh the instance info in case it caused the handshake failure
 		i.ForceRefresh()
-		tlsConn.Close()
+		_ = tlsConn.Close() // best effort close attempt
 		return nil, fmt.Errorf("handshake failed: %w", err)
 	}
-	return tlsConn, err
+	return tlsConn, nil
 }
 
 func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
