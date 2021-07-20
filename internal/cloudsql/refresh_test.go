@@ -32,9 +32,9 @@ func TestRefresh(t *testing.T) {
 	wantIP := "127.0.0.1"
 	wantExpiry := time.Now().Add(time.Hour).UTC().Round(time.Second)
 	wantConnName := "my-project:my-region:my-instance"
-	cn, _ := cloudsql.NewConnName(wantConnName)
+	cn, err := cloudsql.NewConnName(wantConnName)
 	client, cleanup, err := mock.TestClient(
-		cn,
+		"my-project", "my-region", "my-instance",
 		&sqladmin.DatabaseInstance{IpAddresses: []*sqladmin.IpMapping{{IpAddress: "127.0.0.1", Type: "PRIMARY"}}},
 		wantExpiry,
 	)
@@ -68,7 +68,7 @@ func TestRefresh(t *testing.T) {
 func TestRefreshFailsFast(t *testing.T) {
 	cn, _ := cloudsql.NewConnName("my-project:my-region:my-instance")
 	client, cleanup, err := mock.TestClient(
-		cn,
+		"my-project", "my-region", "my-instance",
 		&sqladmin.DatabaseInstance{
 			IpAddresses: []*sqladmin.IpMapping{
 				{IpAddress: "127.0.0.1", Type: "PRIMARY"},

@@ -60,7 +60,7 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
 	lock           sync.RWMutex
-	instances      map[cloudsql.ConnName]*cloudsql.Instance
+	instances      map[string]*cloudsql.Instance
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
 
@@ -107,7 +107,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	}
 
 	d := &Dialer{
-		instances:      make(map[cloudsql.ConnName]*cloudsql.Instance),
+		instances:      make(map[string]*cloudsql.Instance),
 		key:            cfg.rsaKey,
 		refreshTimeout: cfg.refreshTimeout,
 		sqladmin:       client,
@@ -124,12 +124,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		opt(&cfg)
 	}
 
-	cn, err := cloudsql.NewConnName(instance)
-	if err != nil {
-		return nil, err
-	}
-
-	i, err := d.instance(cn)
+	i, err := d.instance(instance)
 	if err != nil {
 		return nil, err
 	}
@@ -163,18 +158,23 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	return tlsConn, nil
 }
 
-func (d *Dialer) instance(cn cloudsql.ConnName) (*cloudsql.Instance, error) {
+func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
 	// Check instance cache
 	d.lock.RLock()
-	i, ok := d.instances[cn]
+	i, ok := d.instances[connName]
 	d.lock.RUnlock()
 	if !ok {
 		d.lock.Lock()
 		// Recheck to ensure instance wasn't created between locks
-		i, ok = d.instances[cn]
+		i, ok = d.instances[connName]
 		if !ok {
-			i = cloudsql.NewInstance(cn, d.sqladmin, d.key, d.refreshTimeout)
-			d.instances[cn] = i
+			var err error
+			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout)
+			if err != nil {
+				d.lock.Unlock()
+				return nil, err
+			}
+			d.instances[connName] = i
 		}
 		d.lock.Unlock()
 	}

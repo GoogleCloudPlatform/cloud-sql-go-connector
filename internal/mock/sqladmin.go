@@ -32,7 +32,6 @@ import (
 	"sync"
 	"time"
 
-	"cloud.google.com/cloudsqlconn/internal/cloudsql"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -269,8 +268,8 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 
 // TestClient is a convenience wrapper that configures a mock HTTP client and
 // sqladmin.Service based on a connection name.
-func TestClient(cn cloudsql.ConnName, db *sqladmin.DatabaseInstance, certExpiry time.Time) (*sqladmin.Service, func() error, error) {
-	inst := NewFakeCSQLInstance(cn.Project, cn.Region, cn.Name)
+func TestClient(proj, reg, name string, db *sqladmin.DatabaseInstance, certExpiry time.Time) (*sqladmin.Service, func() error, error) {
+	inst := NewFakeCSQLInstance(proj, reg, name)
 	mc, url, cleanup := HTTPClient(
 		InstanceGetSuccessWithDatabase(inst, 1, db),
 		CreateEphemeralSuccessWithExpiry(inst, 1, certExpiry),

@@ -57,12 +57,8 @@ func TestParseConnName(t *testing.T) {
 
 func TestConnectInfo(t *testing.T) {
 	wantAddr := "0.0.0.0"
-	cn, err := cloudsql.NewConnName("my-project:my-region:my-instance")
-	if err != nil {
-		t.Fatalf("%s", err)
-	}
 	client, cleanup, err := mock.TestClient(
-		cn,
+		"my-project", "my-region", "my-instance",
 		&sqladmin.DatabaseInstance{IpAddresses: []*sqladmin.IpMapping{{IpAddress: wantAddr, Type: "PRIMARY"}}},
 		time.Now().Add(time.Hour),
 	)
@@ -71,7 +67,10 @@ func TestConnectInfo(t *testing.T) {
 	}
 	defer cleanup()
 
-	i := cloudsql.NewInstance(cn, client, mock.RSAKey, 30*time.Second)
+	i, err := cloudsql.NewInstance("my-project:my-region:my-instance", client, mock.RSAKey, 30*time.Second)
+	if err != nil {
+		t.Fatalf("failed to create instance: %v", err)
+	}
 
 	gotAddr, gotTLSCfg, err := i.ConnectInfo(context.Background(), cloudsql.PublicIP)
 	if err != nil {
@@ -95,9 +94,8 @@ func TestConnectInfo(t *testing.T) {
 }
 
 func TestConnectInfoErrors(t *testing.T) {
-	cn, _ := cloudsql.NewConnName("my-project:my-region:my-instance")
 	client, cleanup, err := mock.TestClient(
-		cn,
+		"my-project", "my-region", "my-instance",
 		&sqladmin.DatabaseInstance{IpAddresses: []*sqladmin.IpMapping{{IpAddress: "127.0.0.1", Type: "PUBLIC"}}},
 		time.Now().Add(time.Hour),
 	)
@@ -106,12 +104,8 @@ func TestConnectInfoErrors(t *testing.T) {
 	}
 	defer cleanup()
 
-	cn, err = cloudsql.NewConnName("my-proj:my-region:my-inst")
-	if err != nil {
-		t.Fatalf("expected valid conn name, got error: %v", err)
-	}
 	// Use a timeout that should fail instantly
-	i := cloudsql.NewInstance(cn, client, mock.RSAKey, 0)
+	i, err := cloudsql.NewInstance("my-project:my-region:my-instance", client, mock.RSAKey, 0)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
