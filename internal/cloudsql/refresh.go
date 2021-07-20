@@ -152,7 +152,8 @@ func createTLSConfig(inst ConnName, m Metadata, cert tls.Certificate) *tls.Confi
 
 // verifyPeerCertFunc creates a VerifyPeerCertificate func that verifies that the peer
 // certificate is in the cert pool. We need to define our own because CloudSQL
-// instances use self-signed certificates as a RootCA.
+// instances use the instance name (e.g., my-project:my-instance) instead of a
+// valid domain name for the certificate's Common Name.
 func verifyPeerCertFunc(cn ConnName, pool *x509.CertPool) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 		if len(rawCerts) == 0 {
