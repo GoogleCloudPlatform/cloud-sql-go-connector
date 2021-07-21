@@ -107,11 +107,7 @@ func TestConnectInfoErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
-	defer func() {
-		if err := cleanup(); err != nil {
-			t.Fatalf("%v", err)
-		}
-	}()
+	defer cleanup()
 
 	// Use a timeout that should fail instantly
 	im, err := NewInstance("my-project:my-region:my-instance", client, mock.RSAKey, 0)
