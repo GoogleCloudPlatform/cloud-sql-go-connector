@@ -127,7 +127,7 @@ func TestRefreshTimeout(t *testing.T) {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 
-	_, _, err = im.ConnectInfo(context.Background(), PublicIP)
+	_, _, err = im.ConnectInfo(ctx, PublicIP)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
