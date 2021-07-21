@@ -94,7 +94,7 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 
-	_, _, err = im.ConnectInfo(ctx)
+	_, _, err = im.ConnectInfo(ctx, PublicIP)
 	if err != nil {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
@@ -127,8 +127,14 @@ func TestRefreshTimeout(t *testing.T) {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 
-	_, _, err = im.ConnectInfo(ctx)
+	_, _, err = im.ConnectInfo(ctx, PublicIP)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
+	}
+
+	// when client asks for wrong IP address type
+	gotAddr, _, err := im.ConnectInfo(ctx, PrivateIP)
+	if err == nil {
+		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", gotAddr)
 	}
 }
