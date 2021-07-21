@@ -133,7 +133,7 @@ func TestRefreshTimeout(t *testing.T) {
 	}
 
 	// when client asks for wrong IP address type
-	gotAddr, _, err := im.ConnectInfo(context.Background(), PrivateIP)
+	gotAddr, _, err := im.ConnectInfo(ctx, PrivateIP)
 	if err == nil {
 		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", gotAddr)
 	}
