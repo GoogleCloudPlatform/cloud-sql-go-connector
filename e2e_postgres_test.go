@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/cloudsqlconn"
+	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v4"
 )
 

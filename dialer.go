@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"cloud.google.com/cloudsqlconn/internal/cloudsql"
+	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"

@@ -18,7 +18,7 @@ import (
 	"crypto/rsa"
 	"time"
 
-	"cloud.google.com/cloudsqlconn/internal/cloudsql"
+	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/oauth2"
 	apiopt "google.golang.org/api/option"
 )
