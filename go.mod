@@ -1,4 +1,4 @@
-module cloud.google.com/cloudsqlconn
+module cloud.google.com/go/cloudsqlconn
 
 go 1.15
 

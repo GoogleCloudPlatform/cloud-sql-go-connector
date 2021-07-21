@@ -20,7 +20,7 @@ import (
 	"crypto/rsa"
 	"testing"
 
-	"cloud.google.com/cloudsqlconn/internal/mock"
+	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
