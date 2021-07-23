@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// EndSpanFunc is a function that ends a span, reporting an error if necessary.
 type EndSpanFunc func(error)
 
 // StartSpan begins a span with the provided name and returns a context and a
