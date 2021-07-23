@@ -101,9 +101,14 @@ func (r *Request) matches(hR *http.Request) bool {
 	return true
 }
 
-// InstanceGetSuccessWithDatabase is like InstanceGetSuccess, but allows a
-// caller to configured the returned Database instance data.
-func InstanceGetSuccessWithDatabase(i FakeCSQLInstance, ct int, db *sqladmin.DatabaseInstance) *Request {
+// InstanceGetSuccess returns a Request that responds to the `instance.get` SQL Admin
+// endpoint. It responds with a "StatusOK" and a DatabaseInstance object.
+//
+// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
+//
+// To Configure the response from the SQL Admin endpoint, use
+// InstanceGetSuccessWithOpts.
+func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 	// Turn instance keys/certs into PEM encoded versions needed for response
 	certBytes, err := x509.CreateCertificate(
 		rand.Reader, i.Cert, i.Cert, &i.Key.PublicKey, i.Key)
@@ -115,32 +120,19 @@ func InstanceGetSuccessWithDatabase(i FakeCSQLInstance, ct int, db *sqladmin.Dat
 		Type:  "CERTIFICATE",
 		Bytes: certBytes,
 	})
-
-	if db.BackendType == "" {
-		db.BackendType = "SECOND_GEN"
+	ipMapping := &sqladmin.IpMapping{IpAddress: i.ipAddr, Type: "PRIMARY"}
+	if i.privateIP {
+		ipMapping.Type = "PRIVATE"
 	}
-	if db.ConnectionName == "" {
-		db.ConnectionName = fmt.Sprintf("%s:%s:%s", i.project, i.region, i.name)
-	}
-	if db.DatabaseVersion == "" {
-		db.DatabaseVersion = i.dbVersion
-	}
-	if db.Project == "" {
-		db.Project = i.project
-	}
-	if db.Region == "" {
-		db.Region = i.region
-	}
-	if db.Name == "" {
-		db.Name = i.name
-	}
-	if db.IpAddresses == nil {
-		db.IpAddresses = []*sqladmin.IpMapping{
-			{IpAddress: "127.0.0.1", Type: "PRIMARY"},
-		}
-	}
-	if db.ServerCaCert == nil {
-		db.ServerCaCert = &sqladmin.SslCert{Cert: certPEM.String()}
+	db := &sqladmin.DatabaseInstance{
+		BackendType:     "SECOND_GEN",
+		ConnectionName:  fmt.Sprintf("%s:%s:%s", i.project, i.region, i.name),
+		DatabaseVersion: i.dbVersion,
+		Project:         i.project,
+		Region:          i.region,
+		Name:            i.name,
+		IpAddresses:     []*sqladmin.IpMapping{ipMapping},
+		ServerCaCert:    &sqladmin.SslCert{Cert: certPEM.String()},
 	}
 
 	r := &Request{
@@ -160,20 +152,12 @@ func InstanceGetSuccessWithDatabase(i FakeCSQLInstance, ct int, db *sqladmin.Dat
 	return r
 }
 
-// InstanceGetSuccess returns a Request that responds to the `instance.get` SQL Admin
-// endpoint. It responds with a "StatusOK" and a DatabaseInstance object.
+// CreateEphemeralSuccess returns a Request that responds to the
+// `sslCerts.createEphemeral` SQL Admin endpoint. It responds with a "StatusOK" and a
+// SslCerts object.
 //
-// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
-//
-// To Configure the response from the SQL Admin endpoint, use
-// InstanceGetSuccessWithOpts.
-func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
-	return InstanceGetSuccessWithDatabase(i, ct, &sqladmin.DatabaseInstance{})
-}
-
-// CreateEphemeralSuccessWithExpiry is like CreateEphemeralSuccess but allows a
-// client to configure the certificate expiration time.
-func CreateEphemeralSuccessWithExpiry(i FakeCSQLInstance, ct int, certExpiry time.Time) *Request {
+// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/sslCerts/createEphemeral
+func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 	r := &Request{
 		reqMethod: http.MethodPost,
 		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s/createEphemeral", i.project, i.name),
@@ -213,7 +197,7 @@ func CreateEphemeralSuccessWithExpiry(i FakeCSQLInstance, ct int, certExpiry tim
 					CommonName:   "Google Cloud SQL Client",
 				},
 				NotBefore:             time.Now(),
-				NotAfter:              certExpiry,
+				NotAfter:              i.Cert.NotAfter,
 				ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 				KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 				BasicConstraintsValid: true,
@@ -250,25 +234,14 @@ func CreateEphemeralSuccessWithExpiry(i FakeCSQLInstance, ct int, certExpiry tim
 	return r
 }
 
-// CreateEphemeralSuccess returns a Request that responds to the
-// `sslCerts.createEphemeral` SQL Admin endpoint. It responds with a "StatusOK" and a
-// SslCerts object.
-//
-// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/sslCerts/createEphemeral
-func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
-	return CreateEphemeralSuccessWithExpiry(i, ct, time.Now().Add(time.Hour))
-}
-
-// TestClient is a convenience wrapper that configures a mock HTTP client and
-// sqladmin.Service based on a connection name.
-func TestClient(proj, reg, name string, db *sqladmin.DatabaseInstance, certExpiry time.Time) (*sqladmin.Service, func() error, error) {
-	inst := NewFakeCSQLInstance(proj, reg, name)
-	mc, url, cleanup := HTTPClient(
-		InstanceGetSuccessWithDatabase(inst, 1, db),
-		CreateEphemeralSuccessWithExpiry(inst, 1, certExpiry),
-	)
+// NewSQLAdminService creates a SQL Admin API service backed by a mock HTTP
+// backend. Callers should use the cleanup function to close down the server. If
+// the cleanup function returns an error, a caller has not exercised all the
+// registered requests.
+func NewSQLAdminService(ctx context.Context, reqs ...*Request) (*sqladmin.Service, func() error, error) {
+	mc, url, cleanup := HTTPClient(reqs...)
 	client, err := sqladmin.NewService(
-		context.Background(),
+		ctx,
 		option.WithHTTPClient(mc),
 		option.WithEndpoint(url),
 	)

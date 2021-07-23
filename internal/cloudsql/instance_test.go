@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 func TestParseConnName(t *testing.T) {
@@ -55,11 +54,13 @@ func TestParseConnName(t *testing.T) {
 }
 
 func TestConnectInfo(t *testing.T) {
+	ctx := context.Background()
 	wantAddr := "0.0.0.0"
-	client, cleanup, err := mock.TestClient(
-		"my-project", "my-region", "my-instance",
-		&sqladmin.DatabaseInstance{IpAddresses: []*sqladmin.IpMapping{{IpAddress: wantAddr, Type: "PRIMARY"}}},
-		time.Now().Add(time.Hour),
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithPublicIP(wantAddr))
+	client, cleanup, err := mock.NewSQLAdminService(
+		ctx,
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
 	)
 	if err != nil {
 		t.Fatalf("%s", err)
@@ -75,7 +76,7 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("failed to create instance: %v", err)
 	}
 
-	gotAddr, gotTLSCfg, err := i.ConnectInfo(context.Background(), PublicIP)
+	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, PublicIP)
 	if err != nil {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
@@ -99,11 +100,7 @@ func TestConnectInfo(t *testing.T) {
 func TestConnectInfoErrors(t *testing.T) {
 	ctx := context.Background()
 
-	client, cleanup, err := mock.TestClient(
-		"my-project", "my-region", "my-instance",
-		&sqladmin.DatabaseInstance{IpAddresses: []*sqladmin.IpMapping{{IpAddress: "127.0.0.1", Type: "PUBLIC"}}},
-		time.Now().Add(time.Hour),
-	)
+	client, cleanup, err := mock.NewSQLAdminService(ctx)
 	if err != nil {
 		t.Fatalf("%s", err)
 	}

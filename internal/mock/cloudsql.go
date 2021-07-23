@@ -47,19 +47,29 @@ type FakeCSQLInstance struct {
 	region    string
 	name      string
 	dbVersion string
+	ipAddr    string
+	privateIP bool
 	Key       *rsa.PrivateKey
 	Cert      *x509.Certificate
 }
 
+type FakeCSQLInstanceOption func(f *FakeCSQLInstance)
+
+func WithPublicIP(addr string) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.ipAddr = addr
+	}
+}
+
 // NewFakeCSQLInstance returns a CloudSQLInst object for configuring mocks.
-func NewFakeCSQLInstance(project, region, name string) FakeCSQLInstance {
+func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceOption) FakeCSQLInstance {
 	// TODO: consider options for this?
 	key, cert, err := generateCerts(project, name)
 	if err != nil {
 		panic(err)
 	}
 
-	return FakeCSQLInstance{
+	f := FakeCSQLInstance{
 		project:   project,
 		region:    region,
 		name:      name,
@@ -67,6 +77,10 @@ func NewFakeCSQLInstance(project, region, name string) FakeCSQLInstance {
 		Key:       key,
 		Cert:      cert,
 	}
+	for _, o := range opts {
+		o(&f)
+	}
+	return f
 }
 
 // generateCerts generates a private key, an X.509 certificate, and a TLS
