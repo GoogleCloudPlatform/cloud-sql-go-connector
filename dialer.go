@@ -134,10 +134,12 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
 	i, err := d.instance(instance)
 	if err != nil {
+		endInfo(err)
 		return nil, err
 	}
 	addr, tlsCfg, err := i.ConnectInfo(ctx, cfg.ipType)
 	if err != nil {
+		endInfo(err)
 		return nil, err
 	}
 	endInfo(err)
