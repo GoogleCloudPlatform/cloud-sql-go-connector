@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
+	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
@@ -120,12 +121,17 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
 // instance's connection name, which is in the format "project-name:region:instance-name".
-func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (net.Conn, error) {
+func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
+	var endDial trace.EndSpanFunc
+	ctx, endDial = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn.Dial")
+	defer func() { endDial(err) }()
 	cfg := d.defaultDialCfg
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
+	var endInfo trace.EndSpanFunc
+	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
 	i, err := d.instance(instance)
 	if err != nil {
 		return nil, err
@@ -134,9 +140,13 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if err != nil {
 		return nil, err
 	}
-	addr = net.JoinHostPort(addr, serverProxyPort)
+	endInfo(err)
 
-	conn, err := proxy.Dial(ctx, "tcp", addr)
+	var connectEnd trace.EndSpanFunc
+	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
+	defer func() { connectEnd(err) }()
+	addr = net.JoinHostPort(addr, serverProxyPort)
+	conn, err = proxy.Dial(ctx, "tcp", addr)
 	if err != nil {
 		// refresh the instance info in case it caused the connection failure
 		i.ForceRefresh()
