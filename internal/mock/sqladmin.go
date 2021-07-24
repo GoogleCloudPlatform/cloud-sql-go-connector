@@ -105,9 +105,6 @@ func (r *Request) matches(hR *http.Request) bool {
 // endpoint. It responds with a "StatusOK" and a DatabaseInstance object.
 //
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
-//
-// To Configure the response from the SQL Admin endpoint, use
-// InstanceGetSuccessWithOpts.
 func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 	// Turn instance keys/certs into PEM encoded versions needed for response
 	certBytes, err := x509.CreateCertificate(
