@@ -53,8 +53,10 @@ type FakeCSQLInstance struct {
 	Cert      *x509.Certificate
 }
 
+// FakeCSQLInstanceOption is a function that configures a FakeCSQLInstance.
 type FakeCSQLInstanceOption func(f *FakeCSQLInstance)
 
+// WithPublicIP sets the public IP address to addr.
 func WithPublicIP(addr string) FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
 		f.ipAddr = addr
