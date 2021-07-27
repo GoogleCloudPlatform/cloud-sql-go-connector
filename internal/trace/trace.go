@@ -41,7 +41,7 @@ func StartSpan(ctx context.Context, name string) (context.Context, EndSpanFunc) 
 
 // toStatus interrogates an error and converts it to an appropriate
 // OpenCensus status.
-// Note: this function is burrowed from
+// Note: this function is borrowed from
 // https://github.com/googleapis/google-cloud-go/blob/master/internal/trace/trace.go
 func toStatus(err error) trace.Status {
 	if err2, ok := err.(*googleapi.Error); ok {
