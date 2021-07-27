@@ -47,10 +47,10 @@ type FakeCSQLInstance struct {
 	region    string
 	name      string
 	dbVersion string
-	ipAddr    string
-	privateIP bool
-	Key       *rsa.PrivateKey
-	Cert      *x509.Certificate
+	// ipAddrs is a map of IP type (PUBLIC or PRIVATE) to IP address.
+	ipAddrs map[string]string
+	Key     *rsa.PrivateKey
+	Cert    *x509.Certificate
 }
 
 // FakeCSQLInstanceOption is a function that configures a FakeCSQLInstance.
@@ -59,7 +59,7 @@ type FakeCSQLInstanceOption func(f *FakeCSQLInstance)
 // WithPublicIP sets the public IP address to addr.
 func WithPublicIP(addr string) FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
-		f.ipAddr = addr
+		f.ipAddrs["PUBLIC"] = addr
 	}
 }
 
@@ -75,6 +75,7 @@ func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceO
 		project:   project,
 		region:    region,
 		name:      name,
+		ipAddrs:   map[string]string{"PUBLIC": "0.0.0.0"},
 		dbVersion: "POSTGRES_12", // default of no particular importance
 		Key:       key,
 		Cert:      cert,

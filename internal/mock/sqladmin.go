@@ -109,6 +109,17 @@ func (r *Request) matches(hR *http.Request) bool {
 //
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
 func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
+	var ips []*sqladmin.IpMapping
+	for ipType, addr := range i.ipAddrs {
+		if ipType == "PUBLIC" {
+			ips = append(ips, &sqladmin.IpMapping{IpAddress: addr, Type: "PRIMARY"})
+			continue
+		}
+		if ipType == "PRIVATE" {
+			ips = append(ips, &sqladmin.IpMapping{IpAddress: addr, Type: "PRIVATE"})
+		}
+	}
+
 	// Turn instance keys/certs into PEM encoded versions needed for response
 	certBytes, err := x509.CreateCertificate(
 		rand.Reader, i.Cert, i.Cert, &i.Key.PublicKey, i.Key)
@@ -120,10 +131,6 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 		Type:  "CERTIFICATE",
 		Bytes: certBytes,
 	})
-	ipMapping := &sqladmin.IpMapping{IpAddress: i.ipAddr, Type: "PRIMARY"}
-	if i.privateIP {
-		ipMapping.Type = "PRIVATE"
-	}
 	db := &sqladmin.DatabaseInstance{
 		BackendType:     "SECOND_GEN",
 		ConnectionName:  fmt.Sprintf("%s:%s:%s", i.project, i.region, i.name),
@@ -131,7 +138,7 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 		Project:         i.project,
 		Region:          i.region,
 		Name:            i.name,
-		IpAddresses:     []*sqladmin.IpMapping{ipMapping},
+		IpAddresses:     ips,
 		ServerCaCert:    &sqladmin.SslCert{Cert: certPEM.String()},
 	}
 
