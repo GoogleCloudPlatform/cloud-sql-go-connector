@@ -35,6 +35,9 @@ import (
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
+// RSAKey is used for test only.
+var RSAKey = genRSAKey()
+
 // HTTPClient returns an *http.Client, URL, and cleanup function. The http.Client is
 // configured to connect to test SSL Server at the returned URL. This server will
 // respond to HTTP requests defined, or return a 5xx server error for unexpected ones.
@@ -253,6 +256,3 @@ func genRSAKey() *rsa.PrivateKey {
 	}
 	return key
 }
-
-// RSAKey is used for test only.
-var RSAKey = genRSAKey()
