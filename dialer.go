@@ -123,7 +123,8 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 // instance's connection name, which is in the format "project-name:region:instance-name".
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
 	var endDial trace.EndSpanFunc
-	ctx, endDial = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn.Dial")
+	ctx, endDial = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn.Dial",
+		trace.AddInstanceName(instance))
 	defer func() { endDial(err) }()
 	cfg := d.defaultDialCfg
 	for _, opt := range opts {

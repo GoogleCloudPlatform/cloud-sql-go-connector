@@ -191,7 +191,9 @@ type refresher struct {
 // performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
 func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (md metadata, c *tls.Config, expiry time.Time, err error) {
 	var refreshEnd trace.EndSpanFunc
-	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.RefreshConnection")
+	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.RefreshConnection",
+		trace.AddInstanceName(cn.String()),
+	)
 	defer func() { refreshEnd(err) }()
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()

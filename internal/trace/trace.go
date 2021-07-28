@@ -26,11 +26,33 @@ import (
 // EndSpanFunc is a function that ends a span, reporting an error if necessary.
 type EndSpanFunc func(error)
 
+// Attribute annotates a span with additional data.
+type Attribute struct {
+	key   string
+	value interface{}
+}
+
+func (a Attribute) traceAttr() trace.Attribute {
+	// always use a string attribute for now
+	// if need for additional types arise, this can be expanded.
+	return trace.StringAttribute(a.key, a.value.(string))
+}
+
+// AddInstanceName creates an attribute with the Cloud SQL instance name.
+func AddInstanceName(name string) Attribute {
+	return Attribute{key: "/cloudsql/instance", value: name}
+}
+
 // StartSpan begins a span with the provided name and returns a context and a
 // function to end the created span.
-func StartSpan(ctx context.Context, name string) (context.Context, EndSpanFunc) {
+func StartSpan(ctx context.Context, name string, attrs ...Attribute) (context.Context, EndSpanFunc) {
 	var span *trace.Span
 	ctx, span = trace.StartSpan(ctx, name)
+	as := make([]trace.Attribute, 0, len(attrs))
+	for _, a := range attrs {
+		as = append(as, a.traceAttr())
+	}
+	span.AddAttributes(as...)
 	return ctx, func(err error) {
 		if err != nil {
 			span.SetStatus(toStatus(err))
