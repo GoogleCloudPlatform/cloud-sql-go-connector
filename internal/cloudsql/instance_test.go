@@ -73,7 +73,7 @@ func TestConnectInfo(t *testing.T) {
 
 	i, err := NewInstance("my-project:my-region:my-instance", client, mock.RSAKey, 30*time.Second)
 	if err != nil {
-		t.Fatalf("failed to create instance: %v", err)
+		t.Fatalf("failed to create mock instance: %v", err)
 	}
 
 	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, PublicIP)
