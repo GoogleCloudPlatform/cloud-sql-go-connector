@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"golang.org/x/time/rate"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -42,7 +43,10 @@ type metadata struct {
 
 // fetchMetadata uses the Cloud SQL Admin APIs get method to retreive the information about a Cloud SQL instance
 // that is used to create secure connections.
-func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName) (metadata, error) {
+func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName) (m metadata, err error) {
+	var end trace.EndSpanFunc
+	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.FetchMetadata")
+	defer func() { end(err) }()
 	db, err := client.Instances.Get(inst.project, inst.name).Context(ctx).Do()
 	if err != nil {
 		return metadata{}, fmt.Errorf("failed to get instance (%s): %w", inst, err)
@@ -80,7 +84,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 		return metadata{}, fmt.Errorf("failed to parse as x509 cert: %s", err)
 	}
 
-	m := metadata{
+	m = metadata{
 		ipAddrs:      ipAddrs,
 		serverCaCert: cert,
 		version:      db.DatabaseVersion,
@@ -92,7 +96,10 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 // fetchEphemeralCert uses the Cloud SQL Admin API's createEphemeral method to create a signed TLS
 // certificate that authorized to connect via the Cloud SQL instance's serverside proxy. The cert
 // if valid for approximately one hour.
-func fetchEphemeralCert(ctx context.Context, client *sqladmin.Service, inst connName, key *rsa.PrivateKey) (tls.Certificate, error) {
+func fetchEphemeralCert(ctx context.Context, client *sqladmin.Service, inst connName, key *rsa.PrivateKey) (c tls.Certificate, err error) {
+	var end trace.EndSpanFunc
+	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.FetchEphemeralCert")
+	defer func() { end(err) }()
 	clientPubKey, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	if err != nil {
 		return tls.Certificate{}, err
@@ -116,12 +123,12 @@ func fetchEphemeralCert(ctx context.Context, client *sqladmin.Service, inst conn
 		return tls.Certificate{}, fmt.Errorf("failed to parse as x509 cert: %s", err)
 	}
 
-	tmpCert := tls.Certificate{
+	c = tls.Certificate{
 		Certificate: [][]byte{clientCert.Raw},
 		PrivateKey:  key,
 		Leaf:        clientCert,
 	}
-	return tmpCert, nil
+	return c, nil
 }
 
 // createTLSConfig returns a *tls.Config for connecting securely to the Cloud SQL instance.
@@ -182,7 +189,12 @@ type refresher struct {
 }
 
 // performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
-func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (metadata, *tls.Config, time.Time, error) {
+func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (md metadata, c *tls.Config, expiry time.Time, err error) {
+	var refreshEnd trace.EndSpanFunc
+	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.RefreshConnection",
+		trace.AddInstanceName(cn.String()),
+	)
+	defer func() { refreshEnd(err) }()
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 	if ctx.Err() == context.Canceled {
@@ -190,7 +202,7 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 	}
 
 	// avoid refreshing too often to try not to tax the SQL Admin API quotas
-	err := r.clientLimiter.Wait(ctx)
+	err = r.clientLimiter.Wait(ctx)
 	if err != nil {
 		return metadata{}, nil, time.Time{}, fmt.Errorf("refresh was throttled until context expired: %w", err)
 	}
@@ -220,7 +232,6 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 	}()
 
 	// wait for the results of each operations
-	var md metadata
 	select {
 	case r := <-mdC:
 		if r.err != nil {
@@ -241,9 +252,8 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 		return md, nil, time.Time{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
-	c := createTLSConfig(cn, md, ec)
+	c = createTLSConfig(cn, md, ec)
 	// This should never not be the case, but we check to avoid a potential nil-pointer
-	expiry := time.Time{}
 	if len(c.Certificates) > 0 {
 		expiry = c.Certificates[0].Leaf.NotAfter
 	}
