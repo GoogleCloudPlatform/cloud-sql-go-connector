@@ -16,12 +16,26 @@ package cloudsql
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"errors"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
+
+// genRSAKey generates an RSA key used for test.
+func genRSAKey() *rsa.PrivateKey {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(err) // unexpected, so just panic if it happens
+	}
+	return key
+}
+
+// RSAKey is used for test only.
+var RSAKey = genRSAKey()
 
 func TestParseConnName(t *testing.T) {
 	tests := []struct {
@@ -71,7 +85,7 @@ func TestConnectInfo(t *testing.T) {
 		}
 	}()
 
-	i, err := NewInstance("my-project:my-region:my-instance", client, mock.RSAKey, 30*time.Second)
+	i, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 30*time.Second)
 	if err != nil {
 		t.Fatalf("failed to create mock instance: %v", err)
 	}
@@ -107,7 +121,7 @@ func TestConnectInfoErrors(t *testing.T) {
 	defer cleanup()
 
 	// Use a timeout that should fail instantly
-	im, err := NewInstance("my-project:my-region:my-instance", client, mock.RSAKey, 0)
+	im, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 0)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}

@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -34,9 +33,6 @@ import (
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
-
-// RSAKey is used for test only.
-var RSAKey = genRSAKey()
 
 // HTTPClient returns an *http.Client, URL, and cleanup function. The http.Client is
 // configured to connect to test SSL Server at the returned URL. This server will
@@ -253,13 +249,4 @@ func NewSQLAdminService(ctx context.Context, reqs ...*Request) (*sqladmin.Servic
 		option.WithEndpoint(url),
 	)
 	return client, cleanup, err
-}
-
-// genRSAKey generates an RSA key used for test.
-func genRSAKey() *rsa.PrivateKey {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		panic(err) // unexpected, so just panic if it happens
-	}
-	return key
 }
