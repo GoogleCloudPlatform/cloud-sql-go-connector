@@ -16,6 +16,7 @@ package mock
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -29,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
@@ -98,11 +100,22 @@ func (r *Request) matches(hR *http.Request) bool {
 	return true
 }
 
-// InstanceGetSuccess returns a Request that responds to the `instance.get` SQLAdmin
+// InstanceGetSuccess returns a Request that responds to the `instance.get` SQL Admin
 // endpoint. It responds with a "StatusOK" and a DatabaseInstance object.
 //
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
 func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
+	var ips []*sqladmin.IpMapping
+	for ipType, addr := range i.ipAddrs {
+		if ipType == "PUBLIC" {
+			ips = append(ips, &sqladmin.IpMapping{IpAddress: addr, Type: "PRIMARY"})
+			continue
+		}
+		if ipType == "PRIVATE" {
+			ips = append(ips, &sqladmin.IpMapping{IpAddress: addr, Type: "PRIVATE"})
+		}
+	}
+
 	// Turn instance keys/certs into PEM encoded versions needed for response
 	certBytes, err := x509.CreateCertificate(
 		rand.Reader, i.Cert, i.Cert, &i.Key.PublicKey, i.Key)
@@ -114,7 +127,6 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 		Type:  "CERTIFICATE",
 		Bytes: certBytes,
 	})
-
 	db := &sqladmin.DatabaseInstance{
 		BackendType:     "SECOND_GEN",
 		ConnectionName:  fmt.Sprintf("%s:%s:%s", i.project, i.region, i.name),
@@ -122,13 +134,8 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 		Project:         i.project,
 		Region:          i.region,
 		Name:            i.name,
-		IpAddresses: []*sqladmin.IpMapping{
-			{
-				IpAddress: "127.0.0.1",
-				Type:      "PRIMARY",
-			},
-		},
-		ServerCaCert: &sqladmin.SslCert{Cert: certPEM.String()},
+		IpAddresses:     ips,
+		ServerCaCert:    &sqladmin.SslCert{Cert: certPEM.String()},
 	}
 
 	r := &Request{
@@ -193,7 +200,7 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 					CommonName:   "Google Cloud SQL Client",
 				},
 				NotBefore:             time.Now(),
-				NotAfter:              time.Now().Add(time.Hour), // 1 hour
+				NotAfter:              i.Cert.NotAfter,
 				ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 				KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 				BasicConstraintsValid: true,
@@ -228,4 +235,18 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 		},
 	}
 	return r
+}
+
+// NewSQLAdminService creates a SQL Admin API service backed by a mock HTTP
+// backend. Callers should use the cleanup function to close down the server. If
+// the cleanup function returns an error, a caller has not exercised all the
+// registered requests.
+func NewSQLAdminService(ctx context.Context, reqs ...*Request) (*sqladmin.Service, func() error, error) {
+	mc, url, cleanup := HTTPClient(reqs...)
+	client, err := sqladmin.NewService(
+		ctx,
+		option.WithHTTPClient(mc),
+		option.WithEndpoint(url),
+	)
+	return client, cleanup, err
 }

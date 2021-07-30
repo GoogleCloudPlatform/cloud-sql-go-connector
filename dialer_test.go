@@ -138,6 +138,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 
 func TestDialWithConfigurationErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
+	inst.Cert.NotAfter = time.Now().Add(-time.Hour)
 	mc, url, cleanup := mock.HTTPClient(
 		mock.InstanceGetSuccess(inst, 2),
 		mock.CreateEphemeralSuccess(inst, 2),
@@ -168,7 +169,6 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		t.Fatalf("expected Dial to fail with connection error")
 	}
 
-	inst.Cert.NotAfter = time.Now().Add(-time.Hour)
 	stop := mock.StartServerProxy(t, inst)
 	defer stop()
 

@@ -23,9 +23,19 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
-	"google.golang.org/api/option"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
+
+// genRSAKey generates an RSA key used for test.
+func genRSAKey() *rsa.PrivateKey {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(err) // unexpected, so just panic if it happens
+	}
+	return key
+}
+
+// RSAKey is used for test only.
+var RSAKey = genRSAKey()
 
 func TestParseConnName(t *testing.T) {
 	tests := []struct {
@@ -59,70 +69,59 @@ func TestParseConnName(t *testing.T) {
 
 func TestConnectInfo(t *testing.T) {
 	ctx := context.Background()
-
-	// define some test instance settings
-	cn, err := parseConnName("my-proj:my-region:my-inst")
-	if err != nil {
-		t.Fatalf("%s", err)
-	}
-	inst := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
-
-	// mock expected requests
-	mc, url, cleanup := mock.HTTPClient(
+	wantAddr := "0.0.0.0"
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithPublicIP(wantAddr))
+	client, cleanup, err := mock.NewSQLAdminService(
+		ctx,
 		mock.InstanceGetSuccess(inst, 1),
 		mock.CreateEphemeralSuccess(inst, 1),
 	)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
 	defer func() {
 		if err := cleanup(); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()
 
-	client, err := sqladmin.NewService(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	i, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 30*time.Second)
 	if err != nil {
-		t.Fatalf("client init failed: %s", err)
+		t.Fatalf("failed to create mock instance: %v", err)
 	}
 
-	// Step 0: Generate Keys
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("failed to generate keys: %v", err)
-	}
-
-	im, err := NewInstance(cn.String(), client, key, 30*time.Second)
-	if err != nil {
-		t.Fatalf("failed to initialize Instance: %v", err)
-	}
-
-	_, _, err = im.ConnectInfo(ctx, PublicIP)
+	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, PublicIP)
 	if err != nil {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
+
+	if gotAddr != wantAddr {
+		t.Fatalf(
+			"ConnectInfo returned unexpected IP address, want = %v, got = %v",
+			wantAddr, gotAddr,
+		)
+	}
+
+	wantServerName := "my-project:my-region:my-instance"
+	if gotTLSCfg.ServerName != wantServerName {
+		t.Fatalf(
+			"ConnectInfo return unexpected server name in TLS Config, want = %v, got = %v",
+			wantServerName, gotTLSCfg.ServerName,
+		)
+	}
 }
 
-func TestRefreshTimeout(t *testing.T) {
+func TestConnectInfoErrors(t *testing.T) {
 	ctx := context.Background()
 
-	// mock expected requests
-	mc, url, cleanup := mock.HTTPClient()
-	defer func() {
-		if err := cleanup(); err != nil {
-			t.Fatalf("%v", err)
-		}
-	}()
-
-	client, err := sqladmin.NewService(ctx, option.WithHTTPClient(mc), option.WithEndpoint(url))
+	client, cleanup, err := mock.NewSQLAdminService(ctx)
 	if err != nil {
-		t.Fatalf("client init failed: %s", err)
+		t.Fatalf("%s", err)
 	}
-	// Step 0: Generate Keys
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("failed to generate keys: %v", err)
-	}
+	defer cleanup()
 
 	// Use a timeout that should fail instantly
-	im, err := NewInstance("my-proj:my-region:my-inst", client, key, 0)
+	im, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 0)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
