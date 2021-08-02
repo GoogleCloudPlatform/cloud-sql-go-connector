@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/time/rate"
-
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
@@ -143,11 +141,12 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey,
 	i := &Instance{
 		connName: cn,
 		key:      key,
-		r: refresher{
-			timeout:       refreshTimeout,
-			clientLimiter: rate.NewLimiter(rate.Every(30*time.Second), 2),
-			client:        client,
-		},
+		r: newRefresher(
+			refreshTimeout,
+			30*time.Second,
+			2,
+			client,
+		),
 		ctx:    ctx,
 		cancel: cancel,
 	}

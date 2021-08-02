@@ -115,27 +115,19 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 			ips = append(ips, &sqladmin.IpMapping{IpAddress: addr, Type: "PRIVATE"})
 		}
 	}
-
-	// Turn instance keys/certs into PEM encoded versions needed for response
-	certBytes, err := x509.CreateCertificate(
-		rand.Reader, i.Cert, i.Cert, &i.Key.PublicKey, i.Key)
+	certBytes, err := i.signedCert()
 	if err != nil {
 		panic(err)
 	}
-	certPEM := new(bytes.Buffer)
-	pem.Encode(certPEM, &pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: certBytes,
-	})
 	db := &sqladmin.DatabaseInstance{
-		BackendType:     "SECOND_GEN",
+		BackendType:     i.backendType,
 		ConnectionName:  fmt.Sprintf("%s:%s:%s", i.project, i.region, i.name),
 		DatabaseVersion: i.dbVersion,
 		Project:         i.project,
 		Region:          i.region,
 		Name:            i.name,
 		IpAddresses:     ips,
-		ServerCaCert:    &sqladmin.SslCert{Cert: certPEM.String()},
+		ServerCaCert:    &sqladmin.SslCert{Cert: string(certBytes)},
 	}
 
 	r := &Request{
