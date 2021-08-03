@@ -137,3 +137,31 @@ func TestConnectInfoErrors(t *testing.T) {
 		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", gotAddr)
 	}
 }
+
+func TestClose(t *testing.T) {
+	ctx := context.Background()
+
+	client, cleanup, err := mock.NewSQLAdminService(ctx)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+	defer cleanup()
+
+	// Step 0: Generate Keys
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate keys: %v", err)
+	}
+
+	// Set up an instance and then close it immediately
+	im, err := NewInstance("my-proj:my-region:my-inst", client, key, 30)
+	if err != nil {
+		t.Fatalf("failed to initialize Instance: %v", err)
+	}
+	im.Close()
+
+	_, _, err = im.ConnectInfo(ctx, PublicIP)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("failed to retrieve connect info: %v", err)
+	}
+}

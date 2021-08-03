@@ -127,7 +127,10 @@ type Instance struct {
 	// replacement to occur.
 	next *refreshResult
 
-	// TODO: add a way to close
+	// ctx is the default ctx for refresh operations. Canceling it prevents new refresh
+	// operations from being triggered.
+	ctx      context.Context
+	closeCtx func()
 }
 
 // NewInstance initializes a new Instance given an instance connection name
@@ -136,6 +139,7 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey,
 	if err != nil {
 		return nil, err
 	}
+	ctx, close := context.WithCancel(context.Background())
 	i := &Instance{
 		connName: cn,
 		key:      key,
@@ -144,6 +148,8 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey,
 			clientLimiter: rate.NewLimiter(rate.Every(30*time.Second), 2),
 			client:        client,
 		},
+		ctx:      ctx,
+		closeCtx: close,
 	}
 	// For the initial refresh operation, set cur = next so that connection requests block
 	// until the first refresh is complete.
@@ -152,6 +158,12 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey,
 	i.next = i.cur
 	i.resultGuard.Unlock()
 	return i, nil
+}
+
+// Close closes the instance; it stops the refresh cycle and prevents it from making
+// additional calls to the Cloud SQL Admin API.
+func (i *Instance) Close() {
+	i.closeCtx()
 }
 
 // ConnectInfo returns an IP address specified by ipType (i.e., public or
@@ -190,7 +202,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 	res := &refreshResult{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		ctx := context.Background() // TODO: store this in Instance
+		ctx := i.ctx
 		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(ctx, i.connName, i.key)
 		close(res.ready)
 
