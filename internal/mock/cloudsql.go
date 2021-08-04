@@ -50,13 +50,13 @@ type FakeCSQLInstance struct {
 	// ipAddrs is a map of IP type (PUBLIC or PRIVATE) to IP address.
 	ipAddrs     map[string]string
 	backendType string
-	sign        SignFunc
+	signer      SignFunc
 	Key         *rsa.PrivateKey
 	Cert        *x509.Certificate
 }
 
 func (f FakeCSQLInstance) signedCert() ([]byte, error) {
-	return f.sign(f.Cert, f.Key)
+	return f.signer(f.Cert, f.Key)
 }
 
 // FakeCSQLInstanceOption is a function that configures a FakeCSQLInstance.
@@ -101,11 +101,11 @@ func WithFirstGenBackend() FakeCSQLInstanceOption {
 // result should be PEM-encoded.
 type SignFunc = func(*x509.Certificate, *rsa.PrivateKey) ([]byte, error)
 
-// WithSigner configures the signing function used to generate a signed
+// WithCertSigner configures the signing function used to generate a signed
 // certificate.
-func WithSigner(s SignFunc) FakeCSQLInstanceOption {
+func WithCertSigner(s SignFunc) FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
-		f.sign = s
+		f.signer = s
 	}
 }
 
@@ -132,7 +132,7 @@ func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceO
 		ipAddrs:     map[string]string{"PUBLIC": "0.0.0.0"},
 		dbVersion:   "POSTGRES_12", // default of no particular importance
 		backendType: "SECOND_GEN",
-		sign:        SelfSign,
+		signer:      SelfSign,
 		Key:         key,
 		Cert:        cert,
 	}

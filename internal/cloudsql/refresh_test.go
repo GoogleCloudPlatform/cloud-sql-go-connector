@@ -173,7 +173,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 				mock.NewFakeCSQLInstance(
 					cn.project, cn.region, cn.name,
 					mock.WithRegion("my-region"),
-					mock.WithSigner(func(_ *x509.Certificate, _ *rsa.PrivateKey) ([]byte, error) {
+					mock.WithCertSigner(func(_ *x509.Certificate, _ *rsa.PrivateKey) ([]byte, error) {
 						return nil, nil
 					}),
 				), 1),
@@ -185,7 +185,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 				mock.NewFakeCSQLInstance(
 					cn.project, cn.region, cn.name,
 					mock.WithRegion("my-region"),
-					mock.WithSigner(func(_ *x509.Certificate, _ *rsa.PrivateKey) ([]byte, error) {
+					mock.WithCertSigner(func(_ *x509.Certificate, _ *rsa.PrivateKey) ([]byte, error) {
 						certPEM := &bytes.Buffer{}
 						pem.Encode(certPEM, &pem.Block{
 							Type:  "CERTIFICATE",
@@ -200,11 +200,9 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 	}
 	for i, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
-			mc, url, cleanup := mock.HTTPClient(tc.req)
-			client, err := sqladmin.NewService(
+			client, cleanup, err := mock.NewSQLAdminService(
 				context.Background(),
-				option.WithHTTPClient(mc),
-				option.WithEndpoint(url),
+				tc.req,
 			)
 			if err != nil {
 				t.Fatalf("failed to create test SQL admin service: %s", err)
@@ -232,7 +230,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 	}{
 		{
 			req:     mock.InstanceGetSuccess(inst, 1), // not an ephemeral cert call
-			wantErr: "create failed",
+			wantErr: "fetch ephemeral cert failed",
 			desc:    "When the CreateEphemeralCert call fails",
 		},
 	}
