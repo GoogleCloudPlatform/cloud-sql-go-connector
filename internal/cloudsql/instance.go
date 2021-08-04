@@ -202,8 +202,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 	res := &refreshResult{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		ctx := i.ctx
-		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(ctx, i.connName, i.key)
+		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key)
 		close(res.ready)
 
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh
@@ -223,6 +222,12 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 		}
 		// Update the current results, and schedule the next refresh in the future
 		i.cur = res
+		select {
+		case <-i.ctx.Done():
+			// instance has been closed, don't schedule anything
+			return
+		default:
+		}
 		nextRefresh := i.cur.expiry.Add(-refreshBuffer)
 		i.next = i.scheduleRefresh(time.Until(nextRefresh))
 	})
