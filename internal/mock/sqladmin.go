@@ -15,16 +15,13 @@
 package mock
 
 import (
-	"bytes"
 	"context"
-	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -183,39 +180,19 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 				return
 			}
 
-			// Create a signed cert from the client's public key.
-			cert := &x509.Certificate{ // TODO: Validate this format vs API
-				SerialNumber: &big.Int{},
-				Subject: pkix.Name{
-					Country:      []string{"US"},
-					Organization: []string{"Google, Inc"},
-					CommonName:   "Google Cloud SQL Client",
-				},
-				NotBefore:             time.Now(),
-				NotAfter:              i.Cert.NotAfter,
-				ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-				KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-				BasicConstraintsValid: true,
-			}
-			certBytes, err := x509.CreateCertificate(rand.Reader, cert, i.Cert, pubKey, i.Key)
+			certBytes, err := i.clientCert(pubKey.(*rsa.PublicKey))
 			if err != nil {
-				http.Error(resp, fmt.Errorf("unable to decode PublicKey: %w", err).Error(), http.StatusInternalServerError)
+				http.Error(resp, fmt.Errorf("failed to sign instance's certificate: %v", err).Error(), http.StatusBadRequest)
 				return
 			}
-			certPEM := new(bytes.Buffer)
-			pem.Encode(certPEM, &pem.Block{
-				Type:  "CERTIFICATE",
-				Bytes: certBytes,
-			})
 
 			// Return the signed cert to the client.
 			c := sqladmin.SslCert{
-				Cert:             certPEM.String(),
-				CertSerialNumber: cert.SerialNumber.String(),
-				CommonName:       cert.Subject.CommonName,
-				CreateTime:       cert.NotBefore.Format(time.RFC3339),
-				ExpirationTime:   cert.NotAfter.Format(time.RFC3339),
-				Instance:         i.name,
+				Cert:           string(certBytes),
+				CommonName:     "Google Cloud SQL Client",
+				CreateTime:     time.Now().Format(time.RFC3339),
+				ExpirationTime: i.Cert.NotAfter.Format(time.RFC3339),
+				Instance:       i.name,
 			}
 			b, err = c.MarshalJSON()
 			if err != nil {

@@ -224,18 +224,49 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
 
 	testCases := []struct {
-		req     *mock.Request
+		reqs    []*mock.Request
 		wantErr string
 		desc    string
 	}{
 		{
-			req:     mock.InstanceGetSuccess(inst, 1), // not an ephemeral cert call
+			reqs:    []*mock.Request{mock.InstanceGetSuccess(inst, 1)}, // no ephemeral cert call registered
 			wantErr: "fetch ephemeral cert failed",
 			desc:    "When the CreateEphemeralCert call fails",
 		},
+		{
+			reqs: []*mock.Request{mock.InstanceGetSuccess(inst, 1),
+				mock.CreateEphemeralSuccess(
+					mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
+						mock.WithClientCertSigner(
+							func(*x509.Certificate, *rsa.PrivateKey, *rsa.PublicKey) ([]byte, error) {
+								return nil, nil
+							}),
+					), 1),
+			},
+			wantErr: "failed to decode valid PEM cert",
+			desc:    "When decoding the cert fails",
+		},
+		{
+			reqs: []*mock.Request{mock.InstanceGetSuccess(inst, 1),
+				mock.CreateEphemeralSuccess(
+					mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
+						mock.WithClientCertSigner(
+							func(*x509.Certificate, *rsa.PrivateKey, *rsa.PublicKey) ([]byte, error) {
+								certPEM := &bytes.Buffer{}
+								pem.Encode(certPEM, &pem.Block{
+									Type:  "CERTIFICATE",
+									Bytes: []byte("hello"), // woops no cert
+								})
+								return certPEM.Bytes(), nil
+							}),
+					), 1),
+			},
+			wantErr: "failed to parse as x509 cert",
+			desc:    "When parsing the cert fails",
+		},
 	}
 	for i, tc := range testCases {
-		mc, url, cleanup := mock.HTTPClient(mock.InstanceGetSuccess(inst, 1), tc.req)
+		mc, url, cleanup := mock.HTTPClient(tc.reqs...)
 		client, err := sqladmin.NewService(
 			context.Background(),
 			option.WithHTTPClient(mc),
