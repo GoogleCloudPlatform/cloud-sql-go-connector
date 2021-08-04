@@ -147,14 +147,8 @@ func TestClose(t *testing.T) {
 	}
 	defer cleanup()
 
-	// Step 0: Generate Keys
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("failed to generate keys: %v", err)
-	}
-
 	// Set up an instance and then close it immediately
-	im, err := NewInstance("my-proj:my-region:my-inst", client, key, 30)
+	im, err := NewInstance("my-proj:my-region:my-inst", client, RSAKey, 30)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
