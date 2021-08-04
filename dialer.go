@@ -173,6 +173,17 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	return tlsConn, nil
 }
 
+// Close closes the Dialer; it prevents the Dialer from refreshing the information
+// needed to connect. Additional dial operations may succeed until the information
+// expires.
+func (d *Dialer) Close() {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	for _, i := range d.instances {
+		i.Close()
+	}
+}
+
 func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
 	// Check instance cache
 	d.lock.RLock()
