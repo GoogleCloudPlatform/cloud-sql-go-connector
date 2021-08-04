@@ -129,8 +129,8 @@ type Instance struct {
 
 	// ctx is the default ctx for refresh operations. Canceling it prevents new refresh
 	// operations from being triggered.
-	ctx      context.Context
-	closeCtx func()
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewInstance initializes a new Instance given an instance connection name
@@ -139,7 +139,7 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey,
 	if err != nil {
 		return nil, err
 	}
-	ctx, close := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	i := &Instance{
 		connName: cn,
 		key:      key,
@@ -148,8 +148,8 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey,
 			clientLimiter: rate.NewLimiter(rate.Every(30*time.Second), 2),
 			client:        client,
 		},
-		ctx:      ctx,
-		closeCtx: close,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 	// For the initial refresh operation, set cur = next so that connection requests block
 	// until the first refresh is complete.
@@ -163,7 +163,7 @@ func NewInstance(instance string, client *sqladmin.Service, key *rsa.PrivateKey,
 // Close closes the instance; it stops the refresh cycle and prevents it from making
 // additional calls to the Cloud SQL Admin API.
 func (i *Instance) Close() {
-	i.closeCtx()
+	i.cancel()
 }
 
 // ConnectInfo returns an IP address specified by ipType (i.e., public or
