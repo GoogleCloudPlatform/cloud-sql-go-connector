@@ -114,9 +114,9 @@ func WithCertSigner(s SignFunc) FakeCSQLInstanceOption {
 	}
 }
 
-// ClientSignFunc is a function that produces a certificate signed by the
+// ClientSignFunc is a function that produces a certificate signed using the
 // provided certificate, using the server's private key and the client's public
-// key. The result shoudl be PEM-encoded.
+// key. The result should be PEM-encoded.
 type ClientSignFunc = func(*x509.Certificate, *rsa.PrivateKey, *rsa.PublicKey) ([]byte, error)
 
 // WithClientCertSigner configures the signing function used to generated a
