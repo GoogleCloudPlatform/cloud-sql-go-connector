@@ -19,15 +19,9 @@ in the future. Please use at your own risk.
 
 ## Installation
 
-First, clone this repo into a folder relative to your project:
+You can install this repo with `go get`:
 ```sh
-git clone https://github.com/kurtisvg/cloud-sql-go-connector.git
-```
-
-Next, use a _replace_ directive in your `go.mod` that points to the cloned
-folder:
-```
-replace cloud.google.com/cloudsqlconn => ../cloud-sql-go-connector
+go get cloud.google.com/go/cloudsqlconn
 ```
 
 ## Usage
