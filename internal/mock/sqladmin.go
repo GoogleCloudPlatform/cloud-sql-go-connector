@@ -31,12 +31,12 @@ import (
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
-// HTTPClient returns an *http.Client, URL, and cleanup function. The http.Client is
+// httpClient returns an *http.Client, URL, and cleanup function. The http.Client is
 // configured to connect to test SSL Server at the returned URL. This server will
 // respond to HTTP requests defined, or return a 5xx server error for unexpected ones.
 // The cleanup function will close the server, and return an error if any expected calls
 // weren't received.
-func HTTPClient(requests ...*Request) (*http.Client, string, func() error) {
+func httpClient(requests ...*Request) (*http.Client, string, func() error) {
 	// Create a TLS Server that responses to the requests defined
 	s := httptest.NewTLSServer(http.HandlerFunc(
 		func(resp http.ResponseWriter, req *http.Request) {
@@ -211,7 +211,7 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 // the cleanup function returns an error, a caller has not exercised all the
 // registered requests.
 func NewSQLAdminService(ctx context.Context, reqs ...*Request) (*sqladmin.Service, func() error, error) {
-	mc, url, cleanup := HTTPClient(reqs...)
+	mc, url, cleanup := httpClient(reqs...)
 	client, err := sqladmin.NewService(
 		ctx,
 		option.WithHTTPClient(mc),
