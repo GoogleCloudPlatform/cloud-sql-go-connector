@@ -26,8 +26,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
-	"google.golang.org/api/option"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 func errorContains(err error, want string) bool {
@@ -266,11 +264,9 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		},
 	}
 	for i, tc := range testCases {
-		mc, url, cleanup := mock.HTTPClient(tc.reqs...)
-		client, err := sqladmin.NewService(
+		client, cleanup, err := mock.NewSQLAdminService(
 			context.Background(),
-			option.WithHTTPClient(mc),
-			option.WithEndpoint(url),
+			tc.reqs...,
 		)
 		if err != nil {
 			t.Fatalf("failed to create test SQL admin service: %s", err)
@@ -294,19 +290,15 @@ func TestRefreshBuildsTLSConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to sign certificate: %v", err)
 	}
-	mc, url, cleanup := mock.HTTPClient(
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
 		mock.InstanceGetSuccess(inst, 1), // no server cert
 		mock.CreateEphemeralSuccess(inst, 1),
-	)
-	defer cleanup()
-	client, err := sqladmin.NewService(
-		context.Background(),
-		option.WithHTTPClient(mc),
-		option.WithEndpoint(url),
 	)
 	if err != nil {
 		t.Fatalf("failed to create test SQL admin service: %s", err)
 	}
+	defer cleanup()
 
 	r := newRefresher(time.Hour, 30*time.Second, 1, client)
 	_, tlsCfg, _, err := r.performRefresh(context.Background(), cn, RSAKey)

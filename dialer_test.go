@@ -18,33 +18,17 @@ import (
 	"context"
 	"errors"
 	"io/ioutil"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
-	"google.golang.org/api/option"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
-
-// replaceSQLAdminClient patches the Dialer's SQL Admin API client with one that
-// uses the provided HTTP client and endpoint.
-func newMockService(client *http.Client, endpoint string) *sqladmin.Service {
-	svc, err := sqladmin.NewService(
-		context.Background(),
-		option.WithHTTPClient(client),
-		option.WithEndpoint(endpoint),
-	)
-	if err != nil {
-		panic(err)
-	}
-	return svc
-}
 
 func TestDialerCanConnectToInstance(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
-	mc, url, cleanup := mock.HTTPClient(
+	svc, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
 		mock.InstanceGetSuccess(inst, 1),
 		mock.CreateEphemeralSuccess(inst, 1),
 	)
@@ -63,7 +47,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
-	d.sqladmin = newMockService(mc, url)
+	d.sqladmin = svc
 
 	conn, err := d.Dial(context.Background(), "my-project:my-region:my-instance", WithPublicIP())
 	if err != nil {
@@ -96,7 +80,7 @@ func errorContains(err error, want string) bool {
 
 func TestDialWithAdminAPIErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
-	mc, url, cleanup := mock.HTTPClient()
+	svc, cleanup, err := mock.NewSQLAdminService(context.Background())
 	stop := mock.StartServerProxy(t, inst)
 	defer func() {
 		stop()
@@ -112,7 +96,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
-	d.sqladmin = newMockService(mc, url)
+	d.sqladmin = svc
 
 	// instance name is bad
 	_, err = d.Dial(context.Background(), "bad-instance-name")
@@ -139,7 +123,8 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 func TestDialWithConfigurationErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance",
 		mock.WithCertExpiry(time.Now().Add(-time.Hour)))
-	mc, url, cleanup := mock.HTTPClient(
+	svc, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
 		mock.InstanceGetSuccess(inst, 2),
 		mock.CreateEphemeralSuccess(inst, 2),
 	)
@@ -150,7 +135,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
-	d.sqladmin = newMockService(mc, url)
+	d.sqladmin = svc
 	defer func() {
 		if err := cleanup(); err != nil {
 			t.Fatalf("%v", err)
