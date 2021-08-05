@@ -48,9 +48,20 @@ type FakeCSQLInstance struct {
 	name      string
 	dbVersion string
 	// ipAddrs is a map of IP type (PUBLIC or PRIVATE) to IP address.
-	ipAddrs map[string]string
-	Key     *rsa.PrivateKey
-	Cert    *x509.Certificate
+	ipAddrs      map[string]string
+	backendType  string
+	signer       SignFunc
+	clientSigner ClientSignFunc
+	Key          *rsa.PrivateKey
+	Cert         *x509.Certificate
+}
+
+func (f FakeCSQLInstance) signedCert() ([]byte, error) {
+	return f.signer(f.Cert, f.Key)
+}
+
+func (f FakeCSQLInstance) clientCert(pubKey *rsa.PublicKey) ([]byte, error) {
+	return f.clientSigner(f.Cert, f.Key, pubKey)
 }
 
 // FakeCSQLInstanceOption is a function that configures a FakeCSQLInstance.
@@ -63,6 +74,67 @@ func WithPublicIP(addr string) FakeCSQLInstanceOption {
 	}
 }
 
+// WithPrivateIP sets the private IP address to addr.
+func WithPrivateIP(addr string) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.ipAddrs["PRIVATE"] = addr
+	}
+}
+
+// WithCertExpiry sets the server certificate's expiration to t.
+func WithCertExpiry(t time.Time) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.Cert.NotAfter = t
+	}
+}
+
+// WithRegion sets the server's region to the provided value.
+func WithRegion(region string) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.region = region
+	}
+}
+
+// WithFirstGenBackend sets the server backend type to FIRST_GEN.
+func WithFirstGenBackend() FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.backendType = "FIRST_GEN"
+	}
+}
+
+// SignFunc is a function that signs the certificate using the provided key. The
+// result should be PEM-encoded.
+type SignFunc = func(*x509.Certificate, *rsa.PrivateKey) ([]byte, error)
+
+// WithCertSigner configures the signing function used to generate a signed
+// certificate.
+func WithCertSigner(s SignFunc) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.signer = s
+	}
+}
+
+// ClientSignFunc is a function that produces a certificate signed using the
+// provided certificate, using the server's private key and the client's public
+// key. The result should be PEM-encoded.
+type ClientSignFunc = func(*x509.Certificate, *rsa.PrivateKey, *rsa.PublicKey) ([]byte, error)
+
+// WithClientCertSigner configures the signing function used to generated a
+// certificate signed with the client's public key.
+func WithClientCertSigner(s ClientSignFunc) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.clientSigner = s
+	}
+}
+
+// WithMissingIPAddrs configures a Fake Cloud SQL instance to have no IP
+// addresses.
+func WithMissingIPAddrs() FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.ipAddrs = map[string]string{}
+	}
+}
+
 // NewFakeCSQLInstance returns a CloudSQLInst object for configuring mocks.
 func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceOption) FakeCSQLInstance {
 	// TODO: consider options for this?
@@ -72,18 +144,87 @@ func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceO
 	}
 
 	f := FakeCSQLInstance{
-		project:   project,
-		region:    region,
-		name:      name,
-		ipAddrs:   map[string]string{"PUBLIC": "0.0.0.0"},
-		dbVersion: "POSTGRES_12", // default of no particular importance
-		Key:       key,
-		Cert:      cert,
+		project:      project,
+		region:       region,
+		name:         name,
+		ipAddrs:      map[string]string{"PUBLIC": "0.0.0.0"},
+		dbVersion:    "POSTGRES_12", // default of no particular importance
+		backendType:  "SECOND_GEN",
+		signer:       SelfSign,
+		clientSigner: SignWithClientKey,
+		Key:          key,
+		Cert:         cert,
 	}
 	for _, o := range opts {
 		o(&f)
 	}
 	return f
+}
+
+// SelfSign produces a PEM encoded certificate that is self-signed.
+func SelfSign(c *x509.Certificate, k *rsa.PrivateKey) ([]byte, error) {
+	certBytes, err := x509.CreateCertificate(rand.Reader, c, c, &k.PublicKey, k)
+	if err != nil {
+		return nil, err
+	}
+	certPEM := new(bytes.Buffer)
+	pem.Encode(certPEM, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certBytes,
+	})
+	return certPEM.Bytes(), nil
+}
+
+// SignWithClientKey produces a PEM encoded certificate signed by the parent
+// certificate c using the server's private key and the client's public key.
+func SignWithClientKey(c *x509.Certificate, k *rsa.PrivateKey, clientKey *rsa.PublicKey) ([]byte, error) {
+	// Create a signed cert from the client's public key.
+	cert := &x509.Certificate{ // TODO: Validate this format vs API
+		SerialNumber: &big.Int{},
+		Subject: pkix.Name{
+			Country:      []string{"US"},
+			Organization: []string{"Google, Inc"},
+			CommonName:   "Google Cloud SQL Client",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              c.NotAfter,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+	}
+	certBytes, err := x509.CreateCertificate(rand.Reader, cert, c, clientKey, k)
+	if err != nil {
+		return nil, err
+	}
+	certPEM := new(bytes.Buffer)
+	err = pem.Encode(certPEM, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certBytes,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return certPEM.Bytes(), nil
+}
+
+// GenerateCertWithCommonName produces a certificate signed by the Fake Cloud
+// SQL instance's CA with the specified common name cn.
+func GenerateCertWithCommonName(i FakeCSQLInstance, cn string) []byte {
+	cert := &x509.Certificate{
+		SerialNumber: &big.Int{},
+		Subject: pkix.Name{
+			CommonName: cn,
+		},
+		NotBefore: time.Now(),
+		NotAfter:  time.Now().AddDate(0, 0, 1),
+		IsCA:      true,
+	}
+	signed, err := x509.CreateCertificate(
+		rand.Reader, cert, i.Cert, &i.Key.PublicKey, i.Key)
+	if err != nil {
+		panic(err)
+	}
+	return signed
 }
 
 // generateCerts generates a private key, an X.509 certificate, and a TLS

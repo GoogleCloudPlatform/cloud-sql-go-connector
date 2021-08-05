@@ -15,16 +15,13 @@
 package mock
 
 import (
-	"bytes"
 	"context"
-	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -34,12 +31,12 @@ import (
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
-// HTTPClient returns an *http.Client, URL, and cleanup function. The http.Client is
+// httpClient returns an *http.Client, URL, and cleanup function. The http.Client is
 // configured to connect to test SSL Server at the returned URL. This server will
 // respond to HTTP requests defined, or return a 5xx server error for unexpected ones.
 // The cleanup function will close the server, and return an error if any expected calls
 // weren't received.
-func HTTPClient(requests ...*Request) (*http.Client, string, func() error) {
+func httpClient(requests ...*Request) (*http.Client, string, func() error) {
 	// Create a TLS Server that responses to the requests defined
 	s := httptest.NewTLSServer(http.HandlerFunc(
 		func(resp http.ResponseWriter, req *http.Request) {
@@ -115,27 +112,19 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 			ips = append(ips, &sqladmin.IpMapping{IpAddress: addr, Type: "PRIVATE"})
 		}
 	}
-
-	// Turn instance keys/certs into PEM encoded versions needed for response
-	certBytes, err := x509.CreateCertificate(
-		rand.Reader, i.Cert, i.Cert, &i.Key.PublicKey, i.Key)
+	certBytes, err := i.signedCert()
 	if err != nil {
 		panic(err)
 	}
-	certPEM := new(bytes.Buffer)
-	pem.Encode(certPEM, &pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: certBytes,
-	})
 	db := &sqladmin.DatabaseInstance{
-		BackendType:     "SECOND_GEN",
+		BackendType:     i.backendType,
 		ConnectionName:  fmt.Sprintf("%s:%s:%s", i.project, i.region, i.name),
 		DatabaseVersion: i.dbVersion,
 		Project:         i.project,
 		Region:          i.region,
 		Name:            i.name,
 		IpAddresses:     ips,
-		ServerCaCert:    &sqladmin.SslCert{Cert: certPEM.String()},
+		ServerCaCert:    &sqladmin.SslCert{Cert: string(certBytes)},
 	}
 
 	r := &Request{
@@ -191,39 +180,19 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 				return
 			}
 
-			// Create a signed cert from the client's public key.
-			cert := &x509.Certificate{ // TODO: Validate this format vs API
-				SerialNumber: &big.Int{},
-				Subject: pkix.Name{
-					Country:      []string{"US"},
-					Organization: []string{"Google, Inc"},
-					CommonName:   "Google Cloud SQL Client",
-				},
-				NotBefore:             time.Now(),
-				NotAfter:              i.Cert.NotAfter,
-				ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-				KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-				BasicConstraintsValid: true,
-			}
-			certBytes, err := x509.CreateCertificate(rand.Reader, cert, i.Cert, pubKey, i.Key)
+			certBytes, err := i.clientCert(pubKey.(*rsa.PublicKey))
 			if err != nil {
-				http.Error(resp, fmt.Errorf("unable to decode PublicKey: %w", err).Error(), http.StatusInternalServerError)
+				http.Error(resp, fmt.Errorf("failed to sign client certificate: %v", err).Error(), http.StatusBadRequest)
 				return
 			}
-			certPEM := new(bytes.Buffer)
-			pem.Encode(certPEM, &pem.Block{
-				Type:  "CERTIFICATE",
-				Bytes: certBytes,
-			})
 
 			// Return the signed cert to the client.
 			c := sqladmin.SslCert{
-				Cert:             certPEM.String(),
-				CertSerialNumber: cert.SerialNumber.String(),
-				CommonName:       cert.Subject.CommonName,
-				CreateTime:       cert.NotBefore.Format(time.RFC3339),
-				ExpirationTime:   cert.NotAfter.Format(time.RFC3339),
-				Instance:         i.name,
+				Cert:           string(certBytes),
+				CommonName:     "Google Cloud SQL Client",
+				CreateTime:     time.Now().Format(time.RFC3339),
+				ExpirationTime: i.Cert.NotAfter.Format(time.RFC3339),
+				Instance:       i.name,
 			}
 			b, err = c.MarshalJSON()
 			if err != nil {
@@ -242,7 +211,7 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 // the cleanup function returns an error, a caller has not exercised all the
 // registered requests.
 func NewSQLAdminService(ctx context.Context, reqs ...*Request) (*sqladmin.Service, func() error, error) {
-	mc, url, cleanup := HTTPClient(reqs...)
+	mc, url, cleanup := httpClient(reqs...)
 	client, err := sqladmin.NewService(
 		ctx,
 		option.WithHTTPClient(mc),

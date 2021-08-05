@@ -110,7 +110,7 @@ func fetchEphemeralCert(ctx context.Context, client *sqladmin.Service, inst conn
 	}
 	resp, err := client.SslCerts.CreateEphemeral(inst.project, inst.name, &req).Context(ctx).Do()
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("create ephemeral failed: %w", err)
+		return tls.Certificate{}, fmt.Errorf("create ephemeral cert failed: %w", err)
 	}
 
 	// parse the client cert
@@ -154,10 +154,11 @@ func createTLSConfig(inst connName, m metadata, cert tls.Certificate) *tls.Confi
 }
 
 // genVerifyPeerCertificateFunc creates a VerifyPeerCertificate func that verifies that the peer
-// certificate is in the cert pool. We need to define our own because of our sketchy non-standard
-// CNs.
-func genVerifyPeerCertificateFunc(cn connName, pool *x509.CertPool) func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-	return func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+// certificate is in the cert pool. We need to define our own because CloudSQL
+// instances use the instance name (e.g., my-project:my-instance) instead of a
+// valid domain name for the certificate's Common Name.
+func genVerifyPeerCertificateFunc(cn connName, pool *x509.CertPool) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 		if len(rawCerts) == 0 {
 			return fmt.Errorf("no certificate to verify")
 		}
@@ -180,6 +181,17 @@ func genVerifyPeerCertificateFunc(cn connName, pool *x509.CertPool) func(rawCert
 	}
 }
 
+// newRefresher creates a Refresher.
+func newRefresher(timeout time.Duration, interval time.Duration, burst int, svc *sqladmin.Service) refresher {
+	return refresher{
+		timeout:       timeout,
+		clientLimiter: rate.NewLimiter(rate.Every(interval), burst),
+		client:        svc,
+	}
+}
+
+// refresher manages the SQL Admin API access to instance metadata and to
+// ephemeral certificates.
 type refresher struct {
 	// timeout is the maximum amount of time a refresh operation should be allowed to take.
 	timeout time.Duration
