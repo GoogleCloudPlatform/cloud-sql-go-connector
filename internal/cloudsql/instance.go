@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/errtypes"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
@@ -54,7 +55,11 @@ func parseConnName(cn string) (connName, error) {
 	b := []byte(cn)
 	m := connNameRegex.FindSubmatch(b)
 	if m == nil {
-		return connName{}, fmt.Errorf("invalid instance connection name - expected PROJECT:REGION:ID")
+		err := errtypes.NewClientError(
+			"invalid instance connection name, expected PROJECT:REGION:INSTANCE",
+			cn,
+		)
+		return connName{}, err
 	}
 
 	c := connName{
@@ -178,7 +183,11 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 	}
 	addr, ok := res.md.ipAddrs[ipType]
 	if !ok {
-		return "", nil, fmt.Errorf("instance '%s' does not have IP of type '%s'", i, ipType)
+		err := errtypes.NewClientError(
+			fmt.Sprintf("instance does not have IP of type %q", ipType),
+			i.String(),
+		)
+		return "", nil, err
 	}
 	return addr, res.tlsCfg, nil
 }

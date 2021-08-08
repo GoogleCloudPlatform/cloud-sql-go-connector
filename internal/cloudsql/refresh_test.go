@@ -21,19 +21,12 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/errtypes"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
-
-func errorContains(err error, want string) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), want)
-}
 
 func TestRefresh(t *testing.T) {
 	wantPublicIP := "127.0.0.1"
@@ -120,8 +113,9 @@ func TestRefreshFailsFast(t *testing.T) {
 	ctx, _ = context.WithTimeout(context.Background(), time.Millisecond)
 	_, _, _, err = r.performRefresh(ctx, cn, RSAKey)
 
-	if !errorContains(err, "throttled") {
-		t.Fatalf("expected throttled error, got = %v", err)
+	var wantErr *errtypes.DialError
+	if !errors.As(err, &wantErr) {
+		t.Fatalf("when refresh is throttled, want = %T, got = %v", wantErr, err)
 	}
 }
 
@@ -130,20 +124,20 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 
 	testCases := []struct {
 		req     *mock.Request
-		wantErr string
+		wantErr error
 		desc    string
 	}{
 		{
 			req: mock.CreateEphemeralSuccess(
 				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name), 1),
-			wantErr: "failed to get instance",
+			wantErr: &errtypes.APIError{},
 			desc:    "When the Metadata call fails",
 		},
 		{
 			req: mock.InstanceGetSuccess(
 				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
 					mock.WithRegion("some-other-region")), 1),
-			wantErr: "region was mismatched",
+			wantErr: &errtypes.ServerError{},
 			desc:    "When the region does not match",
 		},
 		{
@@ -153,7 +147,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 					mock.WithRegion("my-region"),
 					mock.WithFirstGenBackend(),
 				), 1),
-			wantErr: "only Second Generation",
+			wantErr: &errtypes.ClientError{},
 			desc:    "When the instance isn't Second generation",
 		},
 		{
@@ -163,7 +157,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 					mock.WithRegion("my-region"),
 					mock.WithMissingIPAddrs(),
 				), 1),
-			wantErr: "no supported IP addresses",
+			wantErr: &errtypes.ClientError{},
 			desc:    "When the instance has no supported IP addresses",
 		},
 		{
@@ -175,7 +169,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 						return nil, nil
 					}),
 				), 1),
-			wantErr: "failed to decode",
+			wantErr: &errtypes.ServerError{},
 			desc:    "When the server cert does not decode",
 		},
 		{
@@ -192,7 +186,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 						return certPEM.Bytes(), nil
 					}),
 				), 1),
-			wantErr: "failed to parse",
+			wantErr: &errtypes.ServerError{},
 			desc:    "When the cert is not a valid X.509 cert",
 		},
 	}
@@ -210,8 +204,8 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 			r := newRefresher(time.Hour, 30*time.Second, 1, client)
 			_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey)
 
-			if !errorContains(err, tc.wantErr) {
-				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %v, got = %v", i, tc.wantErr, err)
+			if !errors.As(err, &tc.wantErr) {
+				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 			}
 		})
 	}
@@ -223,12 +217,12 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 
 	testCases := []struct {
 		reqs    []*mock.Request
-		wantErr string
+		wantErr error
 		desc    string
 	}{
 		{
 			reqs:    []*mock.Request{mock.InstanceGetSuccess(inst, 1)}, // no ephemeral cert call registered
-			wantErr: "fetch ephemeral cert failed",
+			wantErr: &errtypes.APIError{},
 			desc:    "When the CreateEphemeralCert call fails",
 		},
 		{
@@ -241,8 +235,8 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 							}),
 					), 1),
 			},
-			wantErr: "failed to decode valid PEM cert",
-			desc:    "When decoding the cert fails",
+			wantErr: &errtypes.ServerError{},
+			desc:    "When decoding the cert fails", // SQL Admin API fail
 		},
 		{
 			reqs: []*mock.Request{mock.InstanceGetSuccess(inst, 1),
@@ -259,8 +253,8 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 							}),
 					), 1),
 			},
-			wantErr: "failed to parse as x509 cert",
-			desc:    "When parsing the cert fails",
+			wantErr: &errtypes.ServerError{},
+			desc:    "When parsing the cert fails", // SQL Admin API fail
 		},
 	}
 	for i, tc := range testCases {
@@ -276,8 +270,8 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		r := newRefresher(time.Hour, 30*time.Second, 1, client)
 		_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey)
 
-		if !errorContains(err, tc.wantErr) {
-			t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %v, got = %v", i, tc.wantErr, err)
+		if !errors.As(err, &tc.wantErr) {
+			t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 		}
 	}
 }
@@ -341,19 +335,20 @@ func TestRefreshBuildsTLSConfig(t *testing.T) {
 	}
 
 	err = verifyPeerCert(nil, nil)
-	if !errorContains(err, "no certificate") {
-		t.Fatalf("expected verify peer cert to fail, got = %v", err)
+	var wantErr *errtypes.DialError
+	if !errors.As(err, &wantErr) {
+		t.Fatalf("when verify peer cert fails, want = %T, got = %v", wantErr, err)
 	}
 
 	err = verifyPeerCert([][]byte{[]byte("not a cert")}, nil)
-	if !errorContains(err, "x509.ParseCertificate(rawCerts[0])") {
-		t.Fatalf("expected verify peer cert to fail on invalid cert, got = %v", err)
+	if !errors.As(err, &wantErr) {
+		t.Fatalf("when verify fails on invalid cert, want = %T, got = %v", wantErr, err)
 	}
 
 	badCert := mock.GenerateCertWithCommonName(inst, "wrong:wrong")
 	err = verifyPeerCert([][]byte{badCert}, nil)
-	if !errorContains(err, "certificate had CN") {
-		t.Fatalf("expected common name mistmatch to error, got = %v", err)
+	if !errors.As(err, &wantErr) {
+		t.Fatalf("when common names mismatch, want = %T, got = %v", wantErr, err)
 	}
 
 	other := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
@@ -363,7 +358,7 @@ func TestRefreshBuildsTLSConfig(t *testing.T) {
 	}
 	b, _ = pem.Decode(certBytes)
 	err = verifyPeerCert([][]byte{b.Bytes}, nil)
-	if !errorContains(err, "signed by unknown authority") {
-		t.Fatalf("expected certificate verification to fail, got = %v", err)
+	if !errors.As(err, &wantErr) {
+		t.Fatalf("when certification fails, want = %T, got = %v", wantErr, err)
 	}
 }
