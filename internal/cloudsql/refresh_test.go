@@ -130,14 +130,14 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 		{
 			req: mock.CreateEphemeralSuccess(
 				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name), 1),
-			wantErr: &errtypes.ServerError{},
+			wantErr: &errtypes.RefreshError{},
 			desc:    "When the Metadata call fails",
 		},
 		{
 			req: mock.InstanceGetSuccess(
 				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
 					mock.WithRegion("some-other-region")), 1),
-			wantErr: &errtypes.ServerError{},
+			wantErr: &errtypes.RefreshError{},
 			desc:    "When the region does not match",
 		},
 		{
@@ -169,7 +169,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 						return nil, nil
 					}),
 				), 1),
-			wantErr: &errtypes.ServerError{},
+			wantErr: &errtypes.RefreshError{},
 			desc:    "When the server cert does not decode",
 		},
 		{
@@ -186,7 +186,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 						return certPEM.Bytes(), nil
 					}),
 				), 1),
-			wantErr: &errtypes.ServerError{},
+			wantErr: &errtypes.RefreshError{},
 			desc:    "When the cert is not a valid X.509 cert",
 		},
 	}
@@ -222,7 +222,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 	}{
 		{
 			reqs:    []*mock.Request{mock.InstanceGetSuccess(inst, 1)}, // no ephemeral cert call registered
-			wantErr: &errtypes.ServerError{},
+			wantErr: &errtypes.RefreshError{},
 			desc:    "When the CreateEphemeralCert call fails",
 		},
 		{
@@ -235,7 +235,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 							}),
 					), 1),
 			},
-			wantErr: &errtypes.ServerError{},
+			wantErr: &errtypes.RefreshError{},
 			desc:    "When decoding the cert fails", // SQL Admin API fail
 		},
 		{
@@ -253,7 +253,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 							}),
 					), 1),
 			},
-			wantErr: &errtypes.ServerError{},
+			wantErr: &errtypes.RefreshError{},
 			desc:    "When parsing the cert fails", // SQL Admin API fail
 		},
 	}

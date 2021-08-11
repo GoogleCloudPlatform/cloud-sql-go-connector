@@ -106,7 +106,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	}
 
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")
-	var wantErr2 *errtypes.ServerError
+	var wantErr2 *errtypes.RefreshError
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when API call fails, want = %T, got = %v", wantErr2, err)
 	}

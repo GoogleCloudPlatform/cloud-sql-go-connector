@@ -49,11 +49,11 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 	defer func() { end(err) }()
 	db, err := client.Instances.Get(inst.project, inst.name).Context(ctx).Do()
 	if err != nil {
-		return metadata{}, errtypes.NewServerError("failed to get instance metadata", inst.String(), err)
+		return metadata{}, errtypes.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
 	// validate the instance is supported for authenticated connections
 	if db.Region != inst.region {
-		return metadata{}, errtypes.NewServerError(
+		return metadata{}, errtypes.NewRefreshError(
 			fmt.Sprintf("provided region was mismatched - got %s, want %s", inst.region, db.Region),
 			inst.String(),
 			nil,
@@ -86,7 +86,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 	// parse the server-side CA certificate
 	b, _ := pem.Decode([]byte(db.ServerCaCert.Cert))
 	if b == nil {
-		return metadata{}, errtypes.NewServerError(
+		return metadata{}, errtypes.NewRefreshError(
 			"failed to decode valid PEM cert",
 			inst.String(),
 			nil,
@@ -94,7 +94,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 	}
 	cert, err := x509.ParseCertificate(b.Bytes)
 	if err != nil {
-		return metadata{}, errtypes.NewServerError(
+		return metadata{}, errtypes.NewRefreshError(
 			fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
 			inst.String(),
 			nil,
@@ -127,7 +127,7 @@ func fetchEphemeralCert(ctx context.Context, client *sqladmin.Service, inst conn
 	}
 	resp, err := client.SslCerts.CreateEphemeral(inst.project, inst.name, &req).Context(ctx).Do()
 	if err != nil {
-		return tls.Certificate{}, errtypes.NewServerError(
+		return tls.Certificate{}, errtypes.NewRefreshError(
 			"create ephemeral cert failed",
 			inst.String(),
 			err,
@@ -137,7 +137,7 @@ func fetchEphemeralCert(ctx context.Context, client *sqladmin.Service, inst conn
 	// parse the client cert
 	b, _ := pem.Decode([]byte(resp.Cert))
 	if b == nil {
-		return tls.Certificate{}, errtypes.NewServerError(
+		return tls.Certificate{}, errtypes.NewRefreshError(
 			"failed to decode valid PEM cert",
 			inst.String(),
 			nil,
@@ -145,7 +145,7 @@ func fetchEphemeralCert(ctx context.Context, client *sqladmin.Service, inst conn
 	}
 	clientCert, err := x509.ParseCertificate(b.Bytes)
 	if err != nil {
-		return tls.Certificate{}, errtypes.NewServerError(
+		return tls.Certificate{}, errtypes.NewRefreshError(
 			fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
 			inst.String(),
 			nil,

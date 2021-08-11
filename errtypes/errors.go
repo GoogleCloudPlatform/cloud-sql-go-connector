@@ -37,33 +37,33 @@ func NewConfigError(msg, cn string) *ConfigError {
 // malformated, the SQL instance does not support the requested IP type, etc.)
 type ConfigError struct{ *genericError }
 
-// NewServerError initializes a ServerError.
-func NewServerError(msg, cn string, err error) *ServerError {
-	return &ServerError{
+// NewRefreshError initializes a RefreshError.
+func NewRefreshError(msg, cn string, err error) *RefreshError {
+	return &RefreshError{
 		genericError: &genericError{Message: msg, ConnName: cn},
 		Err:          err,
 	}
 }
 
-// ServerError means the server returned with unexpected or invalid data. In
+// RefreshError means the server returned with unexpected or invalid data. In
 // general, this is an unexpected error and if a caller receives the error,
 // there is likely a problem with the backend API or the instance itself (e.g.,
 // missing certificates, invalid certificate encoding, region mismatch with the
 // requested instance connection name, etc.)
-type ServerError struct {
+type RefreshError struct {
 	*genericError
 	// Err is the underlying error and may be nil.
 	Err error
 }
 
-func (e *ServerError) Error() string {
+func (e *RefreshError) Error() string {
 	if e.Err == nil {
 		return fmt.Sprintf("Server error: %v", e.genericError)
 	}
 	return fmt.Sprintf("Server error: %v: %v", e.genericError, e.Err)
 }
 
-func (e *ServerError) Unwrap() error { return e.Err }
+func (e *RefreshError) Unwrap() error { return e.Err }
 
 // NewDialError initializes a DialError.
 func NewDialError(msg, cn string, err error) *DialError {
@@ -78,6 +78,7 @@ func NewDialError(msg, cn string, err error) *DialError {
 // failure, a missing certificate, etc.)
 type DialError struct {
 	*genericError
+	// Err is the underlying error and may be nil.
 	Err error
 }
 
