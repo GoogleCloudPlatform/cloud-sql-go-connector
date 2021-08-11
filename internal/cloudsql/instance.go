@@ -55,7 +55,7 @@ func parseConnName(cn string) (connName, error) {
 	b := []byte(cn)
 	m := connNameRegex.FindSubmatch(b)
 	if m == nil {
-		err := errtypes.NewClientError(
+		err := errtypes.NewConfigError(
 			"invalid instance connection name, expected PROJECT:REGION:INSTANCE",
 			cn,
 		)
@@ -183,7 +183,7 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 	}
 	addr, ok := res.md.ipAddrs[ipType]
 	if !ok {
-		err := errtypes.NewClientError(
+		err := errtypes.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", ipType),
 			i.String(),
 		)

@@ -29,50 +29,35 @@ func TestErrorFormatting(t *testing.T) {
 	}{
 		{
 			desc: "client error message",
-			err:  errtypes.NewClientError("error message", "proj:reg:inst"),
+			err:  errtypes.NewConfigError("error message", "proj:reg:inst"),
 			want: "Client error: error message (connection name = \"proj:reg:inst\")",
 		},
 		{
-			desc: "server error message",
-			err:  errtypes.NewServerError("error message", "proj:reg:inst"),
+			desc: "server error message without internal error",
+			err:  errtypes.NewServerError("error message", "proj:reg:inst", nil),
 			want: "Server error: error message (connection name = \"proj:reg:inst\")",
 		},
 		{
-			desc: "API error without inner error",
-			err: &errtypes.APIError{
-				Op:       "Do.Something",
-				ConnName: "proj:reg:inst",
-				Message:  "message",
-				Err:      nil, // no error here
-			},
-			want: "API error: Operation Do.Something failed (connection name = \"proj:reg:inst\")",
-		},
-		{
-			desc: "API error with inner error",
-			err: &errtypes.APIError{
-				Op:       "Do.Something",
-				ConnName: "proj:reg:inst",
-				Message:  "message",
-				Err:      errors.New("inner-error"),
-			},
-			want: "API error: Operation Do.Something failed (connection name = \"proj:reg:inst\"): inner-error",
+			desc: "server error message with internal error",
+			err:  errtypes.NewServerError("error message", "proj:reg:inst", errors.New("inner-error")),
+			want: "Server error: error message (connection name = \"proj:reg:inst\"): inner-error",
 		},
 		{
 			desc: "Dial error without inner error",
-			err: &errtypes.DialError{
-				ConnName: "proj:reg:inst",
-				Message:  "message",
-				Err:      nil, // no error here
-			},
+			err: errtypes.NewDialError(
+				"message",
+				"proj:reg:inst",
+				nil, // no error here
+			),
 			want: "Dial error: message (connection name = \"proj:reg:inst\")",
 		},
 		{
 			desc: "Dial error with inner error",
-			err: &errtypes.DialError{
-				ConnName: "proj:reg:inst",
-				Message:  "message",
-				Err:      errors.New("inner-error"),
-			},
+			err: errtypes.NewDialError(
+				"message",
+				"proj:reg:inst",
+				errors.New("inner-error"),
+			),
 			want: "Dial error: message (connection name = \"proj:reg:inst\"): inner-error",
 		},
 	}

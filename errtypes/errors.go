@@ -25,22 +25,23 @@ func (e *genericError) Error() string {
 	return fmt.Sprintf("%v (connection name = %q)", e.Message, e.ConnName)
 }
 
-// NewClientError initializes a ClientError.
-func NewClientError(msg, cn string) *ClientError {
-	return &ClientError{
+// NewConfigError initializes a ConfigError.
+func NewConfigError(msg, cn string) *ConfigError {
+	return &ConfigError{
 		genericError: &genericError{Message: "Client error: " + msg, ConnName: cn},
 	}
 }
 
-// ClientError represents an incorrect request by the client. Client errors
+// ConfigError represents an incorrect request by the user. Config errors
 // usually indicate a semantic error (e.g., the instance connection name is
 // malformated, the SQL instance does not support the requested IP type, etc.)
-type ClientError struct{ *genericError }
+type ConfigError struct{ *genericError }
 
 // NewServerError initializes a ServerError.
-func NewServerError(msg, cn string) *ServerError {
+func NewServerError(msg, cn string, err error) *ServerError {
 	return &ServerError{
-		genericError: &genericError{Message: "Server error: " + msg, ConnName: cn},
+		genericError: &genericError{Message: msg, ConnName: cn},
+		Err:          err,
 	}
 }
 
@@ -49,43 +50,42 @@ func NewServerError(msg, cn string) *ServerError {
 // there is likely a problem with the backend API or the instance itself (e.g.,
 // missing certificates, invalid certificate encoding, region mismatch with the
 // requested instance connection name, etc.)
-type ServerError struct{ *genericError }
-
-// APIError represents an error with the underlying network call to the SQL
-// Admin API. APIErrors typically wrap Error types from the
-// google.golang.org/api/googleapi package.
-type APIError struct {
-	Op       string
-	ConnName string
-	Message  string
-	Err      error
+type ServerError struct {
+	*genericError
+	// Err is the underlying error and may be nil.
+	Err error
 }
 
-func (e *APIError) Error() string {
-	if e.Err != nil {
-		return fmt.Sprintf("API error: Operation %s failed (connection name = %q): %v",
-			e.Op, e.ConnName, e.Err)
+func (e *ServerError) Error() string {
+	if e.Err == nil {
+		return fmt.Sprintf("Server error: %v", e.genericError)
 	}
-	return fmt.Sprintf("API error: Operation %s failed (connection name = %q)",
-		e.Op, e.ConnName)
+	return fmt.Sprintf("Server error: %v: %v", e.genericError, e.Err)
 }
 
-func (e *APIError) Unwrap() error { return e.Err }
+func (e *ServerError) Unwrap() error { return e.Err }
+
+// NewDialError initializes a DialError.
+func NewDialError(msg, cn string, err error) *DialError {
+	return &DialError{
+		genericError: &genericError{Message: msg, ConnName: cn},
+		Err:          err,
+	}
+}
 
 // DialError represents a problem that occurred when trying to dial a SQL
 // instance (e.g., a failure to set the keep-alive property, a TLS handshake
 // failure, a missing certificate, etc.)
 type DialError struct {
-	ConnName string
-	Message  string
-	Err      error
+	*genericError
+	Err error
 }
 
 func (e *DialError) Error() string {
 	if e.Err == nil {
-		return fmt.Sprintf("Dial error: %v (connection name = %q)", e.Message, e.ConnName)
+		return fmt.Sprintf("Dial error: %v", e.genericError)
 	}
-	return fmt.Sprintf("Dial error: %v (connection name = %q): %v", e.Message, e.ConnName, e.Err)
+	return fmt.Sprintf("Dial error: %v: %v", e.genericError, e.Err)
 }
 
 func (e *DialError) Unwrap() error { return e.Err }

@@ -49,19 +49,18 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 	defer func() { end(err) }()
 	db, err := client.Instances.Get(inst.project, inst.name).Context(ctx).Do()
 	if err != nil {
-		return metadata{}, &errtypes.APIError{
-			Op: "Instances.Get", ConnName: inst.String(), Err: err}
+		return metadata{}, errtypes.NewServerError("failed to get instance metadata", inst.String(), err)
 	}
-
 	// validate the instance is supported for authenticated connections
 	if db.Region != inst.region {
 		return metadata{}, errtypes.NewServerError(
 			fmt.Sprintf("provided region was mismatched - got %s, want %s", inst.region, db.Region),
 			inst.String(),
+			nil,
 		)
 	}
 	if db.BackendType != "SECOND_GEN" {
-		return metadata{}, errtypes.NewClientError(
+		return metadata{}, errtypes.NewConfigError(
 			"unsupported instance - only Second Generation instances are supported",
 			inst.String(),
 		)
@@ -78,7 +77,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 		}
 	}
 	if len(ipAddrs) == 0 {
-		return metadata{}, errtypes.NewClientError(
+		return metadata{}, errtypes.NewConfigError(
 			"cannot connect to instance - it has no supported IP addresses",
 			inst.String(),
 		)
@@ -90,6 +89,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 		return metadata{}, errtypes.NewServerError(
 			"failed to decode valid PEM cert",
 			inst.String(),
+			nil,
 		)
 	}
 	cert, err := x509.ParseCertificate(b.Bytes)
@@ -97,6 +97,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 		return metadata{}, errtypes.NewServerError(
 			fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
 			inst.String(),
+			nil,
 		)
 	}
 
@@ -126,12 +127,11 @@ func fetchEphemeralCert(ctx context.Context, client *sqladmin.Service, inst conn
 	}
 	resp, err := client.SslCerts.CreateEphemeral(inst.project, inst.name, &req).Context(ctx).Do()
 	if err != nil {
-		return tls.Certificate{}, &errtypes.APIError{
-			Op:       "SslCerts.CreateEphemeral",
-			ConnName: inst.String(),
-			Message:  "create ephemeral cert failed",
-			Err:      err,
-		}
+		return tls.Certificate{}, errtypes.NewServerError(
+			"create ephemeral cert failed",
+			inst.String(),
+			err,
+		)
 	}
 
 	// parse the client cert
@@ -140,6 +140,7 @@ func fetchEphemeralCert(ctx context.Context, client *sqladmin.Service, inst conn
 		return tls.Certificate{}, errtypes.NewServerError(
 			"failed to decode valid PEM cert",
 			inst.String(),
+			nil,
 		)
 	}
 	clientCert, err := x509.ParseCertificate(b.Bytes)
@@ -147,6 +148,7 @@ func fetchEphemeralCert(ctx context.Context, client *sqladmin.Service, inst conn
 		return tls.Certificate{}, errtypes.NewServerError(
 			fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
 			inst.String(),
+			nil,
 		)
 	}
 
@@ -187,27 +189,39 @@ func createTLSConfig(inst connName, m metadata, cert tls.Certificate) *tls.Confi
 func genVerifyPeerCertificateFunc(cn connName, pool *x509.CertPool) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 		if len(rawCerts) == 0 {
-			return &errtypes.DialError{ConnName: cn.String(),
-				Message: "no certificate to verify"}
+			return errtypes.NewDialError(
+				"no certificate to verify",
+				cn.String(),
+				nil,
+			)
 		}
 
 		cert, err := x509.ParseCertificate(rawCerts[0])
 		if err != nil {
-			return &errtypes.DialError{ConnName: cn.String(),
-				Message: "failed to parse X.509 certificate", Err: err}
+			return errtypes.NewDialError(
+				"failed to parse X.509 certificate",
+				cn.String(),
+				err,
+			)
 		}
 
 		opts := x509.VerifyOptions{Roots: pool}
 		if _, err = cert.Verify(opts); err != nil {
-			return &errtypes.DialError{ConnName: cn.String(),
-				Message: "failed to verify certificate", Err: err}
+			return errtypes.NewDialError(
+				"failed to verify certificate",
+				cn.String(),
+				err,
+			)
 		}
 
 		certInstanceName := fmt.Sprintf("%s:%s", cn.project, cn.name)
 		if cert.Subject.CommonName != certInstanceName {
-			return &errtypes.DialError{ConnName: cn.String(),
-				Message: fmt.Sprintf("certificate had CN %q, expected %q",
-					cert.Subject.CommonName, certInstanceName)}
+			return errtypes.NewDialError(
+				fmt.Sprintf("certificate had CN %q, expected %q",
+					cert.Subject.CommonName, certInstanceName),
+				cn.String(),
+				nil,
+			)
 		}
 		return nil
 	}
@@ -248,10 +262,11 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 	// avoid refreshing too often to try not to tax the SQL Admin API quotas
 	err = r.clientLimiter.Wait(ctx)
 	if err != nil {
-		return metadata{}, nil, time.Time{}, &errtypes.DialError{
-			ConnName: cn.String(),
-			Message:  "refresh was throttled until context expired",
-		}
+		return metadata{}, nil, time.Time{}, errtypes.NewDialError(
+			"refresh was throttled until context expired",
+			cn.String(),
+			nil,
+		)
 	}
 
 	// start async fetching the instance's metadata

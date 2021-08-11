@@ -154,23 +154,26 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if err != nil {
 		// refresh the instance info in case it caused the connection failure
 		i.ForceRefresh()
-		return nil, &errtypes.DialError{ConnName: i.String(),
-			Message: "failed to dial", Err: err}
+		return nil, errtypes.NewDialError(
+			"failed to dial",
+			i.String(),
+			err,
+		)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
-			return nil, &errtypes.DialError{
-				ConnName: i.String(),
-				Message:  "failed to set keep-alive",
-				Err:      err,
-			}
+			return nil, errtypes.NewDialError(
+				"failed to set keep-alive",
+				i.String(),
+				err,
+			)
 		}
 		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
-			return nil, &errtypes.DialError{
-				ConnName: i.String(),
-				Message:  "failed to set keep-alive period",
-				Err:      err,
-			}
+			return nil, errtypes.NewDialError(
+				"failed to set keep-alive period",
+				i.String(),
+				err,
+			)
 		}
 	}
 	tlsConn := tls.Client(conn, tlsCfg)
@@ -178,11 +181,11 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		// refresh the instance info in case it caused the handshake failure
 		i.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
-		return nil, &errtypes.DialError{
-			ConnName: i.String(),
-			Message:  "handshake failed",
-			Err:      err,
-		}
+		return nil, errtypes.NewDialError(
+			"handshake failed",
+			i.String(),
+			err,
+		)
 	}
 	return tlsConn, nil
 }

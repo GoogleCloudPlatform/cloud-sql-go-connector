@@ -130,7 +130,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 		{
 			req: mock.CreateEphemeralSuccess(
 				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name), 1),
-			wantErr: &errtypes.APIError{},
+			wantErr: &errtypes.ServerError{},
 			desc:    "When the Metadata call fails",
 		},
 		{
@@ -147,7 +147,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 					mock.WithRegion("my-region"),
 					mock.WithFirstGenBackend(),
 				), 1),
-			wantErr: &errtypes.ClientError{},
+			wantErr: &errtypes.ConfigError{},
 			desc:    "When the instance isn't Second generation",
 		},
 		{
@@ -157,7 +157,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 					mock.WithRegion("my-region"),
 					mock.WithMissingIPAddrs(),
 				), 1),
-			wantErr: &errtypes.ClientError{},
+			wantErr: &errtypes.ConfigError{},
 			desc:    "When the instance has no supported IP addresses",
 		},
 		{
@@ -222,7 +222,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 	}{
 		{
 			reqs:    []*mock.Request{mock.InstanceGetSuccess(inst, 1)}, // no ephemeral cert call registered
-			wantErr: &errtypes.APIError{},
+			wantErr: &errtypes.ServerError{},
 			desc:    "When the CreateEphemeralCert call fails",
 		},
 		{

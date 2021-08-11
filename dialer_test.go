@@ -92,7 +92,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	d.sqladmin = svc
 
 	_, err = d.Dial(context.Background(), "bad-instance-name")
-	var wantErr1 *errtypes.ClientError
+	var wantErr1 *errtypes.ConfigError
 	if !errors.As(err, &wantErr1) {
 		t.Fatalf("when instance name is invalid, want = %T, got = %v", wantErr1, err)
 	}
@@ -106,7 +106,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	}
 
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")
-	var wantErr2 *errtypes.APIError
+	var wantErr2 *errtypes.ServerError
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when API call fails, want = %T, got = %v", wantErr2, err)
 	}
@@ -135,7 +135,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	}()
 
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance", WithPrivateIP())
-	var wantErr1 *errtypes.ClientError
+	var wantErr1 *errtypes.ConfigError
 	if !errors.As(err, &wantErr1) {
 		t.Fatalf("when IP type is invalid, want = %T, got = %v", wantErr1, err)
 	}
