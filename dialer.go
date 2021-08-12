@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/errtypes"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"golang.org/x/net/proxy"
@@ -153,14 +154,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if err != nil {
 		// refresh the instance info in case it caused the connection failure
 		i.ForceRefresh()
-		return nil, err
+		return nil, errtypes.NewDialError("failed to dial", i.String(), err)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
-			return nil, fmt.Errorf("failed to set keep-alive: %v", err)
+			return nil, errtypes.NewDialError("failed to set keep-alive", i.String(), err)
 		}
 		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
-			return nil, fmt.Errorf("failed to set keep-alive period: %v", err)
+			return nil, errtypes.NewDialError("failed to set keep-alive period", i.String(), err)
 		}
 	}
 	tlsConn := tls.Client(conn, tlsCfg)
@@ -168,7 +169,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		// refresh the instance info in case it caused the handshake failure
 		i.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
-		return nil, fmt.Errorf("handshake failed: %w", err)
+		return nil, errtypes.NewDialError("handshake failed", i.String(), err)
 	}
 	return tlsConn, nil
 }
