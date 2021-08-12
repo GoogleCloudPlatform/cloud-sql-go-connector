@@ -1,0 +1,69 @@
+package trace
+
+import (
+	"context"
+	"fmt"
+
+	"go.opencensus.io/stats"
+	"go.opencensus.io/stats/view"
+	"go.opencensus.io/tag"
+)
+
+var keyInstance, _ = tag.NewKey("cloudsql_instance")
+
+var (
+	mLatencyMS = stats.Int64(
+		"/cloudsqlconn/latency",
+		"The latency in milliseconds per Dial",
+		stats.UnitMilliseconds,
+	)
+	latencyView = &view.View{
+		Name:        "/cloudsqlconn/dialer_latency",
+		Measure:     mLatencyMS,
+		Description: "The distribution of dialer latencies (ms)",
+		// Lantency in buckets, e.g., >=0ms, >=100ms, etc.
+		Aggregation: view.Distribution(0, 100, 200, 300, 400, 500, 600, 800, 1000, 2000, 4000),
+		TagKeys:     []tag.Key{keyInstance},
+	}
+)
+
+var (
+	mConnections = stats.Int64(
+		"/cloudsqlconn/connection",
+		"The number of connections to Cloud SQL",
+		stats.UnitDimensionless,
+	)
+	connectionsView = &view.View{
+		Name:        "/cloudsqlconn/open_connections",
+		Measure:     mConnections,
+		Description: "The count of open connections",
+		Aggregation: view.Count(),
+		TagKeys:     []tag.Key{keyInstance},
+	}
+)
+
+// RecordDialLatency records a latency value for a call to dial.
+func RecordDialLatency(ctx context.Context, instance string, latency int64) {
+	// Why are we ignoring this error? See below under RecordConnections.
+	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance))
+	stats.Record(ctx, mLatencyMS.M(latency))
+}
+
+// RecordConnections records the current number of open connections.
+func RecordConnections(ctx context.Context, instance string, count uint64) {
+	// tag.New creates a new context and errors only if the new tag already
+	// exists in the provided context. Since we're adding tags within this
+	// package only, we can be confident that there were be no duplicate tags
+	// and so can ignore the error.
+	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance))
+	stats.Record(ctx, mConnections.M(int64(count)))
+}
+
+// InitMetrics registers all views. Without registering views, metrics will not
+// be reported.
+func InitMetrics() error {
+	if err := view.Register(latencyView, connectionsView); err != nil {
+		return fmt.Errorf("failed to initialize metrics: %v", err)
+	}
+	return nil
+}

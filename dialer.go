@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtypes"
@@ -73,6 +74,8 @@ type Dialer struct {
 	// defaultDialCfg holds the constructor level DialOptions, so that it can
 	// be copied and mutated by the Dial function.
 	defaultDialCfg dialCfg
+
+	openConns uint64
 }
 
 // NewDialer creates a new Dialer.
@@ -110,6 +113,10 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		opt(&dialCfg)
 	}
 
+	// TODO: consider moving this registration into an option that callers control
+	if err := trace.InitMetrics(); err != nil {
+		return nil, err
+	}
 	d := &Dialer{
 		instances:      make(map[string]*cloudsql.Instance),
 		key:            cfg.rsaKey,
@@ -123,6 +130,9 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
 // instance's connection name, which is in the format "project-name:region:instance-name".
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
+	trace.RecordConnections(ctx, instance, d.openConns)
+
+	startTime := time.Now()
 	var endDial trace.EndSpanFunc
 	ctx, endDial = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn.Dial",
 		trace.AddInstanceName(instance))
@@ -171,7 +181,43 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		_ = tlsConn.Close() // best effort close attempt
 		return nil, errtypes.NewDialError("handshake failed", i.String(), err)
 	}
-	return tlsConn, nil
+	defer func() {
+		trace.RecordDialLatency(ctx, instance, msSince(startTime))
+		atomic.AddUint64(&d.openConns, 1)
+		trace.RecordConnections(ctx, instance, d.openConns)
+	}()
+
+	return newInstrumentedConn(tlsConn, instance, &d.openConns), nil
+}
+
+func newInstrumentedConn(conn net.Conn, instance string, openConns *uint64) *instrumentedConn {
+	return &instrumentedConn{
+		Conn: conn,
+		closeFunc: func() {
+			atomic.AddUint64(openConns, ^uint64(0))
+			trace.RecordConnections(context.Background(), instance, *openConns)
+		},
+	}
+}
+
+type instrumentedConn struct {
+	net.Conn
+	closeFunc func()
+}
+
+// Close delegates to the underylying net.Conn interface and reports the close
+// to the provided closeFunc only when Close returns no error.
+func (i *instrumentedConn) Close() error {
+	err := i.Conn.Close()
+	if err != nil {
+		return err
+	}
+	i.closeFunc()
+	return nil
+}
+
+func msSince(t time.Time) int64 {
+	return time.Since(t).Milliseconds()
 }
 
 // Close closes the Dialer; it prevents the Dialer from refreshing the information

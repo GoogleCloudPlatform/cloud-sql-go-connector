@@ -12,5 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package trace provides an interface for tracing internal operations.
+// Package trace provides an interface for tracing internal operations and
+// reporting various metrics. Metrics are recorded on a package-global basis.
 package trace // import "cloud.google.com/go/cloudsqlconn/internal/trace"
