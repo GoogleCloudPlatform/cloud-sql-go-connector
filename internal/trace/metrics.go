@@ -21,7 +21,7 @@ var (
 		Name:        "/cloudsqlconn/dialer_latency",
 		Measure:     mLatencyMS,
 		Description: "The distribution of dialer latencies (ms)",
-		// Lantency in buckets, e.g., >=0ms, >=100ms, etc.
+		// Latency in buckets, e.g., >=0ms, >=100ms, etc.
 		Aggregation: view.Distribution(0, 100, 200, 300, 400, 500, 600, 800, 1000, 2000, 4000),
 		TagKeys:     []tag.Key{keyInstance},
 	}
