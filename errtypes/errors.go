@@ -45,11 +45,11 @@ func NewRefreshError(msg, cn string, err error) *RefreshError {
 	}
 }
 
-// RefreshError means the server returned with unexpected or invalid data. In
-// general, this is an unexpected error and if a caller receives the error,
-// there is likely a problem with the backend API or the instance itself (e.g.,
-// missing certificates, invalid certificate encoding, region mismatch with the
-// requested instance connection name, etc.)
+// RefreshError means that an error occurred during the background
+// refresh operation. In general, this is an unexpected error caused by
+// an interaction with the API itself. (e.g., missing certificates, 
+// invalid certificate encoding, region mismatch with the requested 
+// instance connection name, etc.)
 type RefreshError struct {
 	*genericError
 	// Err is the underlying error and may be nil.
