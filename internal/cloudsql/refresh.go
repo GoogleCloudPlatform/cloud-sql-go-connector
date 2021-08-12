@@ -83,11 +83,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 	// parse the server-side CA certificate
 	b, _ := pem.Decode([]byte(db.ServerCaCert.Cert))
 	if b == nil {
-		return metadata{}, errtypes.NewRefreshError(
-			"failed to decode valid PEM cert",
-			inst.String(),
-			nil,
-		)
+		return metadata{}, errtypes.NewRefreshError("failed to decode valid PEM cert", inst.String(), nil)
 	}
 	cert, err := x509.ParseCertificate(b.Bytes)
 	if err != nil {
@@ -186,29 +182,17 @@ func createTLSConfig(inst connName, m metadata, cert tls.Certificate) *tls.Confi
 func genVerifyPeerCertificateFunc(cn connName, pool *x509.CertPool) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 		if len(rawCerts) == 0 {
-			return errtypes.NewDialError(
-				"no certificate to verify",
-				cn.String(),
-				nil,
-			)
+			return errtypes.NewDialError("no certificate to verify", cn.String(), nil)
 		}
 
 		cert, err := x509.ParseCertificate(rawCerts[0])
 		if err != nil {
-			return errtypes.NewDialError(
-				"failed to parse X.509 certificate",
-				cn.String(),
-				err,
-			)
+			return errtypes.NewDialError("failed to parse X.509 certificate", cn.String(), err)
 		}
 
 		opts := x509.VerifyOptions{Roots: pool}
 		if _, err = cert.Verify(opts); err != nil {
-			return errtypes.NewDialError(
-				"failed to verify certificate",
-				cn.String(),
-				err,
-			)
+			return errtypes.NewDialError("failed to verify certificate", cn.String(), err)
 		}
 
 		certInstanceName := fmt.Sprintf("%s:%s", cn.project, cn.name)
