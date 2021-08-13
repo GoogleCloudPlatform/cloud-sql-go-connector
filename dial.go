@@ -36,6 +36,15 @@ func Dial(ctx context.Context, instance string) (net.Conn, error) {
 	return d.Dial(ctx, instance)
 }
 
+func Close() error {
+	d, err := getDefaultDialer()
+	if err != nil {
+		return err
+	}
+	d.Close()
+	return nil
+}
+
 // getDefaultDialer provides the singleton dialer as a default for dial functions.
 func getDefaultDialer() (*Dialer, error) {
 	// TODO: Provide functionality for customizing/setting the default dialer

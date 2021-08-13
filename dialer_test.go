@@ -47,6 +47,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
+	defer d.Close()
 	d.sqladmin = svc
 
 	conn, err := d.Dial(context.Background(), "my-project:my-region:my-instance", WithPublicIP())
@@ -89,6 +90,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
+	defer d.Close()
 	d.sqladmin = svc
 
 	_, err = d.Dial(context.Background(), "bad-instance-name")
