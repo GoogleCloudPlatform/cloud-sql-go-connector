@@ -130,7 +130,8 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
 // instance's connection name, which is in the format "project-name:region:instance-name".
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
-	trace.RecordConnections(ctx, instance, d.openConns)
+	open := atomic.LoadUint64(&d.openConns)
+	trace.RecordConnections(ctx, instance, open)
 
 	startTime := time.Now()
 	var endDial trace.EndSpanFunc
@@ -184,7 +185,8 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	defer func() {
 		trace.RecordDialLatency(ctx, instance, msSince(startTime))
 		atomic.AddUint64(&d.openConns, 1)
-		trace.RecordConnections(ctx, instance, d.openConns)
+		open := atomic.LoadUint64(&d.openConns)
+		trace.RecordConnections(ctx, instance, open)
 	}()
 
 	return newInstrumentedConn(tlsConn, instance, &d.openConns), nil
@@ -195,7 +197,8 @@ func newInstrumentedConn(conn net.Conn, instance string, openConns *uint64) *ins
 		Conn: conn,
 		closeFunc: func() {
 			atomic.AddUint64(openConns, ^uint64(0))
-			trace.RecordConnections(context.Background(), instance, *openConns)
+			open := atomic.LoadUint64(openConns)
+			trace.RecordConnections(context.Background(), instance, open)
 		},
 	}
 }
