@@ -26,8 +26,13 @@ var (
 	dErr          error
 )
 
-// Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
-// instance's connection name, which is in the format "project-name:region:instance-name".
+// Dial returns a net.Conn connected to the specified Cloud SQL instance. The
+// instance argument must be the instance's connection name, which is in the
+// format "project-name:region:instance-name". Dial is a convenience wrapper
+// that instantiates a Dialer and dials the specified instance. The dialer's
+// goroutine that keeps an instance's connection data fresh is leaked. Callers
+// who are concerned about performance should instantiate a dialer on their own
+// and close it when finished.
 func Dial(ctx context.Context, instance string) (net.Conn, error) {
 	d, err := getDefaultDialer()
 	if err != nil {
