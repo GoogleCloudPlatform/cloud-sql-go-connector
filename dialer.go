@@ -183,26 +183,28 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		return nil, errtypes.NewDialError("handshake failed", i.String(), err)
 	}
 	defer func() {
-		trace.RecordDialLatency(ctx, instance, msSince(startTime))
-		atomic.AddUint64(&d.openConns, 1)
-		open := atomic.LoadUint64(&d.openConns)
+		trace.RecordDialLatency(ctx, instance, time.Since(startTime).Milliseconds())
+		open := atomic.AddUint64(&d.openConns, 1)
 		trace.RecordConnections(ctx, instance, open)
 	}()
 
 	return newInstrumentedConn(tlsConn, instance, &d.openConns), nil
 }
 
+// newInstrumentedConn initializes an instrumentedConn that on closing will
+// decrement the number of open connects and record the result.
 func newInstrumentedConn(conn net.Conn, instance string, openConns *uint64) *instrumentedConn {
 	return &instrumentedConn{
 		Conn: conn,
 		closeFunc: func() {
-			atomic.AddUint64(openConns, ^uint64(0))
-			open := atomic.LoadUint64(openConns)
+			open := atomic.AddUint64(openConns, ^uint64(0))
 			trace.RecordConnections(context.Background(), instance, open)
 		},
 	}
 }
 
+// instrumentedConn wraps a net.Conn and invokes closeFunc when the connection
+// is closed.
 type instrumentedConn struct {
 	net.Conn
 	closeFunc func()
@@ -217,10 +219,6 @@ func (i *instrumentedConn) Close() error {
 	}
 	i.closeFunc()
 	return nil
-}
-
-func msSince(t time.Time) int64 {
-	return time.Since(t).Milliseconds()
 }
 
 // Close closes the Dialer; it prevents the Dialer from refreshing the information

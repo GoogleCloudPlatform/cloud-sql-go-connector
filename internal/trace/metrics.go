@@ -18,7 +18,7 @@ var (
 		stats.UnitMilliseconds,
 	)
 	latencyView = &view.View{
-		Name:        "/cloudsqlconn/dialer_latency",
+		Name:        "/cloudsqlconn/dial_latency",
 		Measure:     mLatencyMS,
 		Description: "The distribution of dialer latencies (ms)",
 		// Latency in buckets, e.g., >=0ms, >=100ms, etc.
