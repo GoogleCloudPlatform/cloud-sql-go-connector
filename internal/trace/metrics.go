@@ -30,14 +30,14 @@ var (
 var (
 	mConnections = stats.Int64(
 		"/cloudsqlconn/connection",
-		"The number of connections to Cloud SQL",
+		"A connect or disconnect event to Cloud SQL",
 		stats.UnitDimensionless,
 	)
 	connectionsView = &view.View{
 		Name:        "/cloudsqlconn/open_connections",
 		Measure:     mConnections,
-		Description: "The count of open connections",
-		Aggregation: view.Count(),
+		Description: "The sum of Cloud SQL connections",
+		Aggregation: view.Sum(),
 		TagKeys:     []tag.Key{keyInstance},
 	}
 )
@@ -49,14 +49,20 @@ func RecordDialLatency(ctx context.Context, instance string, latency int64) {
 	stats.Record(ctx, mLatencyMS.M(latency))
 }
 
-// RecordConnections records the current number of open connections.
-func RecordConnections(ctx context.Context, instance string, count uint64) {
+// RecordConnection reports a connection event.
+func RecordConnection(ctx context.Context, instance string) {
 	// tag.New creates a new context and errors only if the new tag already
 	// exists in the provided context. Since we're adding tags within this
 	// package only, we can be confident that there were be no duplicate tags
 	// and so can ignore the error.
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance))
-	stats.Record(ctx, mConnections.M(int64(count)))
+	stats.Record(ctx, mConnections.M(1))
+}
+
+// RecordDisconnect records a disconnect event.
+func RecordDisconnect(ctx context.Context, instance string) {
+	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance))
+	stats.Record(ctx, mConnections.M(-1))
 }
 
 // InitMetrics registers all views. Without registering views, metrics will not

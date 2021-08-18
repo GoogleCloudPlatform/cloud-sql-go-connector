@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtypes"
@@ -74,8 +73,6 @@ type Dialer struct {
 	// defaultDialCfg holds the constructor level DialOptions, so that it can
 	// be copied and mutated by the Dial function.
 	defaultDialCfg dialCfg
-
-	openConns uint64
 }
 
 // NewDialer creates a new Dialer.
@@ -113,8 +110,11 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		opt(&dialCfg)
 	}
 
-	// TODO: consider moving this registration into an option that callers control
 	if err := trace.InitMetrics(); err != nil {
+		// This error means the internal metric configuration is incorrect and
+		// should never be surfaced to callers, as there's nothing actionable
+		// for a caller to do. Ignoring the error seems worse and so we return
+		// it.
 		return nil, err
 	}
 	d := &Dialer{
@@ -130,9 +130,6 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
 // instance's connection name, which is in the format "project-name:region:instance-name".
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
-	open := atomic.LoadUint64(&d.openConns)
-	trace.RecordConnections(ctx, instance, open)
-
 	startTime := time.Now()
 	var endDial trace.EndSpanFunc
 	ctx, endDial = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn.Dial",
@@ -184,21 +181,19 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	defer func() {
 		trace.RecordDialLatency(ctx, instance, time.Since(startTime).Milliseconds())
-		open := atomic.AddUint64(&d.openConns, 1)
-		trace.RecordConnections(ctx, instance, open)
+		trace.RecordConnection(ctx, instance)
 	}()
 
-	return newInstrumentedConn(tlsConn, instance, &d.openConns), nil
+	return newInstrumentedConn(tlsConn, instance), nil
 }
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
 // decrement the number of open connects and record the result.
-func newInstrumentedConn(conn net.Conn, instance string, openConns *uint64) *instrumentedConn {
+func newInstrumentedConn(conn net.Conn, instance string) *instrumentedConn {
 	return &instrumentedConn{
 		Conn: conn,
 		closeFunc: func() {
-			open := atomic.AddUint64(openConns, ^uint64(0))
-			trace.RecordConnections(context.Background(), instance, open)
+			trace.RecordDisconnect(context.Background(), instance)
 		},
 	}
 }
