@@ -44,29 +44,31 @@ var (
 
 // RecordDialLatency records a latency value for a call to dial.
 func RecordDialLatency(ctx context.Context, instance string, latency int64) {
-	// Why are we ignoring this error? See below under RecordConnections.
+	// tag.New creates a new context and errors only if the new tag already
+	// exists in the provided context. Since we're adding tags within this
+	// package only, we can be confident that there were be no duplicate tags
+	// and so can ignore the error.
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance))
 	stats.Record(ctx, mLatencyMS.M(latency))
 }
 
 // RecordConnection reports a connection event.
 func RecordConnection(ctx context.Context, instance string) {
-	// tag.New creates a new context and errors only if the new tag already
-	// exists in the provided context. Since we're adding tags within this
-	// package only, we can be confident that there were be no duplicate tags
-	// and so can ignore the error.
+	// Why are we ignoring this error? See above under RecordDialLatency.
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance))
 	stats.Record(ctx, mConnections.M(1))
 }
 
 // RecordDisconnect records a disconnect event.
 func RecordDisconnect(ctx context.Context, instance string) {
+	// Why are we ignoring this error? See above under RecordDialLatency.
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance))
 	stats.Record(ctx, mConnections.M(-1))
 }
 
 // InitMetrics registers all views. Without registering views, metrics will not
-// be reported.
+// be reported. If any names of the registered views conflict, this function
+// returns an error to indicate a configuration problem.
 func InitMetrics() error {
 	if err := view.Register(latencyView, connectionsView); err != nil {
 		return fmt.Errorf("failed to initialize metrics: %v", err)
