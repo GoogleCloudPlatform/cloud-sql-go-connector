@@ -221,7 +221,7 @@ func (i *instrumentedConn) Close() error {
 	if err != nil {
 		return err
 	}
-	i.closeFunc()
+	go i.closeFunc()
 	return nil
 }
 
