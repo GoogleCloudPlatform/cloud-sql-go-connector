@@ -27,6 +27,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/errtypes"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
+	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
@@ -73,6 +74,10 @@ type Dialer struct {
 	// defaultDialCfg holds the constructor level DialOptions, so that it can
 	// be copied and mutated by the Dial function.
 	defaultDialCfg dialCfg
+
+	// dialerID uniquely identifies a Dialer. Used for monitoring purposes,
+	// *only* when a client has configured OpenCensus exporters.
+	dialerID string
 }
 
 // NewDialer creates a new Dialer.
@@ -110,12 +115,20 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		opt(&dialCfg)
 	}
 
+	if err := trace.InitMetrics(); err != nil {
+		// This error means the internal metric configuration is incorrect and
+		// should never be surfaced to callers, as there's nothing actionable
+		// for a caller to do. Ignoring the error seems worse and so we return
+		// it.
+		return nil, err
+	}
 	d := &Dialer{
 		instances:      make(map[string]*cloudsql.Instance),
 		key:            cfg.rsaKey,
 		refreshTimeout: cfg.refreshTimeout,
 		sqladmin:       client,
 		defaultDialCfg: dialCfg,
+		dialerID:       uuid.New().String(),
 	}
 	return d, nil
 }
@@ -123,9 +136,12 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
 // instance's connection name, which is in the format "project-name:region:instance-name".
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
+	startTime := time.Now()
 	var endDial trace.EndSpanFunc
 	ctx, endDial = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn.Dial",
-		trace.AddInstanceName(instance))
+		trace.AddInstanceName(instance),
+		trace.AddDialerID(d.dialerID),
+	)
 	defer func() { endDial(err) }()
 	cfg := d.defaultDialCfg
 	for _, opt := range opts {
@@ -171,7 +187,42 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		_ = tlsConn.Close() // best effort close attempt
 		return nil, errtypes.NewDialError("handshake failed", i.String(), err)
 	}
-	return tlsConn, nil
+	latency := time.Since(startTime).Milliseconds()
+	go func() {
+		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
+		trace.RecordConnectionOpen(ctx, instance, d.dialerID)
+	}()
+
+	return newInstrumentedConn(tlsConn, instance, d.dialerID), nil
+}
+
+// newInstrumentedConn initializes an instrumentedConn that on closing will
+// decrement the number of open connects and record the result.
+func newInstrumentedConn(conn net.Conn, instance, dialerID string) *instrumentedConn {
+	return &instrumentedConn{
+		Conn: conn,
+		closeFunc: func() {
+			trace.RecordConnectionClose(context.Background(), instance, dialerID)
+		},
+	}
+}
+
+// instrumentedConn wraps a net.Conn and invokes closeFunc when the connection
+// is closed.
+type instrumentedConn struct {
+	net.Conn
+	closeFunc func()
+}
+
+// Close delegates to the underylying net.Conn interface and reports the close
+// to the provided closeFunc only when Close returns no error.
+func (i *instrumentedConn) Close() error {
+	err := i.Conn.Close()
+	if err != nil {
+		return err
+	}
+	go i.closeFunc()
+	return nil
 }
 
 // Close closes the Dialer; it prevents the Dialer from refreshing the information
