@@ -187,8 +187,9 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		_ = tlsConn.Close() // best effort close attempt
 		return nil, errtypes.NewDialError("handshake failed", i.String(), err)
 	}
-	defer func() {
-		trace.RecordDialLatency(ctx, instance, d.dialerID, time.Since(startTime).Milliseconds())
+	latency := time.Since(startTime).Milliseconds()
+	go func() {
+		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
 		trace.RecordConnectionOpen(ctx, instance, d.dialerID)
 	}()
 
