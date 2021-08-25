@@ -43,6 +43,11 @@ func AddInstanceName(name string) Attribute {
 	return Attribute{key: "/cloudsql/instance", value: name}
 }
 
+// AddDialerID creates an attribute to identify a particular dialer.
+func AddDialerID(dialerID string) Attribute {
+	return Attribute{key: "/cloudsql/dialer_id", value: dialerID}
+}
+
 // StartSpan begins a span with the provided name and returns a context and a
 // function to end the created span.
 func StartSpan(ctx context.Context, name string, attrs ...Attribute) (context.Context, EndSpanFunc) {

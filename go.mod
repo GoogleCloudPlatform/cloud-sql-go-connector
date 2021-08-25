@@ -4,6 +4,7 @@ go 1.15
 
 require (
 	cloud.google.com/go v0.75.0 // indirect
+	github.com/google/uuid v1.3.0
 	github.com/jackc/pgx/v4 v4.10.1
 	github.com/pkg/errors v0.9.1 // indirect
 	go.opencensus.io v0.22.6

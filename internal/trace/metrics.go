@@ -9,7 +9,10 @@ import (
 	"go.opencensus.io/tag"
 )
 
-var keyInstance, _ = tag.NewKey("cloudsql_instance")
+var (
+	keyInstance, _ = tag.NewKey("cloudsql_instance")
+	keyDialerID, _ = tag.NewKey("cloudsql_dialer_id")
+)
 
 var (
 	mLatencyMS = stats.Int64(
@@ -22,8 +25,8 @@ var (
 		Measure:     mLatencyMS,
 		Description: "The distribution of dialer latencies (ms)",
 		// Latency in buckets, e.g., >=0ms, >=100ms, etc.
-		Aggregation: view.Distribution(0, 100, 200, 300, 400, 500, 600, 800, 1000, 2000, 4000),
-		TagKeys:     []tag.Key{keyInstance},
+		Aggregation: view.Distribution(0, 5, 25, 100, 250, 500, 1000, 2000, 5000, 30000),
+		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 )
 
@@ -38,31 +41,31 @@ var (
 		Measure:     mConnections,
 		Description: "The sum of Cloud SQL connections",
 		Aggregation: view.Sum(),
-		TagKeys:     []tag.Key{keyInstance},
+		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 )
 
 // RecordDialLatency records a latency value for a call to dial.
-func RecordDialLatency(ctx context.Context, instance string, latency int64) {
+func RecordDialLatency(ctx context.Context, instance, dialerID string, latency int64) {
 	// tag.New creates a new context and errors only if the new tag already
 	// exists in the provided context. Since we're adding tags within this
 	// package only, we can be confident that there were be no duplicate tags
 	// and so can ignore the error.
-	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance))
+	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
 	stats.Record(ctx, mLatencyMS.M(latency))
 }
 
-// RecordConnection reports a connection event.
-func RecordConnection(ctx context.Context, instance string) {
+// RecordConnectionOpen reports a connection event.
+func RecordConnectionOpen(ctx context.Context, instance, dialerID string) {
 	// Why are we ignoring this error? See above under RecordDialLatency.
-	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance))
+	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
 	stats.Record(ctx, mConnections.M(1))
 }
 
-// RecordDisconnect records a disconnect event.
-func RecordDisconnect(ctx context.Context, instance string) {
+// RecordConnectionClose records a disconnect event.
+func RecordConnectionClose(ctx context.Context, instance, dialerID string) {
 	// Why are we ignoring this error? See above under RecordDialLatency.
-	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance))
+	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
 	stats.Record(ctx, mConnections.M(-1))
 }
 
