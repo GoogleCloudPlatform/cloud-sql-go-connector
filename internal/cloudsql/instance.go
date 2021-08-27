@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtypes"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
+	sqladmin "google.golang.org/api/sqladmin/v1"
 )
 
 const (

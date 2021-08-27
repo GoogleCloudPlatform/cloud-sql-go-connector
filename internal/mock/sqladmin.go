@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"google.golang.org/api/option"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
+	sqladmin "google.golang.org/api/sqladmin/v1"
 )
 
 // httpClient returns an *http.Client, URL, and cleanup function. The http.Client is
@@ -100,7 +100,7 @@ func (r *Request) matches(hR *http.Request) bool {
 // InstanceGetSuccess returns a Request that responds to the `instance.get` SQL Admin
 // endpoint. It responds with a "StatusOK" and a DatabaseInstance object.
 //
-// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
+// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1/instances/get
 func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 	var ips []*sqladmin.IpMapping
 	for ipType, addr := range i.ipAddrs {
@@ -129,7 +129,7 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 
 	r := &Request{
 		reqMethod: http.MethodGet,
-		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s", i.project, i.name),
+		reqPath:   fmt.Sprintf("/v1/projects/%s/instances/%s", i.project, i.name),
 		reqCt:     ct,
 		handle: func(resp http.ResponseWriter, req *http.Request) {
 			b, err := db.MarshalJSON()
@@ -148,11 +148,11 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 // `sslCerts.createEphemeral` SQL Admin endpoint. It responds with a "StatusOK" and a
 // SslCerts object.
 //
-// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/sslCerts/createEphemeral
+// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1/sslCerts/createEphemeral
 func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 	r := &Request{
 		reqMethod: http.MethodPost,
-		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s/createEphemeral", i.project, i.name),
+		reqPath:   fmt.Sprintf("/v1/projects/%s/instances/%s/createEphemeral", i.project, i.name),
 		reqCt:     ct,
 		handle: func(resp http.ResponseWriter, req *http.Request) {
 			// Read the body from the request.

@@ -30,7 +30,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
+	sqladmin "google.golang.org/api/sqladmin/v1"
 )
 
 const (

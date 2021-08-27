@@ -26,7 +26,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/errtypes"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"golang.org/x/time/rate"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
+	sqladmin "google.golang.org/api/sqladmin/v1"
 )
 
 const (
