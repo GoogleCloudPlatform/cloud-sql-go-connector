@@ -163,3 +163,44 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		t.Fatalf("when TLS handshake fails, want = %T, got = %v", wantErr2, err)
 	}
 }
+
+func TestIAMAuthn(t *testing.T) {
+	fakeCreds := []byte(`{
+  "type": "service_account",
+  "project_id": "a-project-id",
+  "private_key_id": "a-private-key-id",
+  "private_key": "a-private-key",
+  "client_email": "email@example.com",
+  "client_id": "12345",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/email%40example.com"
+}`)
+	tcs := []struct {
+		desc            string
+		opts            DialerOption
+		wantTokenSource bool
+	}{
+		{
+			desc:            "When Credentials are provided with IAM Authn ENABLED",
+			opts:            DialerOptions(WithIAMAuthn(), WithCredentialsJSON(fakeCreds)),
+			wantTokenSource: true,
+		},
+		{
+			desc:            "When Credentials are provided with IAM Authn DISABLED",
+			opts:            WithCredentialsJSON(fakeCreds),
+			wantTokenSource: false,
+		},
+	}
+
+	for _, tc := range tcs {
+		d, err := NewDialer(context.Background(), tc.opts)
+		if err != nil {
+			t.Errorf("NewDialer failed with error = %v", err)
+		}
+		if gotTokenSource := d.tokenSource != nil; gotTokenSource != tc.wantTokenSource {
+			t.Errorf("%v, want = %v, got = %v", tc.desc, tc.wantTokenSource, gotTokenSource)
+		}
+	}
+}

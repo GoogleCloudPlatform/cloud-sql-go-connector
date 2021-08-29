@@ -111,9 +111,11 @@ func WithRefreshTimeout(t time.Duration) DialerOption {
 
 // WithIAMAuthn enables IAM DB Authentication. If no token source has been
 // configured, either using WithTokenSource, WithCredentialsFile, or
-// WithCredentialsJSON, the dialer will use the default token source.
+// WithCredentialsJSON, the dialer will use the default token source as defined
+// by https://pkg.go.dev/golang.org/x/oauth2/google#FindDefaultCredentialsWithParams.
 //
-// See https://cloud.google.com/sql/docs/postgres/authentication
+// For documentation on IAM DB Authentication, see
+// https://cloud.google.com/sql/docs/postgres/authentication.
 func WithIAMAuthn() DialerOption {
 	return func(d *dialerConfig) {
 		d.useIAMAuth = true

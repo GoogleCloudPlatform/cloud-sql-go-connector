@@ -112,6 +112,10 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		}
 		cfg.tokenSource = ts
 	}
+	// If IAM Authn is not explicitly enabled, remove the token source.
+	if !cfg.useIAMAuth {
+		cfg.tokenSource = nil
+	}
 
 	if cfg.rsaKey == nil {
 		key, err := getDefaultKeys()
