@@ -64,22 +64,6 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	}
 }
 
-func TestDialerInstantiationErrors(t *testing.T) {
-	_, err := NewDialer(context.Background(), WithCredentialsFile("bogus-file.json"))
-	if err == nil {
-		t.Fatalf("expected NewDialer to return error, but got none.")
-	}
-	_, err = NewDialer(context.Background(),
-		WithCredentialsJSON([]byte("not the JSON you're looking for")))
-	if err == nil {
-		t.Fatalf("expected NewDialer to return error, but got none.")
-	}
-	_, err = NewDialer(context.Background(), WithCredentialsFile("not-a-file.json"))
-	if err == nil {
-		t.Fatalf("expected NewDialer to return error, but got none.")
-	}
-}
-
 func TestDialWithAdminAPIErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	svc, cleanup, err := mock.NewSQLAdminService(context.Background())
@@ -164,8 +148,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	}
 }
 
-func TestIAMAuthn(t *testing.T) {
-	fakeCreds := []byte(`{
+var fakeServiceAccount = []byte(`{
   "type": "service_account",
   "project_id": "a-project-id",
   "private_key_id": "a-private-key-id",
@@ -177,6 +160,8 @@ func TestIAMAuthn(t *testing.T) {
   "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
   "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/email%40example.com"
 }`)
+
+func TestIAMAuthn(t *testing.T) {
 	tcs := []struct {
 		desc            string
 		opts            DialerOption
@@ -184,12 +169,12 @@ func TestIAMAuthn(t *testing.T) {
 	}{
 		{
 			desc:            "When Credentials are provided with IAM Authn ENABLED",
-			opts:            DialerOptions(WithIAMAuthn(), WithCredentialsJSON(fakeCreds)),
+			opts:            DialerOptions(WithIAMAuthN(), WithCredentialsJSON(fakeServiceAccount)),
 			wantTokenSource: true,
 		},
 		{
 			desc:            "When Credentials are provided with IAM Authn DISABLED",
-			opts:            WithCredentialsJSON(fakeCreds),
+			opts:            WithCredentialsJSON(fakeServiceAccount),
 			wantTokenSource: false,
 		},
 	}
@@ -199,7 +184,7 @@ func TestIAMAuthn(t *testing.T) {
 		if err != nil {
 			t.Errorf("NewDialer failed with error = %v", err)
 		}
-		if gotTokenSource := d.tokenSource != nil; gotTokenSource != tc.wantTokenSource {
+		if gotTokenSource := d.iamTokenSource != nil; gotTokenSource != tc.wantTokenSource {
 			t.Errorf("%v, want = %v, got = %v", tc.desc, tc.wantTokenSource, gotTokenSource)
 		}
 	}

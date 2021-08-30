@@ -20,6 +20,7 @@ import (
 	"io/ioutil"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/errtypes"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -57,7 +58,7 @@ func WithCredentialsFile(filename string) DialerOption {
 	return func(d *dialerConfig) {
 		b, err := ioutil.ReadFile(filename)
 		if err != nil {
-			d.err = err
+			d.err = errtypes.NewConfigError(err.Error(), "n/a")
 			return
 		}
 		opt := WithCredentialsJSON(b)
@@ -71,7 +72,7 @@ func WithCredentialsJSON(b []byte) DialerOption {
 	return func(d *dialerConfig) {
 		c, err := google.CredentialsFromJSON(context.Background(), b, sqladmin.SqlserviceAdminScope)
 		if err != nil {
-			d.err = err
+			d.err = errtypes.NewConfigError(err.Error(), "n/a")
 			return
 		}
 		d.tokenSource = c.TokenSource
@@ -109,14 +110,14 @@ func WithRefreshTimeout(t time.Duration) DialerOption {
 	}
 }
 
-// WithIAMAuthn enables IAM DB Authentication. If no token source has been
-// configured, either using WithTokenSource, WithCredentialsFile, or
-// WithCredentialsJSON, the dialer will use the default token source as defined
-// by https://pkg.go.dev/golang.org/x/oauth2/google#FindDefaultCredentialsWithParams.
+// WithIAMAuthN enables automatic IAM Authentication. If no token source has
+// been configured (such as with WithTokenSource, WithCredentialsFile, etc), the
+// dialer will use the default token source as defined by
+// https://pkg.go.dev/golang.org/x/oauth2/google#FindDefaultCredentialsWithParams.
 //
-// For documentation on IAM DB Authentication, see
+// For documentation on automatic IAM Authentication, see
 // https://cloud.google.com/sql/docs/postgres/authentication.
-func WithIAMAuthn() DialerOption {
+func WithIAMAuthN() DialerOption {
 	return func(d *dialerConfig) {
 		d.useIAMAuth = true
 	}

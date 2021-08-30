@@ -21,7 +21,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"strings"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtypes"
@@ -157,9 +156,7 @@ func fetchEphemeralCert(
 				tokErr,
 			)
 		}
-		// TODO: remove this once issue with OAuth2 Tokens is resolved.
-		// See https://github.com/GoogleCloudPlatform/cloudsql-proxy/issues/852.
-		req.AccessToken = strings.TrimRight(tok.AccessToken, ".")
+		req.AccessToken = tok.AccessToken
 	}
 	resp, err := client.SslCerts.CreateEphemeral(inst.project, inst.name, &req).Context(ctx).Do()
 	if err != nil {

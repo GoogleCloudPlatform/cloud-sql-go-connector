@@ -81,9 +81,9 @@ type Dialer struct {
 	// *only* when a client has configured OpenCensus exporters.
 	dialerID string
 
-	// tokenSource supplies the OAuth2 token used for IAM DB Authn. If IAM DB
-	// Authn is not enabled, tokenSource is unused.
-	tokenSource oauth2.TokenSource
+	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn. If IAM DB
+	// Authn is not enabled, iamTokenSource is unused.
+	iamTokenSource oauth2.TokenSource
 }
 
 // NewDialer creates a new Dialer.
@@ -152,7 +152,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		sqladmin:       client,
 		defaultDialCfg: dialCfg,
 		dialerID:       uuid.New().String(),
-		tokenSource:    cfg.tokenSource,
+		iamTokenSource: cfg.tokenSource,
 	}
 	return d, nil
 }
@@ -272,7 +272,7 @@ func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
 		if !ok {
 			// Create a new instance
 			var err error
-			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.tokenSource)
+			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.iamTokenSource)
 			if err != nil {
 				d.lock.Unlock()
 				return nil, err
