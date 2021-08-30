@@ -28,7 +28,7 @@ func (e *genericError) Error() string {
 // NewConfigError initializes a ConfigError.
 func NewConfigError(msg, cn string) *ConfigError {
 	return &ConfigError{
-		genericError: &genericError{Message: "Client error: " + msg, ConnName: cn},
+		genericError: &genericError{Message: "Config error: " + msg, ConnName: cn},
 	}
 }
 
@@ -58,9 +58,9 @@ type RefreshError struct {
 
 func (e *RefreshError) Error() string {
 	if e.Err == nil {
-		return fmt.Sprintf("Server error: %v", e.genericError)
+		return fmt.Sprintf("Refresh error: %v", e.genericError)
 	}
-	return fmt.Sprintf("Server error: %v: %v", e.genericError, e.Err)
+	return fmt.Sprintf("Refresh error: %v: %v", e.genericError, e.Err)
 }
 
 func (e *RefreshError) Unwrap() error { return e.Err }
