@@ -82,7 +82,7 @@ type Dialer struct {
 	dialerID string
 
 	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn. If IAM DB
-	// Authn is not enabled, iamTokenSource is unused.
+	// Authn is not enabled, iamTokenSource will be nil.
 	iamTokenSource oauth2.TokenSource
 }
 
