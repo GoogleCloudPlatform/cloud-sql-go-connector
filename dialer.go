@@ -98,14 +98,14 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	}
 	for _, opt := range opts {
 		opt(cfg)
-	}
-	if cfg.err != nil {
-		return nil, cfg.err
+		if cfg.err != nil {
+			return nil, cfg.err
+		}
 	}
 	// If callers have not provided a token source, either explicitly with
 	// WithTokenSource or implicitly with WithCredentialsJSON etc, then use the
 	// default token source.
-	if cfg.useIAMAuth && cfg.tokenSource == nil {
+	if cfg.useIAMAuthN && cfg.tokenSource == nil {
 		ts, err := google.DefaultTokenSource(ctx, sqladmin.SqlserviceAdminScope)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create token source: %v", err)
@@ -113,7 +113,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		cfg.tokenSource = ts
 	}
 	// If IAM Authn is not explicitly enabled, remove the token source.
-	if !cfg.useIAMAuth {
+	if !cfg.useIAMAuthN {
 		cfg.tokenSource = nil
 	}
 

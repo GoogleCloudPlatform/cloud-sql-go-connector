@@ -129,14 +129,14 @@ type tokenResp struct {
 type fakeTokenSource struct {
 	responses []tokenResp
 	mu        sync.Mutex
-	i         int
+	ct        int
 }
 
 func (f *fakeTokenSource) Token() (*oauth2.Token, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	resp := f.responses[f.i]
-	f.i++
+	resp := f.responses[f.ct]
+	f.ct++
 	return resp.tok, resp.err
 }
 
@@ -233,8 +233,8 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected get failed error, got = %v", err)
 			}
-			if ts.i != tc.wantCount {
-				t.Fatalf("expected fake token source to be called %v time, got = %v", tc.wantCount, ts.i)
+			if ts.ct != tc.wantCount {
+				t.Fatalf("expected fake token source to be called %v time, got = %v", tc.wantCount, ts.ct)
 			}
 		})
 	}
