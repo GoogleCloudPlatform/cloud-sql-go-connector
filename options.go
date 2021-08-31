@@ -36,7 +36,7 @@ type dialerConfig struct {
 	sqladminOpts   []apiopt.ClientOption
 	dialOpts       []DialOption
 	refreshTimeout time.Duration
-	useIAMAuth     bool
+	useIAMAuthN    bool
 	tokenSource    oauth2.TokenSource
 	// err tracks any dialer options that may have failed.
 	err error
@@ -119,7 +119,7 @@ func WithRefreshTimeout(t time.Duration) DialerOption {
 // https://cloud.google.com/sql/docs/postgres/authentication.
 func WithIAMAuthN() DialerOption {
 	return func(d *dialerConfig) {
-		d.useIAMAuth = true
+		d.useIAMAuthN = true
 	}
 }
 
