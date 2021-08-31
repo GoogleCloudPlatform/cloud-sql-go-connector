@@ -64,13 +64,6 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	}
 }
 
-func TestDialerInstantiationErrors(t *testing.T) {
-	_, err := NewDialer(context.Background(), WithCredentialsFile("bogus-file.json"))
-	if err == nil {
-		t.Fatalf("expected NewDialer to return error, but got none.")
-	}
-}
-
 func TestDialWithAdminAPIErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	svc, cleanup, err := mock.NewSQLAdminService(context.Background())
@@ -152,5 +145,47 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when TLS handshake fails, want = %T, got = %v", wantErr2, err)
+	}
+}
+
+var fakeServiceAccount = []byte(`{
+  "type": "service_account",
+  "project_id": "a-project-id",
+  "private_key_id": "a-private-key-id",
+  "private_key": "a-private-key",
+  "client_email": "email@example.com",
+  "client_id": "12345",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/email%40example.com"
+}`)
+
+func TestIAMAuthn(t *testing.T) {
+	tcs := []struct {
+		desc            string
+		opts            DialerOption
+		wantTokenSource bool
+	}{
+		{
+			desc:            "When Credentials are provided with IAM Authn ENABLED",
+			opts:            DialerOptions(WithIAMAuthN(), WithCredentialsJSON(fakeServiceAccount)),
+			wantTokenSource: true,
+		},
+		{
+			desc:            "When Credentials are provided with IAM Authn DISABLED",
+			opts:            WithCredentialsJSON(fakeServiceAccount),
+			wantTokenSource: false,
+		},
+	}
+
+	for _, tc := range tcs {
+		d, err := NewDialer(context.Background(), tc.opts)
+		if err != nil {
+			t.Errorf("NewDialer failed with error = %v", err)
+		}
+		if gotTokenSource := d.iamTokenSource != nil; gotTokenSource != tc.wantTokenSource {
+			t.Errorf("%v, want = %v, got = %v", tc.desc, tc.wantTokenSource, gotTokenSource)
+		}
 	}
 }

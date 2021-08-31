@@ -29,6 +29,8 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -78,6 +80,10 @@ type Dialer struct {
 	// dialerID uniquely identifies a Dialer. Used for monitoring purposes,
 	// *only* when a client has configured OpenCensus exporters.
 	dialerID string
+
+	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn. If IAM DB
+	// Authn is not enabled, iamTokenSource will be nil.
+	iamTokenSource oauth2.TokenSource
 }
 
 // NewDialer creates a new Dialer.
@@ -92,6 +98,23 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	}
 	for _, opt := range opts {
 		opt(cfg)
+		if cfg.err != nil {
+			return nil, cfg.err
+		}
+	}
+	// If callers have not provided a token source, either explicitly with
+	// WithTokenSource or implicitly with WithCredentialsJSON etc, then use the
+	// default token source.
+	if cfg.useIAMAuthN && cfg.tokenSource == nil {
+		ts, err := google.DefaultTokenSource(ctx, sqladmin.SqlserviceAdminScope)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create token source: %v", err)
+		}
+		cfg.tokenSource = ts
+	}
+	// If IAM Authn is not explicitly enabled, remove the token source.
+	if !cfg.useIAMAuthN {
+		cfg.tokenSource = nil
 	}
 
 	if cfg.rsaKey == nil {
@@ -129,6 +152,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		sqladmin:       client,
 		defaultDialCfg: dialCfg,
 		dialerID:       uuid.New().String(),
+		iamTokenSource: cfg.tokenSource,
 	}
 	return d, nil
 }
@@ -248,7 +272,7 @@ func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
 		if !ok {
 			// Create a new instance
 			var err error
-			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout)
+			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.iamTokenSource)
 			if err != nil {
 				d.lock.Unlock()
 				return nil, err

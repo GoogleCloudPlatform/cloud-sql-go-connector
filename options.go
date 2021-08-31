@@ -15,12 +15,17 @@
 package cloudsqlconn
 
 import (
+	"context"
 	"crypto/rsa"
+	"io/ioutil"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/errtypes"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	apiopt "google.golang.org/api/option"
+	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 // A DialerOption is an option for configuring a Dialer.
@@ -31,6 +36,10 @@ type dialerConfig struct {
 	sqladminOpts   []apiopt.ClientOption
 	dialOpts       []DialOption
 	refreshTimeout time.Duration
+	useIAMAuthN    bool
+	tokenSource    oauth2.TokenSource
+	// err tracks any dialer options that may have failed.
+	err error
 }
 
 // DialerOptions turns a list of DialerOption instances into an DialerOption.
@@ -42,17 +51,32 @@ func DialerOptions(opts ...DialerOption) DialerOption {
 	}
 }
 
-// WithCredentialsFile returns a DialerOption that specifies a service account or refresh token JSON credentials file to be used as the basis for authentication.
+// WithCredentialsFile returns a DialerOption that specifies a service account
+// or refresh token JSON credentials file to be used as the basis for
+// authentication.
 func WithCredentialsFile(filename string) DialerOption {
 	return func(d *dialerConfig) {
-		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentialsFile(filename))
+		b, err := ioutil.ReadFile(filename)
+		if err != nil {
+			d.err = errtypes.NewConfigError(err.Error(), "n/a")
+			return
+		}
+		opt := WithCredentialsJSON(b)
+		opt(d)
 	}
 }
 
-// WithCredentialsJSON returns a DialerOption that specifies a service account or refresh token JSON credentials to be used as the basis for authentication.
-func WithCredentialsJSON(p []byte) DialerOption {
+// WithCredentialsJSON returns a DialerOption that specifies a service account
+// or refresh token JSON credentials to be used as the basis for authentication.
+func WithCredentialsJSON(b []byte) DialerOption {
 	return func(d *dialerConfig) {
-		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentialsJSON(p))
+		c, err := google.CredentialsFromJSON(context.Background(), b, sqladmin.SqlserviceAdminScope)
+		if err != nil {
+			d.err = errtypes.NewConfigError(err.Error(), "n/a")
+			return
+		}
+		d.tokenSource = c.TokenSource
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentials(c))
 	}
 }
 
@@ -63,9 +87,11 @@ func WithDefaultDialOptions(opts ...DialOption) DialerOption {
 	}
 }
 
-// WithTokenSource returns a DialerOption that specifies an OAuth2 token source to be used as the basis for authentication.
+// WithTokenSource returns a DialerOption that specifies an OAuth2 token source
+// to be used as the basis for authentication.
 func WithTokenSource(s oauth2.TokenSource) DialerOption {
 	return func(d *dialerConfig) {
+		d.tokenSource = s
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
 	}
 }
@@ -81,6 +107,19 @@ func WithRSAKey(k *rsa.PrivateKey) DialerOption {
 func WithRefreshTimeout(t time.Duration) DialerOption {
 	return func(d *dialerConfig) {
 		d.refreshTimeout = t
+	}
+}
+
+// WithIAMAuthN enables automatic IAM Authentication. If no token source has
+// been configured (such as with WithTokenSource, WithCredentialsFile, etc), the
+// dialer will use the default token source as defined by
+// https://pkg.go.dev/golang.org/x/oauth2/google#FindDefaultCredentialsWithParams.
+//
+// For documentation on automatic IAM Authentication, see
+// https://cloud.google.com/sql/docs/postgres/authentication.
+func WithIAMAuthN() DialerOption {
+	return func(d *dialerConfig) {
+		d.useIAMAuthN = true
 	}
 }
 
