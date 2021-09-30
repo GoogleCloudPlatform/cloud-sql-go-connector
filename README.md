@@ -121,30 +121,35 @@ myDialer, err := cloudsqlconn.NewDialer(
 )
 ```
 
-### Enabling Tracing
+### Enabling Metrics and Tracing
 
-This library includes support for tracing using [OpenCensus][]. To enable
-tracing, you need to configure an [exporter][]. OpenCensus supports many
-backends for exporters. For example, to use [Cloud Trace][], you would
+This library includes support for metrics and tracing using [OpenCensus][]. 
+To enable metrics or tracing, you need to configure an [exporter][]. 
+OpenCensus supports many backends for exporters. 
+
+For example, to use [Cloud Monitoring][] and [Cloud Trace][], you would 
 configure an exporter like so:
 
 ``` golang
 package main
 
 import (
-	"contrib.go.opencensus.io/exporter/stackdriver"
-	"go.opencensus.io/trace"
+    "contrib.go.opencensus.io/exporter/stackdriver"
+    "go.opencensus.io/trace"
 )
 
 func main() {
-	sd, err := stackdriver.NewExporter(stackdriver.Options{
-		ProjectID: "mycoolproject",
-	})
-	if err != nil {
+    sd, err := stackdriver.NewExporter(stackdriver.Options{
+        ProjectID: "mycoolproject",
+    })
+    if err != nil {    
         // handle error
-	}
-	defer sd.Flush()
-	trace.RegisterExporter(sd)
+    }
+    defer sd.Flush()
+    trace.RegisterExporter(sd)
+
+    sd.StartMetricsExporter()
+    defer sd.StopMetricsExporter()
 
     // Use cloudsqlconn as usual.
     // ...
@@ -154,3 +159,4 @@ func main() {
 [OpenCensus]: https://opencensus.io/introduction/
 [exporter]: https://opencensus.io/exporters/
 [Cloud Trace]: https://cloud.google.com/trace
+[Cloud Monitoring]: https://cloud.google.com/monitoring
