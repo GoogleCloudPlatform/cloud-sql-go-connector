@@ -132,7 +132,7 @@ func fetchEphemeralCert(
 		return tls.Certificate{}, err
 	}
 
-	req := sqladmin.SslCertsCreateEphemeralRequest{
+	req := sqladmin.GenerateEphemeralCertRequest{
 		PublicKey: string(pem.EncodeToMemory(&pem.Block{Bytes: clientPubKey, Type: "RSA PUBLIC KEY"})),
 	}
 	var tok *oauth2.Token
@@ -158,7 +158,7 @@ func fetchEphemeralCert(
 		}
 		req.AccessToken = tok.AccessToken
 	}
-	resp, err := client.SslCerts.CreateEphemeral(inst.project, inst.name, &req).Context(ctx).Do()
+	resp, err := client.Connect.GenerateEphemeralCert(inst.project, inst.name, &req).Context(ctx).Do()
 	if err != nil {
 		return tls.Certificate{}, errtypes.NewRefreshError(
 			"create ephemeral cert failed",
@@ -168,7 +168,7 @@ func fetchEphemeralCert(
 	}
 
 	// parse the client cert
-	b, _ := pem.Decode([]byte(resp.Cert))
+	b, _ := pem.Decode([]byte(resp.EphemeralCert.Cert))
 	if b == nil {
 		return tls.Certificate{}, errtypes.NewRefreshError(
 			"failed to decode valid PEM cert",

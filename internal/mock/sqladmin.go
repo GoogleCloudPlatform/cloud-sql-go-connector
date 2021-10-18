@@ -145,14 +145,14 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 }
 
 // CreateEphemeralSuccess returns a Request that responds to the
-// `sslCerts.createEphemeral` SQL Admin endpoint. It responds with a "StatusOK" and a
-// SslCerts object.
+// `connect.generateEphemeralCert` SQL Admin endpoint. It responds with a
+// "StatusOK" and a SslCerts object.
 //
-// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/sslCerts/createEphemeral
+// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/connect/generateEphemeralCert
 func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 	r := &Request{
 		reqMethod: http.MethodPost,
-		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s/createEphemeral", i.project, i.name),
+		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s:generateEphemeralCert", i.project, i.name),
 		reqCt:     ct,
 		handle: func(resp http.ResponseWriter, req *http.Request) {
 			// Read the body from the request.
@@ -162,7 +162,7 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 				http.Error(resp, fmt.Errorf("unable to read body: %w", err).Error(), http.StatusBadRequest)
 				return
 			}
-			var eR sqladmin.SslCertsCreateEphemeralRequest
+			var eR sqladmin.GenerateEphemeralCertRequest
 			err = json.Unmarshal(b, &eR)
 			if err != nil {
 				http.Error(resp, fmt.Errorf("invalid or unexpected json: %w", err).Error(), http.StatusBadRequest)
@@ -187,14 +187,17 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 			}
 
 			// Return the signed cert to the client.
-			c := sqladmin.SslCert{
+			c := &sqladmin.SslCert{
 				Cert:           string(certBytes),
 				CommonName:     "Google Cloud SQL Client",
 				CreateTime:     time.Now().Format(time.RFC3339),
 				ExpirationTime: i.Cert.NotAfter.Format(time.RFC3339),
 				Instance:       i.name,
 			}
-			b, err = c.MarshalJSON()
+			certResp := sqladmin.GenerateEphemeralCertResponse{
+				EphemeralCert: c,
+			}
+			b, err = certResp.MarshalJSON()
 			if err != nil {
 				http.Error(resp, fmt.Errorf("unable to encode response: %w", err).Error(), http.StatusInternalServerError)
 				return
