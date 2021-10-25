@@ -158,7 +158,8 @@ func main() {
 
 ## Go Versions Supported
 
-We support the latest four Go versions.
+We support the latest four Go versions. Changes in supported Go versions will be
+considered a minor and not a major change.
 
 [OpenCensus]: https://opencensus.io/introduction/
 [exporter]: https://opencensus.io/exporters/
