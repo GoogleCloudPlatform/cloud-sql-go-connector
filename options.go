@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"io/ioutil"
+	"net/http"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtypes"
@@ -107,6 +108,15 @@ func WithRSAKey(k *rsa.PrivateKey) DialerOption {
 func WithRefreshTimeout(t time.Duration) DialerOption {
 	return func(d *dialerConfig) {
 		d.refreshTimeout = t
+	}
+}
+
+// WithHTTPClient configures the underlying SQL Admin API client with the
+// provided HTTP client. This option is generally unnecessary except for
+// advanced use-cases.
+func WithHTTPClient(client *http.Client) DialerOption {
+	return func(d *dialerConfig) {
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithHTTPClient(client))
 	}
 }
 
