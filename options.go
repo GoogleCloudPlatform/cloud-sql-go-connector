@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"time"
 
@@ -36,6 +37,7 @@ type dialerConfig struct {
 	rsaKey         *rsa.PrivateKey
 	sqladminOpts   []apiopt.ClientOption
 	dialOpts       []DialOption
+	dialFunc       func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout time.Duration
 	useIAMAuthN    bool
 	tokenSource    oauth2.TokenSource
@@ -117,6 +119,15 @@ func WithRefreshTimeout(t time.Duration) DialerOption {
 func WithHTTPClient(client *http.Client) DialerOption {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithHTTPClient(client))
+	}
+}
+
+// WithDialFunc configures the function used to connect to the address on the
+// named network. This option is generally unnecessary except for advanced
+// use-cases.
+func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn, error)) DialerOption {
+	return func(d *dialerConfig) {
+		d.dialFunc = dial
 	}
 }
 
