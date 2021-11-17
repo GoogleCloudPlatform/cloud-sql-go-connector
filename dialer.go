@@ -81,6 +81,10 @@ type Dialer struct {
 	// *only* when a client has configured OpenCensus exporters.
 	dialerID string
 
+	// dialFunc is the function used to connect to the address on the named
+	// network. By default it is golang.org/x/net/proxy#Dial.
+	dialFunc func(cxt context.Context, network, addr string) (net.Conn, error)
+
 	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn. If IAM DB
 	// Authn is not enabled, iamTokenSource will be nil.
 	iamTokenSource oauth2.TokenSource
@@ -95,6 +99,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	cfg := &dialerConfig{
 		refreshTimeout: 30 * time.Second,
 		sqladminOpts:   []option.ClientOption{option.WithUserAgent(userAgent)},
+		dialFunc:       proxy.Dial,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -153,6 +158,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		defaultDialCfg: dialCfg,
 		dialerID:       uuid.New().String(),
 		iamTokenSource: cfg.tokenSource,
+		dialFunc:       cfg.dialFunc,
 	}
 	return d, nil
 }
@@ -190,7 +196,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
 	defer func() { connectEnd(err) }()
 	addr = net.JoinHostPort(addr, serverProxyPort)
-	conn, err = proxy.Dial(ctx, "tcp", addr)
+	conn, err = d.dialFunc(ctx, "tcp", addr)
 	if err != nil {
 		// refresh the instance info in case it caused the connection failure
 		i.ForceRefresh()

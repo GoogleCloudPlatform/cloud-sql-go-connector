@@ -18,6 +18,8 @@ import (
 	"context"
 	"errors"
 	"io/ioutil"
+	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,5 +189,34 @@ func TestIAMAuthn(t *testing.T) {
 		if gotTokenSource := d.iamTokenSource != nil; gotTokenSource != tc.wantTokenSource {
 			t.Errorf("%v, want = %v, got = %v", tc.desc, tc.wantTokenSource, gotTokenSource)
 		}
+	}
+}
+
+func TestDialerWithCustomDialFunc(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
+	svc, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	d, err := NewDialer(context.Background(),
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return nil, errors.New("sentinel error")
+		}),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.sqladmin = svc
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")
+	if !strings.Contains(err.Error(), "sentinel error") {
+		t.Fatalf("want = sentinel error, got = %v", err)
 	}
 }
