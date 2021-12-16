@@ -88,6 +88,14 @@ type Dialer struct {
 	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn. If IAM DB
 	// Authn is not enabled, iamTokenSource will be nil.
 	iamTokenSource oauth2.TokenSource
+
+	// mu sychronizes access to openConns
+	mu sync.RWMutex
+	// openConns tracks the number of connections across instances
+	openConns map[string]int64
+
+	metrics *trace.MetricsCollector
+	done    chan struct{}
 }
 
 // NewDialer creates a new Dialer.
@@ -143,13 +151,9 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		opt(&dialCfg)
 	}
 
-	if err := trace.InitMetrics(); err != nil {
-		// This error means the internal metric configuration is incorrect and
-		// should never be surfaced to callers, as there's nothing actionable
-		// for a caller to do. Ignoring the error seems worse and so we return
-		// it.
-		return nil, err
-	}
+	// The error returned indicates a configuration error inside the library and
+	// will be caught be tests. So we safely ignore it here.
+	mc, _ := trace.NewMetricsCollector()
 	d := &Dialer{
 		instances:      make(map[string]*cloudsql.Instance),
 		key:            cfg.rsaKey,
@@ -159,7 +163,12 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		dialerID:       uuid.New().String(),
 		iamTokenSource: cfg.tokenSource,
 		dialFunc:       cfg.dialFunc,
+		metrics:        mc,
+		openConns:      make(map[string]int64),
+		done:           make(chan struct{}),
 	}
+	// TODO: don't start the goroutine unless a user has enabled metrics.
+	go d.reportOpenConns(ctx)
 	return d, nil
 }
 
@@ -219,21 +228,25 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
-		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
-		trace.RecordConnectionOpen(ctx, instance, d.dialerID)
+		d.mu.Lock()
+		d.openConns[instance]++
+		d.mu.Unlock()
+		d.metrics.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
 
-	return newInstrumentedConn(tlsConn, instance, d.dialerID), nil
+	return newInstrumentedConn(tlsConn, func() {
+		d.mu.Lock()
+		d.openConns[instance]--
+		d.mu.Unlock()
+	}), nil
 }
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
 // decrement the number of open connects and record the result.
-func newInstrumentedConn(conn net.Conn, instance, dialerID string) *instrumentedConn {
+func newInstrumentedConn(conn net.Conn, closeFunc func()) *instrumentedConn {
 	return &instrumentedConn{
-		Conn: conn,
-		closeFunc: func() {
-			trace.RecordConnectionClose(context.Background(), instance, dialerID)
-		},
+		Conn:      conn,
+		closeFunc: closeFunc,
 	}
 }
 
@@ -255,6 +268,34 @@ func (i *instrumentedConn) Close() error {
 	return nil
 }
 
+func (d *Dialer) reportOpenConns(ctx context.Context) {
+	// TODO: make this metrics reporting interval configurable.
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for range t.C {
+		select {
+		case <-d.done:
+			return
+		case <-ctx.Done():
+			return
+		default:
+			type instConn struct {
+				inst  string
+				conns int64
+			}
+			var ics []instConn
+			d.mu.RLock()
+			for inst, conns := range d.openConns {
+				ics = append(ics, instConn{inst: inst, conns: conns})
+			}
+			d.mu.RUnlock()
+			for _, ic := range ics {
+				d.metrics.RecordOpenConnections(ctx, ic.conns, ic.inst, d.dialerID)
+			}
+		}
+	}
+}
+
 // Close closes the Dialer; it prevents the Dialer from refreshing the information
 // needed to connect. Additional dial operations may succeed until the information
 // expires.
@@ -264,6 +305,7 @@ func (d *Dialer) Close() {
 	for _, i := range d.instances {
 		i.Close()
 	}
+	close(d.done)
 }
 
 func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
