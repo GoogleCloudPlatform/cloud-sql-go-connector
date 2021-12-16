@@ -152,7 +152,7 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 	}
 
 	// The error returned indicates a configuration error inside the library and
-	// will be caught be tests. So we safely ignore it here.
+	// will be caught by tests. So we safely ignore it here.
 	mc, _ := trace.NewMetricsCollector()
 	d := &Dialer{
 		instances:      make(map[string]*cloudsql.Instance),
