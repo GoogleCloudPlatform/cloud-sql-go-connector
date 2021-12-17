@@ -69,7 +69,7 @@ func (mc *MetricsCollector) RecordDialLatency(ctx context.Context, instance, dia
 }
 
 // RecordOpenConnections records the number of open connections
-func (mc *MetricsCollector) RecordOpenConnections(ctx context.Context, num int64, instance, dialerID string) {
+func (mc *MetricsCollector) RecordOpenConnections(ctx context.Context, num int64, dialerID, instance string) {
 	// Why are we ignoring this error? See above under RecordDialLatency.
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
 	stats.Record(ctx, mc.mConnections.M(num))
