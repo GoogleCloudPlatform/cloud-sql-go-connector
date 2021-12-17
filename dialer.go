@@ -146,9 +146,10 @@ func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
 		opt(&dialCfg)
 	}
 
-	// The error returned indicates a configuration error inside the library and
-	// will be caught by tests. So we safely ignore it here.
-	mc, _ := trace.NewMetricsCollector()
+	mc, err := trace.NewMetricsCollector()
+	if err != nil {
+		return nil, fmt.Errorf("failed to configure metrics: %v", err)
+	}
 	d := &Dialer{
 		instances:      make(map[string]*cloudsql.Instance),
 		key:            cfg.rsaKey,
