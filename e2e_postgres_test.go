@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,4 +114,20 @@ func TestConnectWithIAMUser(t *testing.T) {
 		t.Fatalf("QueryRow failed: %s", err)
 	}
 	t.Log(now)
+}
+
+func TestEngineVersion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d, err := cloudsqlconn.NewDialer(context.Background())
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+	gotEV, err := d.EngineVersion(ctx, postgresConnName)
+	if err != nil {
+		t.Fatalf("failed to retrieve engine version: %v", err)
+	}
+	if !strings.Contains(gotEV, "POSTGRES") {
+		t.Errorf("InstanceEngineVersion(%s) failed: want 'POSTGRES', got %v", gotEV, err)
+	}
 }
