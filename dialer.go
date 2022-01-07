@@ -226,6 +226,21 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	return newInstrumentedConn(tlsConn, instance, d.dialerID), nil
 }
 
+// EngineVersion returns the engine type and version for the instance. The value will
+// corespond to one of the following types for the instance:
+// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
+func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, error) {
+	i, err := d.instance(instance)
+	if err != nil {
+		return "", err
+	}
+	e, err := i.InstanceEngineVersion(ctx)
+	if err != nil {
+		return "", err
+	}
+	return e, nil
+}
+
 // newInstrumentedConn initializes an instrumentedConn that on closing will
 // decrement the number of open connects and record the result.
 func newInstrumentedConn(conn net.Conn, instance, dialerID string) *instrumentedConn {

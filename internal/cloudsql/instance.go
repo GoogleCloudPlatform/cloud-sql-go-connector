@@ -182,10 +182,7 @@ func (i *Instance) Close() {
 // private) and a TLS config that can be used to connect to a Cloud SQL
 // instance.
 func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls.Config, error) {
-	i.resultGuard.RLock()
-	res := i.cur
-	i.resultGuard.RUnlock()
-	err := res.Wait(ctx)
+	res, err := i.result(ctx)
 	if err != nil {
 		return "", nil, err
 	}
@@ -200,6 +197,17 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 	return addr, res.tlsCfg, nil
 }
 
+// InstanceEngineVersion returns the engine type and version for the instance. The value
+// coresponds to one of the following types for the instance:
+// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
+func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
+	res, err := i.result(ctx)
+	if err != nil {
+		return "", err
+	}
+	return res.md.version, nil
+}
+
 // ForceRefresh triggers an immediate refresh operation to be scheduled and used for future connection attempts.
 func (i *Instance) ForceRefresh() {
 	i.resultGuard.Lock()
@@ -210,6 +218,18 @@ func (i *Instance) ForceRefresh() {
 	}
 	// block all sequential connection attempts on the next refresh result
 	i.cur = i.next
+}
+
+// result returns the most recent refresh result (waiting for it to complete if necessary)
+func (i *Instance) result(ctx context.Context) (*refreshResult, error) {
+	i.resultGuard.RLock()
+	res := i.cur
+	i.resultGuard.RUnlock()
+	err := res.Wait(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshResult

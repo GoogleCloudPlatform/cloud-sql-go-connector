@@ -36,6 +36,9 @@ func TestRefresh(t *testing.T) {
 	wantExpiry := time.Now().Add(time.Hour).UTC().Round(time.Second)
 	wantConnName := "my-project:my-region:my-instance"
 	cn, err := parseConnName(wantConnName)
+	if err != nil {
+		t.Fatalf("parseConnName(%s)failed : %v", cn, err)
+	}
 	inst := mock.NewFakeCSQLInstance(
 		"my-project", "my-region", "my-instance",
 		mock.WithPublicIP(wantPublicIP),
