@@ -229,7 +229,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 // EngineVersion returns the engine type and version for the instance. The value will
 // corespond to one of the following types for the instance:
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
-func (d *Dialer) EngineVersion(ctx context.Context, instance string) (engine string, err error) {
+func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, error) {
 	i, err := d.instance(instance)
 	if err != nil {
 		return "", err
