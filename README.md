@@ -53,29 +53,49 @@ the package's "Dial" option, which initializes a default dialer for you.
 
 #### pgx for Postgres
 
-  Use the [pgConn.DialFunc field][pgconn-cfg] to create connections:
+To use `database/sql`, import the hook and connect with `sql.Open`:
 
-  ```go
-  // Configure the driver to connect to the database
-  dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", pgUser, pgPass, pgDB)
-  config, err := pgx.ParseConfig(dsn)
-  if err != nil {
-      log.Fatalf("failed to parse pgx config: %v", err)
-  }
+``` go
+package foo
 
-  // Tell the driver to use the Cloud SQL Go Connector to create connections
-  config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
-      return cloudsqlconn.Dial(ctx, "project:region:instance")
-  }
+import (
+	_ "cloud.google.com/go/cloudsqlconn/stdlib/postgres"
+)
 
- // Interact with the driver directly as you normally would
-  conn, connErr := pgx.ConnectConfig(ctx, config)
-  if connErr != nil {
-      log.Fatalf("failed to connect: %s", connErr)
-  }
-  defer conn.Close(ctx)
-  ```
-  [pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
+func Connect() {
+	db, err := sql.Open(
+		"cloudsql-postgres",
+        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"
+	)
+
+    // ... etc
+}
+```
+
+It is also possible to use `pgx` directly with the [pgConn.DialFunc
+field][pgconn-cfg] to create connections:
+
+```go
+// Configure the driver to connect to the database
+dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", pgUser, pgPass, pgDB)
+config, err := pgx.ParseConfig(dsn)
+if err != nil {
+    log.Fatalf("failed to parse pgx config: %v", err)
+}
+
+// Tell the driver to use the Cloud SQL Go Connector to create connections
+config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
+    return cloudsqlconn.Dial(ctx, "project:region:instance")
+}
+
+/ Interact with the driver directly as you normally would
+conn, connErr := pgx.ConnectConfig(ctx, config)
+if connErr != nil {
+    log.Fatalf("failed to connect: %s", connErr)
+}
+defer conn.Close(ctx)
+```
+[pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
 
 
 

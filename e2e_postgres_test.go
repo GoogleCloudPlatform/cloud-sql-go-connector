@@ -20,6 +20,7 @@ package cloudsqlconn_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net"
 	"os"
@@ -29,6 +30,8 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v4"
+
+	_ "cloud.google.com/go/cloudsqlconn/stdlib/postgres"
 )
 
 var (
@@ -130,4 +133,20 @@ func TestEngineVersion(t *testing.T) {
 	if !strings.Contains(gotEV, "POSTGRES") {
 		t.Errorf("InstanceEngineVersion(%s) failed: want 'POSTGRES', got %v", gotEV, err)
 	}
+}
+
+func TestPostgresHook(t *testing.T) {
+	db, err := sql.Open(
+		"cloudsql-postgres",
+		fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
+			postgresConnName, postgresUser, postgresPass, postgresDb),
+	)
+	if err != nil {
+		t.Fatalf("sql.Open want err = nil, got = %v", err)
+	}
+	var now time.Time
+	if err = db.QueryRow("SELECT NOW()").Scan(&now); err != nil {
+		t.Fatalf("QueryRow failed: %v", err)
+	}
+	t.Log(now)
 }
