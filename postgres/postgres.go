@@ -29,6 +29,16 @@ func init() {
 	sql.Register("cloudsql-postgres", &pgDriver{})
 }
 
+type dialerConn struct {
+	driver.Conn
+	dialer *cloudsqlconn.Dialer
+}
+
+func (c *dialerConn) Close() error {
+	c.dialer.Close()
+	return c.Conn.Close()
+}
+
 type pgDriver struct{}
 
 func (*pgDriver) Open(name string) (driver.Conn, error) {
@@ -36,11 +46,19 @@ func (*pgDriver) Open(name string) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := config.Config.Host          // Extract instance connection name
-	config.Config.Host = "localhost" // Replace it with a default value
+	instConnName := config.Config.Host // Extract instance connection name
+	config.Config.Host = "localhost"   // Replace it with a default value
+	d, err := cloudsqlconn.NewDialer(context.Background())
+	if err != nil {
+		return nil, err
+	}
 	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return cloudsqlconn.Dial(ctx, h)
+		return d.Dial(ctx, instConnName)
 	}
 	dbURI := stdlib.RegisterConnConfig(config)
-	return stdlib.GetDefaultDriver().Open(dbURI)
+	conn, err := stdlib.GetDefaultDriver().Open(dbURI)
+	if err != nil {
+		return nil, err
+	}
+	return &dialerConn{Conn: conn, dialer: d}, nil
 }

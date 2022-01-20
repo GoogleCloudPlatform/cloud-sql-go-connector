@@ -31,7 +31,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v4"
 
-	_ "cloud.google.com/go/cloudsqlconn/stdlib/postgres"
+	_ "cloud.google.com/go/cloudsqlconn/postgres"
 )
 
 var (

@@ -53,27 +53,8 @@ the package's "Dial" option, which initializes a default dialer for you.
 
 #### pgx for Postgres
 
-To use `database/sql`, import the hook and connect with `sql.Open`:
-
-``` go
-package foo
-
-import (
-	_ "cloud.google.com/go/cloudsqlconn/stdlib/postgres"
-)
-
-func Connect() {
-	db, err := sql.Open(
-		"cloudsql-postgres",
-        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"
-	)
-
-    // ... etc
-}
-```
-
-It is also possible to use `pgx` directly with the [pgConn.DialFunc
-field][pgconn-cfg] to create connections:
+To use the dialer with [pgx](https://github.com/jackc/pgx), configure the
+[pgConn.DialFunc field][pgconn-cfg] to create connections:
 
 ```go
 // Configure the driver to connect to the database
@@ -95,9 +76,8 @@ if connErr != nil {
 }
 defer conn.Close(ctx)
 ```
+
 [pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
-
-
 
 ### Using DialerOptions
 
@@ -139,6 +119,32 @@ myDialer, err := cloudsqlconn.NewDialer(
         cloudsqlconn.WithPrivateIP(),
     ),
 )
+```
+
+### Using the dialer with database/sql
+
+Using the dialer directly will expose more configuration options. However, it is
+possible to use the dialer with the `database/sql` package.
+
+#### postgres
+
+To use `database/sql`, import the hook and connect with `sql.Open`:
+
+``` go
+package foo
+
+import (
+	_ "cloud.google.com/go/cloudsqlconn/postgres"
+)
+
+func Connect() {
+	db, err := sql.Open(
+		"cloudsql-postgres",
+        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"
+	)
+
+    // ... etc
+}
 ```
 
 ### Enabling Metrics and Tracing
