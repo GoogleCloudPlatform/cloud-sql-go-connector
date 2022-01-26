@@ -25,8 +25,16 @@ import (
 	"github.com/jackc/pgx/v4/stdlib"
 )
 
-func init() {
-	sql.Register("cloudsql-postgres", &pgDriver{})
+// RegisterDriver registers a Postgres driver that uses the cloudsqlconn.Dialer
+// configured with the provided options. The choice of name is entirely up to
+// the caller and may be used to distinguish between multiple registrations of
+// differently configured Dialers.
+// Note: The underlying driver uses the latest version of pgx.
+func RegisterDriver(name string, opts []cloudsqlconn.DialerOption, dopts ...cloudsqlconn.DialOption) {
+	sql.Register(name, &pgDriver{
+		opts:     opts,
+		dialOpts: dopts,
+	})
 }
 
 type dialerConn struct {
@@ -39,21 +47,29 @@ func (c *dialerConn) Close() error {
 	return c.Conn.Close()
 }
 
-type pgDriver struct{}
+type pgDriver struct {
+	opts     []cloudsqlconn.DialerOption
+	dialOpts []cloudsqlconn.DialOption
+}
 
-func (*pgDriver) Open(name string) (driver.Conn, error) {
+// Open accepts a keyword/value formatted connection string and returns a
+// connection to the database using cloudsqlconn.Dialer. The Cloud SQL instance
+// connection name should be specified in the host field. For example:
+//
+// "host=my-project:us-central1:my-db-instance user=myuser password=mypass"
+func (p *pgDriver) Open(name string) (driver.Conn, error) {
 	config, err := pgx.ParseConfig(name)
 	if err != nil {
 		return nil, err
 	}
 	instConnName := config.Config.Host // Extract instance connection name
 	config.Config.Host = "localhost"   // Replace it with a default value
-	d, err := cloudsqlconn.NewDialer(context.Background())
+	d, err := cloudsqlconn.NewDialer(context.Background(), p.opts...)
 	if err != nil {
 		return nil, err
 	}
 	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return d.Dial(ctx, instConnName)
+		return d.Dial(ctx, instConnName, p.dialOpts...)
 	}
 	dbURI := stdlib.RegisterConnConfig(config)
 	conn, err := stdlib.GetDefaultDriver().Open(dbURI)

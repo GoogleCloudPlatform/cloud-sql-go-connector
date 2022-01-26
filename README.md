@@ -128,21 +128,24 @@ possible to use the dialer with the `database/sql` package.
 
 #### postgres
 
-To use `database/sql`, import the hook and connect with `sql.Open`:
+To use `database/sql`, use `postgres.RegisterDriver` with any necessary Dialer
+configuration. Note: the connection string must use the keyword/value format
+with host set to the instance connection name.
 
 ``` go
 package foo
 
 import (
-	_ "cloud.google.com/go/cloudsqlconn/postgres"
+    // ...
+    "cloud.google.com/go/cloudsqlconn/postgres"
 )
 
 func Connect() {
-	db, err := sql.Open(
-		"cloudsql-postgres",
+    postgres.RegisterDrive("cloudsql-postgres", cloudsqlconn.WithCredentialsFile("creds.json"))
+    db, err := sql.Open(
+        "cloudsql-postgres",
         "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"
 	)
-
     // ... etc
 }
 ```

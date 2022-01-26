@@ -31,6 +31,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v4"
 
+	"cloud.google.com/go/cloudsqlconn/postgres"
 	_ "cloud.google.com/go/cloudsqlconn/postgres"
 )
 
@@ -136,6 +137,14 @@ func TestEngineVersion(t *testing.T) {
 }
 
 func TestPostgresHook(t *testing.T) {
+	testConn := func(db *sql.DB) {
+		var now time.Time
+		if err := db.QueryRow("SELECT NOW()").Scan(&now); err != nil {
+			t.Fatalf("QueryRow failed: %v", err)
+		}
+		t.Log(now)
+	}
+	postgres.RegisterDriver("cloudsql-postgres", nil)
 	db, err := sql.Open(
 		"cloudsql-postgres",
 		fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
@@ -144,9 +153,20 @@ func TestPostgresHook(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sql.Open want err = nil, got = %v", err)
 	}
-	var now time.Time
-	if err = db.QueryRow("SELECT NOW()").Scan(&now); err != nil {
-		t.Fatalf("QueryRow failed: %v", err)
+	defer db.Close()
+	testConn(db)
+
+	postgres.RegisterDriver("cloudsql-postgres-iam", []cloudsqlconn.DialerOption{
+		cloudsqlconn.WithIAMAuthN(),
+	})
+	db2, err := sql.Open(
+		"cloudsql-postgres-iam",
+		fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
+			postgresConnName, postgresUserIAM, postgresDb),
+	)
+	if err != nil {
+		t.Fatalf("sql.Open want err = nil, got = %v", err)
 	}
-	t.Log(now)
+	defer db2.Close()
+	testConn(db2)
 }
