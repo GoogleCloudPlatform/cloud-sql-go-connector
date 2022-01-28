@@ -141,7 +141,7 @@ import (
 )
 
 func Connect() {
-    postgres.RegisterDrive("cloudsql-postgres", cloudsqlconn.WithCredentialsFile("creds.json"))
+    postgres.RegisterDriver("cloudsql-postgres", nil)
     db, err := sql.Open(
         "cloudsql-postgres",
         "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"
