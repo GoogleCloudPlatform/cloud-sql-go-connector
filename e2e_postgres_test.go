@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !skip_postgres
+// +build !skip_postgres
+
 // Package tests contains end to end tests for verifying compatibility of examples with external resources.
 package cloudsqlconn_test
 
