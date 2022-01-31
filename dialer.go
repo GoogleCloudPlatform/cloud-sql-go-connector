@@ -95,7 +95,7 @@ type Dialer struct {
 // Initial calls to NewDialer make take longer than normal because generation of an
 // RSA keypair is performed. Calls with a WithRSAKeyPair DialOption or after a default
 // RSA keypair is generated will be faster.
-func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
+func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg := &dialerConfig{
 		refreshTimeout: 30 * time.Second,
 		sqladminOpts:   []option.ClientOption{option.WithUserAgent(userAgent)},
