@@ -145,6 +145,9 @@ func TestEngineVersion(t *testing.T) {
 }
 
 func TestPostgresHook(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
 	testConn := func(db *sql.DB) {
 		var now time.Time
 		if err := db.QueryRow("SELECT NOW()").Scan(&now); err != nil {
