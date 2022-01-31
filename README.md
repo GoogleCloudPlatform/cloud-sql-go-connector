@@ -137,11 +137,11 @@ package foo
 
 import (
     // ...
-    "cloud.google.com/go/cloudsqlconn/postgres"
+    "cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
 )
 
 func Connect() {
-    postgres.RegisterDriver("cloudsql-postgres", nil)
+    pgxv4.RegisterDriver("cloudsql-postgres")
     db, err := sql.Open(
         "cloudsql-postgres",
         "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"

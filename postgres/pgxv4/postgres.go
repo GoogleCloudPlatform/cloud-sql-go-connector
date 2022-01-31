@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package postgres
+// Package pgxv4 provides a Cloud SQL Postgres driver that uses pgx v4.
+package pgxv4
 
 import (
 	"context"
@@ -30,10 +31,9 @@ import (
 // the caller and may be used to distinguish between multiple registrations of
 // differently configured Dialers.
 // Note: The underlying driver uses the latest version of pgx.
-func RegisterDriver(name string, opts []cloudsqlconn.DialerOption, dopts ...cloudsqlconn.DialOption) {
+func RegisterDriver(name string, opts ...cloudsqlconn.DialerOption) {
 	sql.Register(name, &pgDriver{
-		opts:     opts,
-		dialOpts: dopts,
+		opts: opts,
 	})
 }
 
@@ -48,8 +48,7 @@ func (c *dialerConn) Close() error {
 }
 
 type pgDriver struct {
-	opts     []cloudsqlconn.DialerOption
-	dialOpts []cloudsqlconn.DialOption
+	opts []cloudsqlconn.DialerOption
 }
 
 // Open accepts a keyword/value formatted connection string and returns a
@@ -69,7 +68,7 @@ func (p *pgDriver) Open(name string) (driver.Conn, error) {
 		return nil, err
 	}
 	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return d.Dial(ctx, instConnName, p.dialOpts...)
+		return d.Dial(ctx, instConnName)
 	}
 	dbURI := stdlib.RegisterConnConfig(config)
 	conn, err := stdlib.GetDefaultDriver().Open(dbURI)
