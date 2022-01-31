@@ -31,8 +31,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v4"
 
-	"cloud.google.com/go/cloudsqlconn/postgres"
-	_ "cloud.google.com/go/cloudsqlconn/postgres"
+	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
 )
 
 var (
@@ -153,7 +152,7 @@ func TestPostgresHook(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	postgres.RegisterDriver("cloudsql-postgres", nil)
+	pgxv4.RegisterDriver("cloudsql-postgres")
 	db, err := sql.Open(
 		"cloudsql-postgres",
 		fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
@@ -165,9 +164,7 @@ func TestPostgresHook(t *testing.T) {
 	defer db.Close()
 	testConn(db)
 
-	postgres.RegisterDriver("cloudsql-postgres-iam", []cloudsqlconn.DialerOption{
-		cloudsqlconn.WithIAMAuthN(),
-	})
+	pgxv4.RegisterDriver("cloudsql-postgres-iam", cloudsqlconn.WithIAMAuthN())
 	db2, err := sql.Open(
 		"cloudsql-postgres-iam",
 		fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
