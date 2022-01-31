@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !skip_e2e && !skip_postgres
-// +build !skip_e2e,!skip_postgres
+//go:build !skip_postgres
+// +build !skip_postgres
 
 // Package tests contains end to end tests for verifying compatibility of examples with external resources.
 package cloudsqlconn_test
@@ -59,6 +59,9 @@ func requirePostgresVars(t *testing.T) {
 }
 
 func TestPgxConnect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
 	requirePostgresVars(t)
 
 	ctx := context.Background()
@@ -87,6 +90,9 @@ func TestPgxConnect(t *testing.T) {
 }
 
 func TestConnectWithIAMUser(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
 	requirePostgresVars(t)
 
 	ctx := context.Background()
@@ -121,6 +127,9 @@ func TestConnectWithIAMUser(t *testing.T) {
 }
 
 func TestEngineVersion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	d, err := cloudsqlconn.NewDialer(context.Background())
