@@ -68,6 +68,43 @@ func TestParseConnName(t *testing.T) {
 	}
 }
 
+func TestInstanceEngineVersion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tests := []string{
+		"MYSQL_5_7", "POSTGRES_14", "SQLSERVER_2019_STANDARD", "MYSQL_8_0_18",
+	}
+	for _, wantEV := range tests {
+		inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion(wantEV))
+		client, cleanup, err := mock.NewSQLAdminService(
+			ctx,
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		)
+		if err != nil {
+			t.Fatalf("%s", err)
+		}
+		defer func() {
+			if err := cleanup(); err != nil {
+				t.Fatalf("%v", err)
+			}
+		}()
+		i, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 30*time.Second, nil)
+		if err != nil {
+			t.Fatalf("failed to init instance: %v", err)
+		}
+
+		gotEV, err := i.InstanceEngineVersion(ctx)
+		if err != nil {
+			t.Fatalf("failed to retrieve engine version: %v", err)
+		}
+		if wantEV != gotEV {
+			t.Errorf("InstanceEngineVersion(%s) failed: want %v, got %v", wantEV, gotEV, err)
+		}
+
+	}
+}
+
 func TestConnectInfo(t *testing.T) {
 	ctx := context.Background()
 	wantAddr := "0.0.0.0"

@@ -12,7 +12,7 @@ see [About the Cloud SQL Auth proxy][about-proxy].
 [about-proxy]: https://cloud.google.com/sql/docs/mysql/sql-proxy
 
 The _Cloud SQL Go Connector_ is an experimental new version of the
-[Cloud SQL proxy dialer](dialer). Its API is considered unstable and may change
+[Cloud SQL proxy dialer](dialer.go). Its API is considered unstable and may change
 in the future. Please use at your own risk.
 
 [proxy-dialer]: https://github.com/GoogleCloudPlatform/cloudsql-proxy/tree/main/proxy#cloud-sql-proxy-dialer-for-go
@@ -41,7 +41,7 @@ typing providing credentials. Please see the
 how these credentials are sourced.
 
 To explicitly set a specific source for the Credentials to use, see [Using
-DialerOptions](#using-dialeroptions) below.
+Option](#using-options) below.
 
 [adc]: https://cloud.google.com/docs/authentication
 [google-auth]: https://pkg.go.dev/golang.org/x/oauth2/google#hdr-Credentials
@@ -79,7 +79,7 @@ the package's "Dial" option, which initializes a default dialer for you.
 
 
 
-### Using DialerOptions
+### Using Options
 
 If you need to customize something about the `Dialer`, you can initialize
 directly with `NewDialer`:
@@ -96,12 +96,12 @@ if err != nil {
 conn, err := myDialer.Dial(ctx, "project:region:instance")
 ```
 
-For a full list of customizable behavior, see DialerOptions.
+For a full list of customizable behavior, see Option.
 
 ### Using DialOptions
 
 If you want to customize things about how the connection is created, use
-`DialerOptions`:
+`Option`:
 ```go
 conn, err := myDialer.Dial(
     ctx,
@@ -110,7 +110,7 @@ conn, err := myDialer.Dial(
 )
 ```
 
-You can also use the `WithDefaultDialOptions` DialerOption to specify
+You can also use the `WithDefaultDialOptions` Option to specify
 DialOptions to be used by default:
 ```go
 myDialer, err := cloudsqlconn.NewDialer(

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !skip_e2e && !skip_postgres
-// +build !skip_e2e,!skip_postgres
+//go:build !skip_postgres
+// +build !skip_postgres
 
 // Package tests contains end to end tests for verifying compatibility of examples with external resources.
 package cloudsqlconn_test
@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,9 @@ func requirePostgresVars(t *testing.T) {
 }
 
 func TestPgxConnect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
 	requirePostgresVars(t)
 
 	ctx := context.Background()
@@ -82,6 +86,9 @@ func TestPgxConnect(t *testing.T) {
 }
 
 func TestConnectWithIAMUser(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
 	requirePostgresVars(t)
 
 	ctx := context.Background()
@@ -113,4 +120,23 @@ func TestConnectWithIAMUser(t *testing.T) {
 		t.Fatalf("QueryRow failed: %s", err)
 	}
 	t.Log(now)
+}
+
+func TestEngineVersion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d, err := cloudsqlconn.NewDialer(context.Background())
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+	gotEV, err := d.EngineVersion(ctx, postgresConnName)
+	if err != nil {
+		t.Fatalf("failed to retrieve engine version: %v", err)
+	}
+	if !strings.Contains(gotEV, "POSTGRES") {
+		t.Errorf("InstanceEngineVersion(%s) failed: want 'POSTGRES', got %v", gotEV, err)
+	}
 }

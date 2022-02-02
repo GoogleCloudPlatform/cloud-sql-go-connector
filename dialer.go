@@ -98,7 +98,7 @@ type Dialer struct {
 // Initial calls to NewDialer make take longer than normal because generation of an
 // RSA keypair is performed. Calls with a WithRSAKeyPair DialOption or after a default
 // RSA keypair is generated will be faster.
-func NewDialer(ctx context.Context, opts ...DialerOption) (*Dialer, error) {
+func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg := &dialerConfig{
 		refreshTimeout: 30 * time.Second,
 		sqladminOpts:   []option.ClientOption{option.WithUserAgent(userAgent)},
@@ -229,6 +229,21 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		n := atomic.AddUint64(&i.OpenConns, ^uint64(0))
 		d.metrics.RecordOpenConnections(ctx, int64(n), d.dialerID, i.String())
 	}), nil
+}
+
+// EngineVersion returns the engine type and version for the instance. The value will
+// corespond to one of the following types for the instance:
+// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
+func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, error) {
+	i, err := d.instance(instance)
+	if err != nil {
+		return "", err
+	}
+	e, err := i.InstanceEngineVersion(ctx)
+	if err != nil {
+		return "", err
+	}
+	return e, nil
 }
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will

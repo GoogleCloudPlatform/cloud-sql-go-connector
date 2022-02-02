@@ -102,6 +102,13 @@ func WithFirstGenBackend() FakeCSQLInstanceOption {
 	}
 }
 
+// WithEngineVersion sets the "DB Version"
+func WithEngineVersion(s string) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.dbVersion = s
+	}
+}
+
 // SignFunc is a function that signs the certificate using the provided key. The
 // result should be PEM-encoded.
 type SignFunc = func(*x509.Certificate, *rsa.PrivateKey) ([]byte, error)
