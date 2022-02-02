@@ -12,7 +12,7 @@ see [About the Cloud SQL Auth proxy][about-proxy].
 [about-proxy]: https://cloud.google.com/sql/docs/mysql/sql-proxy
 
 The _Cloud SQL Go Connector_ is an experimental new version of the
-[Cloud SQL proxy dialer](dialer). Its API is considered unstable and may change
+[Cloud SQL proxy dialer](dialer.go). Its API is considered unstable and may change
 in the future. Please use at your own risk.
 
 [proxy-dialer]: https://github.com/GoogleCloudPlatform/cloudsql-proxy/tree/main/proxy#cloud-sql-proxy-dialer-for-go
