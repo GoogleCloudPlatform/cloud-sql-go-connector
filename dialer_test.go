@@ -175,12 +175,12 @@ var fakeServiceAccount = []byte(`{
 func TestIAMAuthn(t *testing.T) {
 	tcs := []struct {
 		desc            string
-		opts            DialerOption
+		opts            Option
 		wantTokenSource bool
 	}{
 		{
 			desc:            "When Credentials are provided with IAM Authn ENABLED",
-			opts:            DialerOptions(WithIAMAuthN(), WithCredentialsJSON(fakeServiceAccount)),
+			opts:            WithOptions(WithIAMAuthN(), WithCredentialsJSON(fakeServiceAccount)),
 			wantTokenSource: true,
 		},
 		{
