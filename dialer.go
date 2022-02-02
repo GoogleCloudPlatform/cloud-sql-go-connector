@@ -227,7 +227,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 
 	return newInstrumentedConn(tlsConn, func() {
 		n := atomic.AddUint64(&i.OpenConns, ^uint64(0))
-		d.metrics.RecordOpenConnections(ctx, int64(n), d.dialerID, i.String())
+		d.metrics.RecordOpenConnections(context.Background(), int64(n), d.dialerID, i.String())
 	}), nil
 }
 
