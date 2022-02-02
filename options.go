@@ -45,7 +45,7 @@ type dialerConfig struct {
 	err error
 }
 
-// Options turns a list of Option's into a single Option.
+// WithOptions turns a list of Option's into a single Option.
 func WithOptions(opts ...Option) Option {
 	return func(d *dialerConfig) {
 		for _, opt := range opts {
