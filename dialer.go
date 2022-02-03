@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtypes"
@@ -144,10 +145,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 
 	if err := trace.InitMetrics(); err != nil {
-		// This error means the internal metric configuration is incorrect and
-		// should never be surfaced to callers, as there's nothing actionable
-		// for a caller to do. Ignoring the error seems worse and so we return
-		// it.
 		return nil, err
 	}
 	d := &Dialer{
@@ -219,11 +216,15 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
+		n := atomic.AddUint64(&i.OpenConns, 1)
+		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, i.String())
 		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
-		trace.RecordConnectionOpen(ctx, instance, d.dialerID)
 	}()
 
-	return newInstrumentedConn(tlsConn, instance, d.dialerID), nil
+	return newInstrumentedConn(tlsConn, func() {
+		n := atomic.AddUint64(&i.OpenConns, ^uint64(0))
+		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, i.String())
+	}), nil
 }
 
 // EngineVersion returns the engine type and version for the instance. The value will
@@ -243,12 +244,10 @@ func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, er
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
 // decrement the number of open connects and record the result.
-func newInstrumentedConn(conn net.Conn, instance, dialerID string) *instrumentedConn {
+func newInstrumentedConn(conn net.Conn, closeFunc func()) *instrumentedConn {
 	return &instrumentedConn{
-		Conn: conn,
-		closeFunc: func() {
-			trace.RecordConnectionClose(context.Background(), instance, dialerID)
-		},
+		Conn:      conn,
+		closeFunc: closeFunc,
 	}
 }
 

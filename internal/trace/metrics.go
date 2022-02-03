@@ -17,6 +17,7 @@ package trace
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
@@ -26,14 +27,18 @@ import (
 var (
 	keyInstance, _ = tag.NewKey("cloudsql_instance")
 	keyDialerID, _ = tag.NewKey("cloudsql_dialer_id")
-)
 
-var (
 	mLatencyMS = stats.Int64(
 		"/cloudsqlconn/latency",
 		"The latency in milliseconds per Dial",
 		stats.UnitMilliseconds,
 	)
+	mConnections = stats.Int64(
+		"/cloudsqlconn/connection",
+		"A connect or disconnect event to Cloud SQL",
+		stats.UnitDimensionless,
+	)
+
 	latencyView = &view.View{
 		Name:        "/cloudsqlconn/dial_latency",
 		Measure:     mLatencyMS,
@@ -42,22 +47,29 @@ var (
 		Aggregation: view.Distribution(0, 5, 25, 100, 250, 500, 1000, 2000, 5000, 30000),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
-)
-
-var (
-	mConnections = stats.Int64(
-		"/cloudsqlconn/connection",
-		"A connect or disconnect event to Cloud SQL",
-		stats.UnitDimensionless,
-	)
 	connectionsView = &view.View{
 		Name:        "/cloudsqlconn/open_connections",
 		Measure:     mConnections,
-		Description: "The sum of Cloud SQL connections",
-		Aggregation: view.Sum(),
+		Description: "The current number of open Cloud SQL connections",
+		Aggregation: view.LastValue(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
+
+	registerOnce sync.Once
+	registerErr  error
 )
+
+// InitMetrics registers all views once. Without registering views, metrics will
+// not be reported. If any names of the registered views conflict, this function
+// returns an error to indicate an internal configuration problem.
+func InitMetrics() error {
+	registerOnce.Do(func() {
+		if rErr := view.Register(latencyView, connectionsView); rErr != nil {
+			registerErr = fmt.Errorf("failed to initialize metrics: %v", rErr)
+		}
+	})
+	return registerErr
+}
 
 // RecordDialLatency records a latency value for a call to dial.
 func RecordDialLatency(ctx context.Context, instance, dialerID string, latency int64) {
@@ -69,26 +81,9 @@ func RecordDialLatency(ctx context.Context, instance, dialerID string, latency i
 	stats.Record(ctx, mLatencyMS.M(latency))
 }
 
-// RecordConnectionOpen reports a connection event.
-func RecordConnectionOpen(ctx context.Context, instance, dialerID string) {
+// RecordOpenConnections records the number of open connections
+func RecordOpenConnections(ctx context.Context, num int64, dialerID, instance string) {
 	// Why are we ignoring this error? See above under RecordDialLatency.
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
-	stats.Record(ctx, mConnections.M(1))
-}
-
-// RecordConnectionClose records a disconnect event.
-func RecordConnectionClose(ctx context.Context, instance, dialerID string) {
-	// Why are we ignoring this error? See above under RecordDialLatency.
-	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
-	stats.Record(ctx, mConnections.M(-1))
-}
-
-// InitMetrics registers all views. Without registering views, metrics will not
-// be reported. If any names of the registered views conflict, this function
-// returns an error to indicate a configuration problem.
-func InitMetrics() error {
-	if err := view.Register(latencyView, connectionsView); err != nil {
-		return fmt.Errorf("failed to initialize metrics: %v", err)
-	}
-	return nil
+	stats.Record(ctx, mConnections.M(num))
 }
