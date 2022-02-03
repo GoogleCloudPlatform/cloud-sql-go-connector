@@ -89,8 +89,6 @@ type Dialer struct {
 	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn. If IAM DB
 	// Authn is not enabled, iamTokenSource will be nil.
 	iamTokenSource oauth2.TokenSource
-
-	metrics *trace.MetricsCollector
 }
 
 // NewDialer creates a new Dialer.
@@ -146,9 +144,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		opt(&dialCfg)
 	}
 
-	mc, err := trace.NewMetricsCollector()
-	if err != nil {
-		return nil, fmt.Errorf("failed to configure metrics: %v", err)
+	if err := trace.InitMetrics(); err != nil {
+		return nil, err
 	}
 	d := &Dialer{
 		instances:      make(map[string]*cloudsql.Instance),
@@ -159,7 +156,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		dialerID:       uuid.New().String(),
 		iamTokenSource: cfg.tokenSource,
 		dialFunc:       cfg.dialFunc,
-		metrics:        mc,
 	}
 	return d, nil
 }
@@ -221,13 +217,13 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
 		n := atomic.AddUint64(&i.OpenConns, 1)
-		d.metrics.RecordOpenConnections(ctx, int64(n), d.dialerID, i.String())
-		d.metrics.RecordDialLatency(ctx, instance, d.dialerID, latency)
+		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, i.String())
+		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
 
 	return newInstrumentedConn(tlsConn, func() {
 		n := atomic.AddUint64(&i.OpenConns, ^uint64(0))
-		d.metrics.RecordOpenConnections(context.Background(), int64(n), d.dialerID, i.String())
+		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, i.String())
 	}), nil
 }
 

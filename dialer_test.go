@@ -191,13 +191,15 @@ func TestIAMAuthn(t *testing.T) {
 	}
 
 	for _, tc := range tcs {
-		d, err := NewDialer(context.Background(), tc.opts)
-		if err != nil {
-			t.Errorf("NewDialer failed with error = %v", err)
-		}
-		if gotTokenSource := d.iamTokenSource != nil; gotTokenSource != tc.wantTokenSource {
-			t.Errorf("%v, want = %v, got = %v", tc.desc, tc.wantTokenSource, gotTokenSource)
-		}
+		t.Run(tc.desc, func(t *testing.T) {
+			d, err := NewDialer(context.Background(), tc.opts)
+			if err != nil {
+				t.Fatalf("NewDialer failed with error = %v", err)
+			}
+			if gotTokenSource := d.iamTokenSource != nil; gotTokenSource != tc.wantTokenSource {
+				t.Fatalf("want = %v, got = %v", tc.wantTokenSource, gotTokenSource)
+			}
+		})
 	}
 }
 

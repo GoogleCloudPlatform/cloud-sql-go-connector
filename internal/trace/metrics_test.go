@@ -21,7 +21,7 @@ import (
 )
 
 func TestMetricsInitializes(t *testing.T) {
-	if _, err := trace.NewMetricsCollector(); err != nil {
+	if err := trace.InitMetrics(); err != nil {
 		t.Fatalf("want no error, got = %v", err)
 	}
 }
