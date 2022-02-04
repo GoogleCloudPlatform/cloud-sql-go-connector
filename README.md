@@ -136,12 +136,19 @@ with host set to the instance connection name.
 package foo
 
 import (
-    // ...
+    "database/sql"
+
+    "cloud.google.com/go/cloudsqlconn"
     "cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
 )
 
 func Connect() {
+    // Without any options:
     pgxv4.RegisterDriver("cloudsql-postgres")
+
+    // Or, with options:
+    // pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())
+
     db, err := sql.Open(
         "cloudsql-postgres",
         "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"
