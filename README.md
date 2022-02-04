@@ -53,31 +53,31 @@ the package's "Dial" option, which initializes a default dialer for you.
 
 #### pgx for Postgres
 
-  Use the [pgConn.DialFunc field][pgconn-cfg] to create connections:
+To use the dialer with [pgx](https://github.com/jackc/pgx), configure the
+[pgConn.DialFunc field][pgconn-cfg] to create connections:
 
-  ```go
-  // Configure the driver to connect to the database
-  dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", pgUser, pgPass, pgDB)
-  config, err := pgx.ParseConfig(dsn)
-  if err != nil {
-      log.Fatalf("failed to parse pgx config: %v", err)
-  }
+```go
+// Configure the driver to connect to the database
+dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", pgUser, pgPass, pgDB)
+config, err := pgx.ParseConfig(dsn)
+if err != nil {
+    log.Fatalf("failed to parse pgx config: %v", err)
+}
 
-  // Tell the driver to use the Cloud SQL Go Connector to create connections
-  config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
-      return cloudsqlconn.Dial(ctx, "project:region:instance")
-  }
+// Tell the driver to use the Cloud SQL Go Connector to create connections
+config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
+    return cloudsqlconn.Dial(ctx, "project:region:instance")
+}
 
- // Interact with the driver directly as you normally would
-  conn, connErr := pgx.ConnectConfig(ctx, config)
-  if connErr != nil {
-      log.Fatalf("failed to connect: %s", connErr)
-  }
-  defer conn.Close(ctx)
-  ```
-  [pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
+// Interact with the driver directly as you normally would
+conn, connErr := pgx.ConnectConfig(ctx, config)
+if connErr != nil {
+    log.Fatalf("failed to connect: %s", connErr)
+}
+defer conn.Close(ctx)
+```
 
-
+[pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
 
 ### Using Options
 
@@ -119,6 +119,42 @@ myDialer, err := cloudsqlconn.NewDialer(
         cloudsqlconn.WithPrivateIP(),
     ),
 )
+```
+
+### Using the dialer with database/sql
+
+Using the dialer directly will expose more configuration options. However, it is
+possible to use the dialer with the `database/sql` package.
+
+#### postgres
+
+To use `database/sql`, use `postgres.RegisterDriver` with any necessary Dialer
+configuration. Note: the connection string must use the keyword/value format
+with host set to the instance connection name.
+
+``` go
+package foo
+
+import (
+    "database/sql"
+
+    "cloud.google.com/go/cloudsqlconn"
+    "cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
+)
+
+func Connect() {
+    // Without any options:
+    pgxv4.RegisterDriver("cloudsql-postgres")
+
+    // Or, with options:
+    // pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())
+
+    db, err := sql.Open(
+        "cloudsql-postgres",
+        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"
+	)
+    // ... etc
+}
 ```
 
 ### Enabling Metrics and Tracing
