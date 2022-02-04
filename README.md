@@ -69,7 +69,7 @@ config.DialFunc = func(ctx context.Context, network string, instance string) (ne
     return cloudsqlconn.Dial(ctx, "project:region:instance")
 }
 
-/ Interact with the driver directly as you normally would
+// Interact with the driver directly as you normally would
 conn, connErr := pgx.ConnectConfig(ctx, config)
 if connErr != nil {
     log.Fatalf("failed to connect: %s", connErr)
