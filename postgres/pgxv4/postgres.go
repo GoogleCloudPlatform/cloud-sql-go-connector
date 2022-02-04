@@ -31,7 +31,7 @@ import (
 // the caller and may be used to distinguish between multiple registrations of
 // differently configured Dialers.
 // Note: The underlying driver uses the latest version of pgx.
-func RegisterDriver(name string, opts ...cloudsqlconn.DialerOption) {
+func RegisterDriver(name string, opts ...cloudsqlconn.Option) {
 	sql.Register(name, &pgDriver{
 		opts: opts,
 	})
@@ -48,7 +48,7 @@ func (c *dialerConn) Close() error {
 }
 
 type pgDriver struct {
-	opts []cloudsqlconn.DialerOption
+	opts []cloudsqlconn.Option
 }
 
 // Open accepts a keyword/value formatted connection string and returns a
