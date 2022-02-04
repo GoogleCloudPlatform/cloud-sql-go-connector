@@ -30,8 +30,8 @@ import (
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
-// A DialerOption is an option for configuring a Dialer.
-type DialerOption func(d *dialerConfig)
+// An Option is an option for configuring a Dialer.
+type Option func(d *dialerConfig)
 
 type dialerConfig struct {
 	rsaKey         *rsa.PrivateKey
@@ -45,8 +45,8 @@ type dialerConfig struct {
 	err error
 }
 
-// DialerOptions turns a list of DialerOption instances into an DialerOption.
-func DialerOptions(opts ...DialerOption) DialerOption {
+// WithOptions turns a list of Option's into a single Option.
+func WithOptions(opts ...Option) Option {
 	return func(d *dialerConfig) {
 		for _, opt := range opts {
 			opt(d)
@@ -54,10 +54,10 @@ func DialerOptions(opts ...DialerOption) DialerOption {
 	}
 }
 
-// WithCredentialsFile returns a DialerOption that specifies a service account
+// WithCredentialsFile returns an Option that specifies a service account
 // or refresh token JSON credentials file to be used as the basis for
 // authentication.
-func WithCredentialsFile(filename string) DialerOption {
+func WithCredentialsFile(filename string) Option {
 	return func(d *dialerConfig) {
 		b, err := ioutil.ReadFile(filename)
 		if err != nil {
@@ -69,9 +69,9 @@ func WithCredentialsFile(filename string) DialerOption {
 	}
 }
 
-// WithCredentialsJSON returns a DialerOption that specifies a service account
+// WithCredentialsJSON returns an Option that specifies a service account
 // or refresh token JSON credentials to be used as the basis for authentication.
-func WithCredentialsJSON(b []byte) DialerOption {
+func WithCredentialsJSON(b []byte) Option {
 	return func(d *dialerConfig) {
 		c, err := google.CredentialsFromJSON(context.Background(), b, sqladmin.SqlserviceAdminScope)
 		if err != nil {
@@ -83,31 +83,32 @@ func WithCredentialsJSON(b []byte) DialerOption {
 	}
 }
 
-// WithDefaultDialOption returns a DialerOption that specifies the default DialOptions used.
-func WithDefaultDialOptions(opts ...DialOption) DialerOption {
+// WithDefaultDialOptions returns an Option that specifies the default
+// DialOptions used.
+func WithDefaultDialOptions(opts ...DialOption) Option {
 	return func(d *dialerConfig) {
 		d.dialOpts = append(d.dialOpts, opts...)
 	}
 }
 
-// WithTokenSource returns a DialerOption that specifies an OAuth2 token source
+// WithTokenSource returns an Option that specifies an OAuth2 token source
 // to be used as the basis for authentication.
-func WithTokenSource(s oauth2.TokenSource) DialerOption {
+func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
 		d.tokenSource = s
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
 	}
 }
 
-// WithRSAKey returns a DialerOption that specifies a rsa.PrivateKey used to represent the client.
-func WithRSAKey(k *rsa.PrivateKey) DialerOption {
+// WithRSAKey returns an Option that specifies a rsa.PrivateKey used to represent the client.
+func WithRSAKey(k *rsa.PrivateKey) Option {
 	return func(d *dialerConfig) {
 		d.rsaKey = k
 	}
 }
 
-// WithRefreshTimeout returns a DialerOption that sets a timeout on refresh operations. Defaults to 30s.
-func WithRefreshTimeout(t time.Duration) DialerOption {
+// WithRefreshTimeout returns an Option that sets a timeout on refresh operations. Defaults to 30s.
+func WithRefreshTimeout(t time.Duration) Option {
 	return func(d *dialerConfig) {
 		d.refreshTimeout = t
 	}
@@ -116,7 +117,7 @@ func WithRefreshTimeout(t time.Duration) DialerOption {
 // WithHTTPClient configures the underlying SQL Admin API client with the
 // provided HTTP client. This option is generally unnecessary except for
 // advanced use-cases.
-func WithHTTPClient(client *http.Client) DialerOption {
+func WithHTTPClient(client *http.Client) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithHTTPClient(client))
 	}
@@ -125,7 +126,7 @@ func WithHTTPClient(client *http.Client) DialerOption {
 // WithDialFunc configures the function used to connect to the address on the
 // named network. This option is generally unnecessary except for advanced
 // use-cases.
-func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn, error)) DialerOption {
+func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn, error)) Option {
 	return func(d *dialerConfig) {
 		d.dialFunc = dial
 	}
@@ -138,7 +139,7 @@ func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn
 //
 // For documentation on automatic IAM Authentication, see
 // https://cloud.google.com/sql/docs/postgres/authentication.
-func WithIAMAuthN() DialerOption {
+func WithIAMAuthN() Option {
 	return func(d *dialerConfig) {
 		d.useIAMAuthN = true
 	}

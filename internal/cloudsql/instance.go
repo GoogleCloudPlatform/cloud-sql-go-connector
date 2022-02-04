@@ -131,6 +131,9 @@ type Instance struct {
 	// replacement to occur.
 	next *refreshResult
 
+	// OpenConns is the number of open connections to the instance.
+	OpenConns uint64
+
 	// ctx is the default ctx for refresh operations. Canceling it prevents new refresh
 	// operations from being triggered.
 	ctx    context.Context
@@ -268,4 +271,9 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
 		i.next = i.scheduleRefresh(time.Until(nextRefresh))
 	})
 	return res
+}
+
+// String returns the instance's connection name.
+func (i *Instance) String() string {
+	return i.connName.String()
 }
