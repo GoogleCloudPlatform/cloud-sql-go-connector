@@ -79,6 +79,11 @@ defer conn.Close(ctx)
 
 [pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
 
+
+#### go-sql-driver/mysql for MySQL
+
+See [below](#MySQL).
+
 ### Using Options
 
 If you need to customize something about the `Dialer`, you can initialize
@@ -126,7 +131,7 @@ myDialer, err := cloudsqlconn.NewDialer(
 Using the dialer directly will expose more configuration options. However, it is
 possible to use the dialer with the `database/sql` package.
 
-#### postgres
+#### Postgres
 
 To use `database/sql`, use `postgres.RegisterDriver` with any necessary Dialer
 configuration. Note: the connection string must use the keyword/value format
@@ -156,6 +161,26 @@ func Connect() {
     // ... etc
 }
 ```
+
+#### MySQL
+
+To use the dialer with [go-sql-driver/mysql][go-sql-driver], configure a custom
+dial function with [mysql.RegisterDialContext][]:
+
+```go
+// the dialer context name is arbitrary, but it must match the protocol in the
+// DSN below.
+mysql.RegisterDialContext("cloudsqlconn", cloudsqlconn.Dial)
+
+db, err := sql.Open("mysql", "user:password@cloudsqlconn(some-project:us-central1:some-instance)/dbname")
+if err != nil {
+	panic(err)
+}
+```
+
+[go-sql-driver]: https://github.com/go-sql-driver/mysql
+[mysql.RegisterDialContext]: https://pkg.go.dev/github.com/go-sql-driver/mysql#RegisterDialContext
+
 
 ### Enabling Metrics and Tracing
 
