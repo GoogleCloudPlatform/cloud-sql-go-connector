@@ -15,7 +15,6 @@
 //go:build !skip_postgres
 // +build !skip_postgres
 
-// Package tests contains end to end tests for verifying compatibility of examples with external resources.
 package cloudsqlconn_test
 
 import (
@@ -38,7 +37,7 @@ var (
 	postgresConnName = os.Getenv("POSTGRES_CONNECTION_NAME") // "Cloud SQL Postgres instance connection name, in the form of 'project:region:instance'.
 	postgresUser     = os.Getenv("POSTGRES_USER")            // Name of database user.
 	postgresPass     = os.Getenv("POSTGRES_PASS")            // Password for the database user; be careful when entering a password on the command line (it may go into your terminal's history).
-	postgresDb       = os.Getenv("POSTGRES_DB")              // Name of the database to connect to.
+	postgresDB       = os.Getenv("POSTGRES_DB")              // Name of the database to connect to.
 	postgresUserIAM  = os.Getenv("POSTGRES_USER_IAM")        // Name of database IAM user.
 )
 
@@ -50,7 +49,7 @@ func requirePostgresVars(t *testing.T) {
 		t.Fatal("'POSTGRES_USER' env var not set")
 	case postgresPass:
 		t.Fatal("'POSTGRES_PASS' env var not set")
-	case postgresDb:
+	case postgresDB:
 		t.Fatal("'POSTGRES_DB' env var not set")
 	case postgresUserIAM:
 		t.Fatal("'POSTGRES_USER_IAM' env var not set")
@@ -70,7 +69,7 @@ func TestPgxConnect(t *testing.T) {
 		t.Fatalf("failed to init Dialer: %v", err)
 	}
 
-	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDb)
+	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDB)
 	config, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("failed to parse pgx config: %v", err)
@@ -103,7 +102,7 @@ func TestConnectWithIAMUser(t *testing.T) {
 	ctx := context.Background()
 
 	// password is intentionally blank
-	dsn := fmt.Sprintf("user=%s password=\"\" dbname=%s sslmode=disable", postgresUserIAM, postgresDb)
+	dsn := fmt.Sprintf("user=%s password=\"\" dbname=%s sslmode=disable", postgresUserIAM, postgresDB)
 	config, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("failed to parse pgx config: %v", err)
@@ -165,7 +164,7 @@ func TestPostgresHook(t *testing.T) {
 	db, err := sql.Open(
 		"cloudsql-postgres",
 		fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
-			postgresConnName, postgresUser, postgresPass, postgresDb),
+			postgresConnName, postgresUser, postgresPass, postgresDB),
 	)
 	if err != nil {
 		t.Fatalf("sql.Open want err = nil, got = %v", err)
@@ -177,7 +176,7 @@ func TestPostgresHook(t *testing.T) {
 	db2, err := sql.Open(
 		"cloudsql-postgres-iam",
 		fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
-			postgresConnName, postgresUserIAM, postgresDb),
+			postgresConnName, postgresUserIAM, postgresDB),
 	)
 	if err != nil {
 		t.Fatalf("sql.Open want err = nil, got = %v", err)
