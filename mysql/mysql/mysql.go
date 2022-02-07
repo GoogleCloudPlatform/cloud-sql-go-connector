@@ -45,16 +45,6 @@ func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, err
 	}, nil
 }
 
-type dialerConn struct {
-	driver.Conn
-	dialer *cloudsqlconn.Dialer
-}
-
-func (c *dialerConn) Close() error {
-	c.dialer.Close()
-	return c.Conn.Close()
-}
-
 type mysqlDriver struct {
 	d *cloudsqlconn.Dialer
 }
@@ -69,12 +59,5 @@ type mysqlDriver struct {
 //
 func (d *mysqlDriver) Open(name string) (driver.Conn, error) {
 	drv := &mysql.MySQLDriver{}
-	conn, err := drv.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	return &dialerConn{
-		Conn:   conn,
-		dialer: d.d,
-	}, nil
+	return drv.Open(name)
 }
