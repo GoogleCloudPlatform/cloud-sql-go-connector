@@ -30,16 +30,19 @@ import (
 // configured with the provided options. The choice of name is entirely up to
 // the caller and may be used to distinguish between multiple registrations of
 // differently configured Dialers.
-func RegisterDriver(name string, opts ...cloudsqlconn.Option) error {
+func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, error) {
 	sql.Register(name, &mysqlDriver{})
 	d, err := cloudsqlconn.NewDialer(context.Background(), opts...)
 	if err != nil {
-		return err
+		return func() error { return nil }, err
 	}
 	mysql.RegisterDialContext(name, mysql.DialContextFunc(func(ctx context.Context, addr string) (net.Conn, error) {
 		return d.Dial(ctx, addr)
 	}))
-	return nil
+	return func() error {
+		d.Close()
+		return nil
+	}, nil
 }
 
 type dialerConn struct {

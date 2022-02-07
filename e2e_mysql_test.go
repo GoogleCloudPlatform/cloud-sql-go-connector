@@ -55,10 +55,11 @@ func TestMySQLDriver(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	err := mysql.RegisterDriver("cloudsql-mysql")
+	cleanup, err := mysql.RegisterDriver("cloudsql-mysql")
 	if err != nil {
 		t.Fatalf("failed to register driver: %v", err)
 	}
+	defer cleanup()
 	db, err := sql.Open(
 		"mysql",
 		fmt.Sprintf("%s:%s@cloudsql-mysql(%s)/%s?parseTime=true",
