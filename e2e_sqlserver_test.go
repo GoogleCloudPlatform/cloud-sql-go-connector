@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/sqlserver"
+	"cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
 )
 
 var (
@@ -58,7 +58,10 @@ func TestSqlServerHook(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	sqlserver.RegisterDriver("cloudsql-sqlserver")
+	err := mssql.RegisterDriver("cloudsql-sqlserver")
+	if err != nil {
+		t.Fatalf("failed to register driver: %v", err)
+	}
 	db, err := sql.Open(
 		"cloudsql-sqlserver",
 		fmt.Sprintf("sqlserver://%s:%s@localhost?database=%s&cloudsql=%s",

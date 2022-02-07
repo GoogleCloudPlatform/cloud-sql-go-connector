@@ -77,11 +77,15 @@ if connErr != nil {
 defer conn.Close(ctx)
 ```
 
+[pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
+
 #### SQL Server Support
 
-See [below](#SQL-Server).
+[Go-mssql][go-mssqldb] does not provide a stand-alone interface for interacting
+with a database and instead uses `database/sql`. See [the section below](#SQL-Server)
+on how to use the `database/sql` package with a Cloud SQL SQL Server instance.
 
-[pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
+[go-mssqldb]: https://github.com/denisenkom/go-mssqldb
 
 ### Using Options
 
@@ -177,11 +181,7 @@ import (
 )
 
 func Connect() {
-    // Without any options:
-    sqlserver.RegisterDriver("cloudsql-sqlserver")
-
-    // Or, with options:
-    // sqlserver.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
+    sqlserver.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
 
     db, err := sql.Open(
         "cloudsql-sqlserver",

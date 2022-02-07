@@ -14,7 +14,7 @@
 
 // Package sqlserver provides a Cloud SQL SQL Server driver that works with the
 // database/sql package.
-package sqlserver
+package mssql
 
 import (
 	"context"
@@ -23,7 +23,7 @@ import (
 	"net"
 
 	"cloud.google.com/go/cloudsqlconn"
-	mssql "github.com/denisenkom/go-mssqldb"
+	mssqldb "github.com/denisenkom/go-mssqldb"
 	"github.com/denisenkom/go-mssqldb/msdsn"
 )
 
@@ -31,8 +31,15 @@ import (
 // cloudsqlconn.Dialer configured with the provided options. The choice of name
 // is entirely up to the caller and may be used to distinguish between multiple
 // registrations of differently configured Dialers.
-func RegisterDriver(name string, opts ...cloudsqlconn.Option) {
-	sql.Register(name, &sqlserverDriver{opts: opts})
+func RegisterDriver(name string, opts ...cloudsqlconn.Option) error {
+	d, err := cloudsqlconn.NewDialer(context.Background(), opts...)
+	if err != nil {
+		return err
+	}
+	sql.Register(name, &sqlserverDriver{
+		d: d,
+	})
+	return nil
 }
 
 type csqlDialer struct {
@@ -55,7 +62,7 @@ func (c *csqlDialer) Close() error {
 }
 
 type sqlserverDriver struct {
-	opts []cloudsqlconn.Option
+	d *cloudsqlconn.Dialer
 }
 
 // Open accepts a URL, ADO, or ODBC style connection string and returns a
@@ -71,17 +78,13 @@ func (s *sqlserverDriver) Open(name string) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	d, err := cloudsqlconn.NewDialer(context.Background(), s.opts...)
-	if err != nil {
-		return nil, err
-	}
-	c, err := mssql.NewConnector(name)
+	c, err := mssqldb.NewConnector(name)
 	if err != nil {
 		return nil, err
 	}
 	connName := res["cloudsql"]
 	c.Dialer = &csqlDialer{
-		d:        d,
+		d:        s.d,
 		connName: connName,
 	}
 	return c.Connect(context.Background())
