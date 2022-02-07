@@ -21,8 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn"
-	"github.com/go-sql-driver/mysql"
+	"cloud.google.com/go/cloudsqlconn/mysql/mysql"
 )
 
 var (
@@ -56,7 +55,10 @@ func TestMySQLDriver(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	mysql.RegisterDialContext("cloudsql-mysql", cloudsqlconn.Dial)
+	err := mysql.RegisterDriver("cloudsql-mysql")
+	if err != nil {
+		t.Fatalf("failed to register driver: %v", err)
+	}
 	db, err := sql.Open(
 		"mysql",
 		fmt.Sprintf("%s:%s@cloudsql-mysql(%s)/%s?parseTime=true",

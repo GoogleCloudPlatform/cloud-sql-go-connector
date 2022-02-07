@@ -79,10 +79,14 @@ defer conn.Close(ctx)
 
 [pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
 
-
 #### go-sql-driver/mysql for MySQL
 
-See [below](#MySQL).
+The [Go MySQL driver][mysql] does not provide a stand-alone interface for
+interacting with a database and instead uses `database/sql`. See [the section
+below](#MySQL) on how to use the `database/sql` package with a Cloud SQL MySQL
+instance.
+
+[mysql]: https://github.com/go-sql-driver/mysql
 
 ### Using Options
 
@@ -168,13 +172,24 @@ To use the dialer with [go-sql-driver/mysql][go-sql-driver], configure a custom
 dial function with [mysql.RegisterDialContext][]:
 
 ```go
-// the dialer context name is arbitrary, but it must match the protocol in the
-// DSN below.
-mysql.RegisterDialContext("cloudsqlconn", cloudsqlconn.Dial)
+package foo
 
-db, err := sql.Open("mysql", "user:password@cloudsqlconn(some-project:us-central1:some-instance)/dbname")
-if err != nil {
-	panic(err)
+import (
+    "database/sql"
+
+    "cloud.google.com/go/cloudsqlconn"
+    "cloud.google.com/go/cloudsqlconn/mysql/mysql"
+)
+
+func Connect() {
+    // Without any options:
+    mysql.RegisterDriver("cloudsql-mysql", cloudsqlconn.WithCredentialsFile("key.json"))
+
+    db, err := sql.Open(
+        "cloudsql-mysql",
+        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"
+	)
+    // ... etc
 }
 ```
 
