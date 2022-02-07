@@ -35,7 +35,7 @@ import (
 func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, error) {
 	d, err := cloudsqlconn.NewDialer(context.Background(), opts...)
 	if err != nil {
-		return err
+		return func() error { return nil }, err
 	}
 	sql.Register(name, &pgDriver{
 		d: d,
