@@ -58,10 +58,11 @@ func TestSqlServerHook(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	err := mssql.RegisterDriver("cloudsql-sqlserver")
+	cleanup, err := mssql.RegisterDriver("cloudsql-sqlserver")
 	if err != nil {
 		t.Fatalf("failed to register driver: %v", err)
 	}
+	defer cleanup()
 	db, err := sql.Open(
 		"cloudsql-sqlserver",
 		fmt.Sprintf("sqlserver://%s:%s@localhost?database=%s&cloudsql=%s",

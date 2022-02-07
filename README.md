@@ -181,10 +181,11 @@ import (
 )
 
 func Connect() {
-    err := sqlserver.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
+    cleanup, err := sqlserver.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
     if err != nil {
         // ... handle error
     }
+    defer cleanup()
 
     db, err := sql.Open(
         "cloudsql-sqlserver",
