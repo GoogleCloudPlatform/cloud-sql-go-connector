@@ -183,7 +183,10 @@ import (
 
 func Connect() {
     // Without any options:
-    mysql.RegisterDriver("cloudsql-mysql", cloudsqlconn.WithCredentialsFile("key.json"))
+    err := mysql.RegisterDriver("cloudsql-mysql", cloudsqlconn.WithCredentialsFile("key.json"))
+    if err != nil {
+        // ... handle error
+    }
 
     db, err := sql.Open(
         "cloudsql-mysql",
