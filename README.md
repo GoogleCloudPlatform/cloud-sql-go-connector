@@ -143,15 +143,11 @@ import (
 )
 
 func Connect() {
-    // Without any options:
-    cleanup, err := pgxv4.RegisterDriver("cloudsql-postgres")
+    cleanup, err := pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())
     if err != nil {
         // ... handle error
     }
     defer cleanup()
-
-    // Or, with options:
-    // pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())
 
     db, err := sql.Open(
         "cloudsql-postgres",
