@@ -29,9 +29,10 @@ import (
 // RegisterDriver registers a Postgres driver that uses the cloudsqlconn.Dialer
 // configured with the provided options. The choice of name is entirely up to
 // the caller and may be used to distinguish between multiple registrations of
-// differently configured Dialers.
-// Note: The underlying driver uses the latest version of pgx.
-func RegisterDriver(name string, opts ...cloudsqlconn.Option) error {
+// differently configured Dialers. The driver uses pgx/v4 internally.
+// RegisterDriver returns a cleanup function that should be called one the
+// database connection is no longer needed.
+func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, error) {
 	d, err := cloudsqlconn.NewDialer(context.Background(), opts...)
 	if err != nil {
 		return err
@@ -39,17 +40,10 @@ func RegisterDriver(name string, opts ...cloudsqlconn.Option) error {
 	sql.Register(name, &pgDriver{
 		d: d,
 	})
-	return nil
-}
-
-type dialerConn struct {
-	driver.Conn
-	dialer *cloudsqlconn.Dialer
-}
-
-func (c *dialerConn) Close() error {
-	c.dialer.Close()
-	return c.Conn.Close()
+	return func() error {
+		d.Close()
+		return nil
+	}, nil
 }
 
 type pgDriver struct {
@@ -72,9 +66,5 @@ func (p *pgDriver) Open(name string) (driver.Conn, error) {
 		return p.d.Dial(ctx, instConnName)
 	}
 	dbURI := stdlib.RegisterConnConfig(config)
-	conn, err := stdlib.GetDefaultDriver().Open(dbURI)
-	if err != nil {
-		return nil, err
-	}
-	return &dialerConn{Conn: conn, dialer: p.d}, nil
+	return stdlib.GetDefaultDriver().Open(dbURI)
 }
