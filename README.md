@@ -144,7 +144,10 @@ import (
 
 func Connect() {
     // Without any options:
-    pgxv4.RegisterDriver("cloudsql-postgres")
+    err := pgxv4.RegisterDriver("cloudsql-postgres")
+    if err != nil {
+        // ... handle error
+    }
 
     // Or, with options:
     // pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())

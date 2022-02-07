@@ -31,10 +31,15 @@ import (
 // the caller and may be used to distinguish between multiple registrations of
 // differently configured Dialers.
 // Note: The underlying driver uses the latest version of pgx.
-func RegisterDriver(name string, opts ...cloudsqlconn.Option) {
+func RegisterDriver(name string, opts ...cloudsqlconn.Option) error {
+	d, err := cloudsqlconn.NewDialer(context.Background(), opts...)
+	if err != nil {
+		return err
+	}
 	sql.Register(name, &pgDriver{
-		opts: opts,
+		d: d,
 	})
+	return nil
 }
 
 type dialerConn struct {
@@ -48,7 +53,7 @@ func (c *dialerConn) Close() error {
 }
 
 type pgDriver struct {
-	opts []cloudsqlconn.Option
+	d *cloudsqlconn.Dialer
 }
 
 // Open accepts a keyword/value formatted connection string and returns a
@@ -63,17 +68,13 @@ func (p *pgDriver) Open(name string) (driver.Conn, error) {
 	}
 	instConnName := config.Config.Host // Extract instance connection name
 	config.Config.Host = "localhost"   // Replace it with a default value
-	d, err := cloudsqlconn.NewDialer(context.Background(), p.opts...)
-	if err != nil {
-		return nil, err
-	}
 	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return d.Dial(ctx, instConnName)
+		return p.d.Dial(ctx, instConnName)
 	}
 	dbURI := stdlib.RegisterConnConfig(config)
 	conn, err := stdlib.GetDefaultDriver().Open(dbURI)
 	if err != nil {
 		return nil, err
 	}
-	return &dialerConn{Conn: conn, dialer: d}, nil
+	return &dialerConn{Conn: conn, dialer: p.d}, nil
 }
