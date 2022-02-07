@@ -185,7 +185,6 @@ import (
 )
 
 func Connect() {
-    // Without any options:
     cleanup, err := mysql.RegisterDriver("cloudsql-mysql", cloudsqlconn.WithCredentialsFile("key.json"))
     if err != nil {
         // ... handle error
