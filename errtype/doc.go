@@ -12,6 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package errtypes provides a number of concrete types which are used by the
+// Package errtype provides a number of concrete types which are used by the
 // cloudsqlconn package.
-package errtypes // import "cloud.google.com/go/cloudsqlconn/errtypes"
+package errtype // import "cloud.google.com/go/cloudsqlconn/errtype"
