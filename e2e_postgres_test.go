@@ -65,13 +65,19 @@ func TestPgxConnect(t *testing.T) {
 
 	ctx := context.Background()
 
+	d, err := cloudsqlconn.NewDialer(ctx)
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+
 	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDb)
 	config, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("failed to parse pgx config: %v", err)
 	}
+
 	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
-		return cloudsqlconn.Dial(ctx, postgresConnName)
+		return d.Dial(ctx, postgresConnName)
 	}
 
 	conn, connErr := pgx.ConnectConfig(ctx, config)
