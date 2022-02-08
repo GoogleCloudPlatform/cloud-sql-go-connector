@@ -270,6 +270,10 @@ func main() {
     // ...
 }
 ```
+[OpenCensus]: https://opencensus.io/
+[exporter]: https://opencensus.io/exporters/
+[Cloud Monitoring]: https://cloud.google.com/monitoring
+[Cloud Trace]: https://cloud.google.com/trace
 
 ## Support policy
 
