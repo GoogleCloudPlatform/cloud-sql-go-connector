@@ -79,6 +79,15 @@ defer conn.Close(ctx)
 
 [pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
 
+#### go-sql-driver/mysql for MySQL
+
+The [Go MySQL driver][mysql] does not provide a stand-alone interface for
+interacting with a database and instead uses `database/sql`. See [the section
+below](#MySQL) on how to use the `database/sql` package with a Cloud SQL MySQL
+instance.
+
+[mysql]: https://github.com/go-sql-driver/mysql
+
 #### SQL Server Support
 
 [Go-mssql][go-mssqldb] does not provide a stand-alone interface for interacting
@@ -134,7 +143,7 @@ myDialer, err := cloudsqlconn.NewDialer(
 Using the dialer directly will expose more configuration options. However, it is
 possible to use the dialer with the `database/sql` package.
 
-#### postgres
+#### Postgres
 
 To use `database/sql`, use `pgxv4.RegisterDriver` with any necessary Dialer
 configuration. Note: the connection string must use the keyword/value format
@@ -159,7 +168,37 @@ func Connect() {
 
     db, err := sql.Open(
         "cloudsql-postgres",
-        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"
+        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable",
+	)
+    // ... etc
+}
+```
+
+#### MySQL
+
+To use `database/sql`, use `mysql.RegisterDriver` with any necessary Dialer
+configuration.
+
+```go
+package foo
+
+import (
+    "database/sql"
+
+    "cloud.google.com/go/cloudsqlconn"
+    "cloud.google.com/go/cloudsqlconn/mysql/mysql"
+)
+
+func Connect() {
+    cleanup, err := mysql.RegisterDriver("cloudsql-mysql", cloudsqlconn.WithCredentialsFile("key.json"))
+    if err != nil {
+        // ... handle error
+    }
+    defer cleanup()
+
+    db, err := sql.Open(
+        "cloudsql-mysql",
+        "myuser:mypass@cloudsql-mysql(my-project:us-central1:my-instance)/mydb",
 	)
     // ... etc
 }
@@ -182,19 +221,18 @@ import (
 
 func Connect() {
     cleanup, err := sqlserver.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
-    if err != nil {
-        // ... handle error
-    }
+        "cloudsql-sqlserver",
+	)
     defer cleanup()
 
     db, err := sql.Open(
         "cloudsql-sqlserver",
-        "sqlserver://user:password@localhost?database=mydb&cloudsql=my-proj:us-central1:my-inst"
+        "sqlserver://user:password@localhost?database=mydb&cloudsql=my-proj:us-central1:my-inst",
 	)
     // ... etc
 }
-
 ```
+
 
 ### Enabling Metrics and Tracing
 
