@@ -2,6 +2,9 @@
 *Warning*: This project is in Public Preview, and may contain breaking changes
 before it becomes Generally Available.
 
+![CI](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/actions/workflows/tests.yaml/badge.svg)
+[![Go Reference](https://pkg.go.dev/badge/cloud.google.com/go/cloudsqlconn.svg)](https://pkg.go.dev/cloud.google.com/go/cloudsqlconn)
+
 The _Cloud SQL Go Connector_ is a Cloud SQL connector designed for use with the
 Go language. Using a Cloud SQL connector provides the following benefits:
 * **IAM Authorization:** uses IAM permissions to control who/what can connect to
