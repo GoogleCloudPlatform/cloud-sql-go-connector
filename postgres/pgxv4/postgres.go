@@ -41,10 +41,7 @@ func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, err
 	sql.Register(name, &pgDriver{
 		d: d,
 	})
-	return func() error {
-		d.Close()
-		return nil
-	}, nil
+	return func() error { return d.Close() }, nil
 }
 
 type pgDriver struct {
