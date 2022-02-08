@@ -88,6 +88,14 @@ instance.
 
 [mysql]: https://github.com/go-sql-driver/mysql
 
+#### SQL Server Support
+
+[Go-mssql][go-mssqldb] does not provide a stand-alone interface for interacting
+with a database and instead uses `database/sql`. See [the section below](#SQL-Server)
+on how to use the `database/sql` package with a Cloud SQL SQL Server instance.
+
+[go-mssqldb]: https://github.com/denisenkom/go-mssqldb
+
 ### Using Options
 
 If you need to customize something about the `Dialer`, you can initialize
@@ -137,7 +145,7 @@ possible to use the dialer with the `database/sql` package.
 
 #### Postgres
 
-To use `database/sql`, use `postgres.RegisterDriver` with any necessary Dialer
+To use `database/sql`, use `pgxv4.RegisterDriver` with any necessary Dialer
 configuration. Note: the connection string must use the keyword/value format
 with host set to the instance connection name.
 
@@ -160,7 +168,7 @@ func Connect() {
 
     db, err := sql.Open(
         "cloudsql-postgres",
-        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"
+        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable",
 	)
     // ... etc
 }
@@ -168,8 +176,8 @@ func Connect() {
 
 #### MySQL
 
-To use the dialer with [go-sql-driver/mysql][go-sql-driver], configure a custom
-dial function with [mysql.RegisterDialContext][]:
+To use `database/sql`, use `mysql.RegisterDriver` with any necessary Dialer
+configuration.
 
 ```go
 package foo
@@ -190,14 +198,40 @@ func Connect() {
 
     db, err := sql.Open(
         "cloudsql-mysql",
-        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable"
+        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable",
 	)
     // ... etc
 }
 ```
 
-[go-sql-driver]: https://github.com/go-sql-driver/mysql
-[mysql.RegisterDialContext]: https://pkg.go.dev/github.com/go-sql-driver/mysql#RegisterDialContext
+### SQL Server
+
+To use `database/sql`, use `sqlserver.RegisterDriver` with any necessary Dialer
+configuration.
+
+``` go
+package foo
+
+import (
+    "database/sql"
+
+    "cloud.google.com/go/cloudsqlconn"
+    "cloud.google.com/go/cloudsqlconn/sqlserver"
+)
+
+func Connect() {
+    cleanup, err := sqlserver.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
+        "cloudsql-sqlserver",
+	)
+    defer cleanup()
+
+    db, err := sql.Open(
+        "cloudsql-sqlserver",
+        "sqlserver://user:password@localhost?database=mydb&cloudsql=my-proj:us-central1:my-inst",
+	)
+    // ... etc
+}
+```
 
 
 ### Enabling Metrics and Tracing
