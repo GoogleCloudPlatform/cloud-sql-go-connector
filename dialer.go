@@ -272,12 +272,13 @@ func (i *instrumentedConn) Close() error {
 // Close closes the Dialer; it prevents the Dialer from refreshing the information
 // needed to connect. Additional dial operations may succeed until the information
 // expires.
-func (d *Dialer) Close() {
+func (d *Dialer) Close() error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	for _, i := range d.instances {
 		i.Close()
 	}
+	return nil
 }
 
 func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
