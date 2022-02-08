@@ -1,21 +1,14 @@
 # cloud-sql-go-connector
-*Warning*: This project is experimental, and is not an officially supported
-Google product.
+*Warning*: This project is Public Preview, and may contain breaking changes before
+it becomes Generally Available. 
 
-The _Cloud SQL Go Connector_ provides strong encryption and IAM authorization
-to an application's connections to a Cloud SQL instance. It provides connection
-level authorization only; it _does not_ provide a network path to an instance
-that doesn't already exist (i.e. you will still be unable to connect to an
-instance's Private IP without access to the correct VPC). For more information
-see [About the Cloud SQL Auth proxy][about-proxy].
+The _Cloud SQL Go Connector_ is a Cloud SQL connector designed for use with the Go language. Using a Cloud SQL connector provides the following benefits: 
+* **IAM Authorization:** uses IAM permissions to control who/what can connect to your Cloud SQL instances
+* **Improved Security:** uses robust, updated TLS encryption and identity verification between the client connector and the server-side proxy, independent of the database protocol.
+* **Convenience:** removes the requirement to use and distribute SSL certificates, as well as manage firewalls or source/destination IP addresses.
+* (optionally) **IAM DB Authenticiation:** provides [iam-db-authn] for [Cloud SQL’s automatic IAM DB AuthN][iam-db-authn] feature.
 
-[about-proxy]: https://cloud.google.com/sql/docs/mysql/sql-proxy
-
-The _Cloud SQL Go Connector_ is an experimental new version of the
-[Cloud SQL proxy dialer](dialer.go). Its API is considered unstable and may change
-in the future. Please use at your own risk.
-
-[proxy-dialer]: https://github.com/GoogleCloudPlatform/cloudsql-proxy/tree/main/proxy#cloud-sql-proxy-dialer-for-go
+[iam-db-authn]: https://cloud.google.com/sql/docs/postgres/authentication
 
 ## Installation
 
@@ -192,12 +185,31 @@ func main() {
 }
 ```
 
-## Go Versions Supported
+
+## Support policy
+
+### Major version lifecycle
+
+This project uses [semantic versioning](https://semver.org/), and uses the
+following lifecycle regarding support for a major version:
+
+**Active** - Active versions get all new features and security fixes (that
+wouldn’t otherwise introduce a breaking change). New major versions are
+guaranteed to be "active" for a minimum of 1 year.
+
+**Deprecated** - Deprecated versions continue to receive security and critical
+bug fixes, but do not receive new features. Deprecated versions will be supported
+for 1 year.
+
+**Unsupported** - Any major version that has been deprecated for >=1 year is
+considered unsupported.
+
+## Supported Go Versions 
 
 We support the latest four Go versions. Changes in supported Go versions will be
-considered a minor and not a major change.
+considered a minor change.
 
-[OpenCensus]: https://opencensus.io/introduction/
-[exporter]: https://opencensus.io/exporters/
-[Cloud Trace]: https://cloud.google.com/trace
-[Cloud Monitoring]: https://cloud.google.com/monitoring
+### Release cadence
+This project aims for a release on at least a monthly basis. If no new features 
+or fixes have been added, a new PATCH version with the latest dependencies is
+released.
