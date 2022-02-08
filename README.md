@@ -168,7 +168,7 @@ OpenCensus supports many backends for exporters.
 For example, to use [Cloud Monitoring][] and [Cloud Trace][], you would
 configure an exporter like so:
 
-``` golang
+```golang
 package main
 
 import (
@@ -192,8 +192,7 @@ func main() {
     // Use cloudsqlconn as usual.
     // ...
 }
-``` 
-
+```
 
 ## Support policy
 
