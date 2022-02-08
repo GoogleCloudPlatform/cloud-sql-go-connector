@@ -30,7 +30,7 @@ behavior you noticed and why it is defective or unintentional.
 
 ## Example code (or command)
 
-```java
+```go
 // example
 ```
 
