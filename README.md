@@ -1,12 +1,18 @@
 # cloud-sql-go-connector
-*Warning*: This project is Public Preview, and may contain breaking changes before
-it becomes Generally Available. 
+*Warning*: This project is Public Preview, and may contain breaking changes
+before it becomes Generally Available.
 
-The _Cloud SQL Go Connector_ is a Cloud SQL connector designed for use with the Go language. Using a Cloud SQL connector provides the following benefits: 
-* **IAM Authorization:** uses IAM permissions to control who/what can connect to your Cloud SQL instances
-* **Improved Security:** uses robust, updated TLS encryption and identity verification between the client connector and the server-side proxy, independent of the database protocol.
-* **Convenience:** removes the requirement to use and distribute SSL certificates, as well as manage firewalls or source/destination IP addresses.
-* (optionally) **IAM DB Authenticiation:** provides [iam-db-authn] for [Cloud SQL’s automatic IAM DB AuthN][iam-db-authn] feature.
+The _Cloud SQL Go Connector_ is a Cloud SQL connector designed for use with the
+Go language. Using a Cloud SQL connector provides the following benefits:
+* **IAM Authorization:** uses IAM permissions to control who/what can connect to
+  your Cloud SQL instances
+* **Improved Security:** uses robust, updated TLS encryption and identity
+  verification between the client connector and the server-side proxy,
+  independent of the database protocol.
+* **Convenience:** removes the requirement to use and distribute SSL
+  certificates, as well as manage firewalls or source/destination IP addresses.
+* (optionally) **IAM DB Authenticiation:** provides [iam-db-authn] for
+  [Cloud SQL’s automatic IAM DB AuthN][iam-db-authn] feature.
 
 [iam-db-authn]: https://cloud.google.com/sql/docs/postgres/authentication
 
@@ -183,7 +189,7 @@ func main() {
     // Use cloudsqlconn as usual.
     // ...
 }
-```
+``` 
 
 
 ## Support policy
@@ -198,8 +204,8 @@ wouldn’t otherwise introduce a breaking change). New major versions are
 guaranteed to be "active" for a minimum of 1 year.
 
 **Deprecated** - Deprecated versions continue to receive security and critical
-bug fixes, but do not receive new features. Deprecated versions will be supported
-for 1 year.
+bug fixes, but do not receive new features. Deprecated versions will be
+supported for 1 year.
 
 **Unsupported** - Any major version that has been deprecated for >=1 year is
 considered unsupported.
