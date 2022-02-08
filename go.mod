@@ -3,11 +3,12 @@ module cloud.google.com/go/cloudsqlconn
 go 1.15
 
 require (
+	github.com/denisenkom/go-mssqldb v0.12.0
 	github.com/google/uuid v1.3.0
 	github.com/jackc/pgx/v4 v4.15.0
 	github.com/pkg/errors v0.9.1 // indirect
 	go.opencensus.io v0.23.0
-	golang.org/x/net v0.0.0-20210503060351-7fd8e65b6420
+	golang.org/x/net v0.0.0-20210610132358-84b48f89b13b
 	golang.org/x/oauth2 v0.0.0-20211104180415-d3ed0bb246c8
 	golang.org/x/time v0.0.0-20211116232009-f0f3c7e86c11
 	google.golang.org/api v0.67.0
