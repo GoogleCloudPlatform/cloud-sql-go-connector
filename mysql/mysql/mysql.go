@@ -31,7 +31,6 @@ import (
 // the caller and may be used to distinguish between multiple registrations of
 // differently configured Dialers.
 func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, error) {
-	sql.Register(name, &mysqlDriver{})
 	d, err := cloudsqlconn.NewDialer(context.Background(), opts...)
 	if err != nil {
 		return func() error { return nil }, err
@@ -39,6 +38,9 @@ func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, err
 	mysql.RegisterDialContext(name, mysql.DialContextFunc(func(ctx context.Context, addr string) (net.Conn, error) {
 		return d.Dial(ctx, addr)
 	}))
+	sql.Register(name, &mysqlDriver{
+		d: &mysql.MySQLDriver{},
+	})
 	return func() error {
 		d.Close()
 		return nil
@@ -46,7 +48,7 @@ func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, err
 }
 
 type mysqlDriver struct {
-	d *cloudsqlconn.Dialer
+	d *mysql.MySQLDriver
 }
 
 // Open accepts a DSN using the go-sql-driver/mysql format. See
@@ -58,6 +60,5 @@ type mysqlDriver struct {
 //     my-user:mypass@cloudsql-mysql(my-proj:us-central1:my-inst)/my-db
 //
 func (d *mysqlDriver) Open(name string) (driver.Conn, error) {
-	drv := &mysql.MySQLDriver{}
-	return drv.Open(name)
+	return d.d.Open(name)
 }
