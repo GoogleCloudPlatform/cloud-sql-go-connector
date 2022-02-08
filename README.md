@@ -198,7 +198,7 @@ func Connect() {
 
     db, err := sql.Open(
         "cloudsql-mysql",
-        "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable",
+        "myuser:mypass@cloudsql-mysql(my-project:us-central1:my-instance)/mydb",
 	)
     // ... etc
 }
