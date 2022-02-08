@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtypes"
+	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"golang.org/x/oauth2"
 )
@@ -118,7 +118,7 @@ func TestRefreshFailsFast(t *testing.T) {
 	ctx, _ = context.WithTimeout(context.Background(), time.Millisecond)
 	_, _, _, err = r.performRefresh(ctx, cn, RSAKey)
 
-	var wantErr *errtypes.DialError
+	var wantErr *errtype.DialError
 	if !errors.As(err, &wantErr) {
 		t.Fatalf("when refresh is throttled, want = %T, got = %v", wantErr, err)
 	}
@@ -254,14 +254,14 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 		{
 			req: mock.CreateEphemeralSuccess(
 				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name), 1),
-			wantErr: &errtypes.RefreshError{},
+			wantErr: &errtype.RefreshError{},
 			desc:    "When the Metadata call fails",
 		},
 		{
 			req: mock.InstanceGetSuccess(
 				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
 					mock.WithRegion("some-other-region")), 1),
-			wantErr: &errtypes.RefreshError{},
+			wantErr: &errtype.RefreshError{},
 			desc:    "When the region does not match",
 		},
 		{
@@ -271,7 +271,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 					mock.WithRegion("my-region"),
 					mock.WithFirstGenBackend(),
 				), 1),
-			wantErr: &errtypes.ConfigError{},
+			wantErr: &errtype.ConfigError{},
 			desc:    "When the instance isn't Second generation",
 		},
 		{
@@ -281,7 +281,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 					mock.WithRegion("my-region"),
 					mock.WithMissingIPAddrs(),
 				), 1),
-			wantErr: &errtypes.ConfigError{},
+			wantErr: &errtype.ConfigError{},
 			desc:    "When the instance has no supported IP addresses",
 		},
 		{
@@ -293,7 +293,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 						return nil, nil
 					}),
 				), 1),
-			wantErr: &errtypes.RefreshError{},
+			wantErr: &errtype.RefreshError{},
 			desc:    "When the server cert does not decode",
 		},
 		{
@@ -310,7 +310,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 						return certPEM.Bytes(), nil
 					}),
 				), 1),
-			wantErr: &errtypes.RefreshError{},
+			wantErr: &errtype.RefreshError{},
 			desc:    "When the cert is not a valid X.509 cert",
 		},
 	}
@@ -346,7 +346,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 	}{
 		{
 			reqs:    []*mock.Request{mock.InstanceGetSuccess(inst, 1)}, // no ephemeral cert call registered
-			wantErr: &errtypes.RefreshError{},
+			wantErr: &errtype.RefreshError{},
 			desc:    "When the CreateEphemeralCert call fails",
 		},
 		{
@@ -359,7 +359,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 							}),
 					), 1),
 			},
-			wantErr: &errtypes.RefreshError{},
+			wantErr: &errtype.RefreshError{},
 			desc:    "When decoding the cert fails", // SQL Admin API fail
 		},
 		{
@@ -377,7 +377,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 							}),
 					), 1),
 			},
-			wantErr: &errtypes.RefreshError{},
+			wantErr: &errtype.RefreshError{},
 			desc:    "When parsing the cert fails", // SQL Admin API fail
 		},
 	}
@@ -459,7 +459,7 @@ func TestRefreshBuildsTLSConfig(t *testing.T) {
 	}
 
 	err = verifyPeerCert(nil, nil)
-	var wantErr *errtypes.DialError
+	var wantErr *errtype.DialError
 	if !errors.As(err, &wantErr) {
 		t.Fatalf("when verify peer cert fails, want = %T, got = %v", wantErr, err)
 	}
