@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtypes"
+	errtype "cloud.google.com/go/cloudsqlconn/errtype"
 	"golang.org/x/oauth2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -56,7 +56,7 @@ func parseConnName(cn string) (connName, error) {
 	b := []byte(cn)
 	m := connNameRegex.FindSubmatch(b)
 	if m == nil {
-		err := errtypes.NewConfigError(
+		err := errtype.NewConfigError(
 			"invalid instance connection name, expected PROJECT:REGION:INSTANCE",
 			cn,
 		)
@@ -191,7 +191,7 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 	}
 	addr, ok := res.md.ipAddrs[ipType]
 	if !ok {
-		err := errtypes.NewConfigError(
+		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", ipType),
 			i.String(),
 		)

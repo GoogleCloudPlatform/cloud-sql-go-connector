@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package errtypes_test
+package errtype_test
 
 import (
 	"errors"
 	"testing"
 
-	"cloud.google.com/go/cloudsqlconn/errtypes"
+	"cloud.google.com/go/cloudsqlconn/errtype"
 )
 
 func TestErrorFormatting(t *testing.T) {
@@ -29,22 +29,22 @@ func TestErrorFormatting(t *testing.T) {
 	}{
 		{
 			desc: "config error message",
-			err:  errtypes.NewConfigError("error message", "proj:reg:inst"),
+			err:  errtype.NewConfigError("error message", "proj:reg:inst"),
 			want: "Config error: error message (connection name = \"proj:reg:inst\")",
 		},
 		{
 			desc: "refresh error message without internal error",
-			err:  errtypes.NewRefreshError("error message", "proj:reg:inst", nil),
+			err:  errtype.NewRefreshError("error message", "proj:reg:inst", nil),
 			want: "Refresh error: error message (connection name = \"proj:reg:inst\")",
 		},
 		{
 			desc: "refresh error message with internal error",
-			err:  errtypes.NewRefreshError("error message", "proj:reg:inst", errors.New("inner-error")),
+			err:  errtype.NewRefreshError("error message", "proj:reg:inst", errors.New("inner-error")),
 			want: "Refresh error: error message (connection name = \"proj:reg:inst\"): inner-error",
 		},
 		{
 			desc: "Dial error without inner error",
-			err: errtypes.NewDialError(
+			err: errtype.NewDialError(
 				"message",
 				"proj:reg:inst",
 				nil, // no error here
@@ -53,7 +53,7 @@ func TestErrorFormatting(t *testing.T) {
 		},
 		{
 			desc: "Dial error with inner error",
-			err: errtypes.NewDialError(
+			err: errtype.NewDialError(
 				"message",
 				"proj:reg:inst",
 				errors.New("inner-error"),

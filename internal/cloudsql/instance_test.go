@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtypes"
+	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
 
@@ -165,7 +165,7 @@ func TestConnectInfoErrors(t *testing.T) {
 	}
 
 	_, _, err = im.ConnectInfo(ctx, PublicIP)
-	var wantErr *errtypes.DialError
+	var wantErr *errtype.DialError
 	if !errors.As(err, &wantErr) {
 		t.Fatalf("when connect info fails, want = %T, got = %v", wantErr, err)
 	}

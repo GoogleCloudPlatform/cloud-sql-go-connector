@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtypes"
+	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"golang.org/x/oauth2"
 	"golang.org/x/time/rate"
@@ -50,15 +50,15 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 	defer func() { end(err) }()
 	db, err := client.Instances.Get(inst.project, inst.name).Context(ctx).Do()
 	if err != nil {
-		return metadata{}, errtypes.NewRefreshError("failed to get instance metadata", inst.String(), err)
+		return metadata{}, errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
 	// validate the instance is supported for authenticated connections
 	if db.Region != inst.region {
 		msg := fmt.Sprintf("provided region was mismatched - got %s, want %s", inst.region, db.Region)
-		return metadata{}, errtypes.NewRefreshError(msg, inst.String(), nil)
+		return metadata{}, errtype.NewRefreshError(msg, inst.String(), nil)
 	}
 	if db.BackendType != "SECOND_GEN" {
-		return metadata{}, errtypes.NewConfigError(
+		return metadata{}, errtype.NewConfigError(
 			"unsupported instance - only Second Generation instances are supported",
 			inst.String(),
 		)
@@ -75,7 +75,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 		}
 	}
 	if len(ipAddrs) == 0 {
-		return metadata{}, errtypes.NewConfigError(
+		return metadata{}, errtype.NewConfigError(
 			"cannot connect to instance - it has no supported IP addresses",
 			inst.String(),
 		)
@@ -84,11 +84,11 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 	// parse the server-side CA certificate
 	b, _ := pem.Decode([]byte(db.ServerCaCert.Cert))
 	if b == nil {
-		return metadata{}, errtypes.NewRefreshError("failed to decode valid PEM cert", inst.String(), nil)
+		return metadata{}, errtype.NewRefreshError("failed to decode valid PEM cert", inst.String(), nil)
 	}
 	cert, err := x509.ParseCertificate(b.Bytes)
 	if err != nil {
-		return metadata{}, errtypes.NewRefreshError(
+		return metadata{}, errtype.NewRefreshError(
 			fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
 			inst.String(),
 			nil,
@@ -140,7 +140,7 @@ func fetchEphemeralCert(
 		var tokErr error
 		tok, tokErr = ts.Token()
 		if tokErr != nil {
-			return tls.Certificate{}, errtypes.NewRefreshError(
+			return tls.Certificate{}, errtype.NewRefreshError(
 				"failed to retrieve Oauth2 token",
 				inst.String(),
 				tokErr,
@@ -150,7 +150,7 @@ func fetchEphemeralCert(
 		// the future.
 		tok, tokErr = refreshToken(ts, tok)
 		if tokErr != nil {
-			return tls.Certificate{}, errtypes.NewRefreshError(
+			return tls.Certificate{}, errtype.NewRefreshError(
 				"failed to refresh Oauth2 token",
 				inst.String(),
 				tokErr,
@@ -160,7 +160,7 @@ func fetchEphemeralCert(
 	}
 	resp, err := client.Connect.GenerateEphemeralCert(inst.project, inst.name, &req).Context(ctx).Do()
 	if err != nil {
-		return tls.Certificate{}, errtypes.NewRefreshError(
+		return tls.Certificate{}, errtype.NewRefreshError(
 			"create ephemeral cert failed",
 			inst.String(),
 			err,
@@ -170,7 +170,7 @@ func fetchEphemeralCert(
 	// parse the client cert
 	b, _ := pem.Decode([]byte(resp.EphemeralCert.Cert))
 	if b == nil {
-		return tls.Certificate{}, errtypes.NewRefreshError(
+		return tls.Certificate{}, errtype.NewRefreshError(
 			"failed to decode valid PEM cert",
 			inst.String(),
 			nil,
@@ -178,7 +178,7 @@ func fetchEphemeralCert(
 	}
 	clientCert, err := x509.ParseCertificate(b.Bytes)
 	if err != nil {
-		return tls.Certificate{}, errtypes.NewRefreshError(
+		return tls.Certificate{}, errtype.NewRefreshError(
 			fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
 			inst.String(),
 			nil,
@@ -230,22 +230,22 @@ func createTLSConfig(inst connName, m metadata, cert tls.Certificate) *tls.Confi
 func genVerifyPeerCertificateFunc(cn connName, pool *x509.CertPool) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 		if len(rawCerts) == 0 {
-			return errtypes.NewDialError("no certificate to verify", cn.String(), nil)
+			return errtype.NewDialError("no certificate to verify", cn.String(), nil)
 		}
 
 		cert, err := x509.ParseCertificate(rawCerts[0])
 		if err != nil {
-			return errtypes.NewDialError("failed to parse X.509 certificate", cn.String(), err)
+			return errtype.NewDialError("failed to parse X.509 certificate", cn.String(), err)
 		}
 
 		opts := x509.VerifyOptions{Roots: pool}
 		if _, err = cert.Verify(opts); err != nil {
-			return errtypes.NewDialError("failed to verify certificate", cn.String(), err)
+			return errtype.NewDialError("failed to verify certificate", cn.String(), err)
 		}
 
 		certInstanceName := fmt.Sprintf("%s:%s", cn.project, cn.name)
 		if cert.Subject.CommonName != certInstanceName {
-			return errtypes.NewDialError(
+			return errtype.NewDialError(
 				fmt.Sprintf("certificate had CN %q, expected %q",
 					cert.Subject.CommonName, certInstanceName),
 				cn.String(),
@@ -299,7 +299,7 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 	// avoid refreshing too often to try not to tax the SQL Admin API quotas
 	err = r.clientLimiter.Wait(ctx)
 	if err != nil {
-		return metadata{}, nil, time.Time{}, errtypes.NewDialError(
+		return metadata{}, nil, time.Time{}, errtype.NewDialError(
 			"refresh was throttled until context expired",
 			cn.String(),
 			nil,

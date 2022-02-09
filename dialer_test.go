@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtypes"
+	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
 
@@ -93,7 +93,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	d.sqladmin = svc
 
 	_, err = d.Dial(context.Background(), "bad-instance-name")
-	var wantErr1 *errtypes.ConfigError
+	var wantErr1 *errtype.ConfigError
 	if !errors.As(err, &wantErr1) {
 		t.Fatalf("when instance name is invalid, want = %T, got = %v", wantErr1, err)
 	}
@@ -107,7 +107,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	}
 
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")
-	var wantErr2 *errtypes.RefreshError
+	var wantErr2 *errtype.RefreshError
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when API call fails, want = %T, got = %v", wantErr2, err)
 	}
@@ -139,13 +139,13 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	}()
 
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance", WithPrivateIP())
-	var wantErr1 *errtypes.ConfigError
+	var wantErr1 *errtype.ConfigError
 	if !errors.As(err, &wantErr1) {
 		t.Fatalf("when IP type is invalid, want = %T, got = %v", wantErr1, err)
 	}
 
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")
-	var wantErr2 *errtypes.DialError
+	var wantErr2 *errtype.DialError
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when server proxy socket is unavailable, want = %T, got = %v", wantErr2, err)
 	}
