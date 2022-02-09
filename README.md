@@ -223,14 +223,15 @@ import (
 
 func Connect() {
     cleanup, err := sqlserver.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
-        "cloudsql-sqlserver",
-	)
+    if err != nil {
+        // ... handle error
+    }
     defer cleanup()
 
     db, err := sql.Open(
         "cloudsql-sqlserver",
         "sqlserver://user:password@localhost?database=mydb&cloudsql=my-proj:us-central1:my-inst",
-	)
+    )
     // ... etc
 }
 ```
