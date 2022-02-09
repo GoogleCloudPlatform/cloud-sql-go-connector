@@ -22,7 +22,7 @@ import (
 	"net/http"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtypes"
+	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -61,7 +61,7 @@ func WithCredentialsFile(filename string) Option {
 	return func(d *dialerConfig) {
 		b, err := ioutil.ReadFile(filename)
 		if err != nil {
-			d.err = errtypes.NewConfigError(err.Error(), "n/a")
+			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
 		}
 		opt := WithCredentialsJSON(b)
@@ -75,7 +75,7 @@ func WithCredentialsJSON(b []byte) Option {
 	return func(d *dialerConfig) {
 		c, err := google.CredentialsFromJSON(context.Background(), b, sqladmin.SqlserviceAdminScope)
 		if err != nil {
-			d.err = errtypes.NewConfigError(err.Error(), "n/a")
+			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
 		}
 		d.tokenSource = c.TokenSource
