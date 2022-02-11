@@ -67,14 +67,19 @@ if err != nil {
 }
 
 // Tell the driver to use the Cloud SQL Go Connector to create connections
+d, err := cloudsqlconn.NewDialer(ctx)
+if err != nil {
+    log.Fatalf("failed to initialize dialer: %v", err)
+}
+defer d.Close()
 config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
-    return cloudsqlconn.Dial(ctx, "project:region:instance")
+    return d.Dial(ctx, "project:region:instance")
 }
 
 // Interact with the driver directly as you normally would
 conn, connErr := pgx.ConnectConfig(ctx, config)
 if connErr != nil {
-    log.Fatalf("failed to connect: %s", connErr)
+    log.Fatalf("failed to connect: %v", connErr)
 }
 defer conn.Close(ctx)
 ```
