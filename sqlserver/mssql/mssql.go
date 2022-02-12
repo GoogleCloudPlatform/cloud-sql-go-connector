@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package sqlserver provides a Cloud SQL SQL Server driver that works with the
+// Package mssql provides a Cloud SQL SQL Server driver that works with the
 // database/sql package.
 package mssql
 
