@@ -13,5 +13,9 @@
   ],
   "ignoreDeps": [
       "golang.org/x/net"
+  ],
+  "schedule": [
+    "after 8am on Friday",
+    "before 12pm on Friday"
   ]
 }
