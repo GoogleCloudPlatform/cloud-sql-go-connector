@@ -16,7 +16,7 @@
   ],
   "packageRules": [
      {
-       "addLabels": ["optional"]
+       "addLabels": ["automerge"]
      }
   ],
   "schedule": [
