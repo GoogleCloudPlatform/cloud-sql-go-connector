@@ -16,7 +16,7 @@
   ],
   "packageRules": [
      {
-       "matchPackagePatterns": ["*"],
+       "matchPackagePatterns": [".*"],
        "addLabels": ["automerge"]
      }
   ],
