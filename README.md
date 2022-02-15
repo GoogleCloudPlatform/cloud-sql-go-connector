@@ -84,6 +84,35 @@ if connErr != nil {
 defer conn.Close(ctx)
 ```
 
+To use the dialer with [pgxpool](https://pkg.go.dev/github.com/jackc/pgx/v4/pgxpool), the configuration is similar:
+
+``` go
+// Configure the driver to connect to the database
+dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", pgUser, pgPass, pgDB)
+config, err := pgxpool.ParseConfig(dsn)
+if err != nil {
+    log.Fatalf("failed to parse pgx config: %v", err)
+}
+
+d, err := cloudsqlconn.NewDialer(ctx)
+if err != nil {
+    log.Fatalf("failed to initialize dialer: %v", err)
+}
+defer d.Close()
+
+// Tell the driver to use the Cloud SQL Go Connector to create connections
+config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string) (net.Conn, error) {
+    return d.Dial(ctx, "project:region:instance")
+}
+
+// Interact with the driver directly as you normally would
+conn, err := pgxpool.ConnectConfig(context.Background(), config)
+if err != nil {
+    log.Fatalf("failed to connect: %v", connErr)
+}
+defer conn.Close()
+```
+
 [pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
 
 #### go-sql-driver/mysql for MySQL
