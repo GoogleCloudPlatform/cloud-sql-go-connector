@@ -48,11 +48,6 @@ Option](#using-options) below.
 [adc]: https://cloud.google.com/docs/authentication
 [google-auth]: https://pkg.go.dev/golang.org/x/oauth2/google#hdr-Credentials
 
-### Using the default Dialer
-
-If you don't need to customize your Dialer's behavior, it is convenient to use
-the package's "Dial" option, which initializes a default dialer for you.
-
 #### pgx for Postgres
 
 To use the dialer with [pgx](https://github.com/jackc/pgx), configure the
