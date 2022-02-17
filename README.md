@@ -9,7 +9,7 @@ The _Cloud SQL Go Connector_ is a Cloud SQL connector designed for use with the
 Go language. Using a Cloud SQL connector provides the following benefits:
 * **IAM Authorization:** uses IAM permissions to control who/what can connect to
   your Cloud SQL instances
-* **Improved Security:** uses robust, updated TLS 1.3git stat encryption and
+* **Improved Security:** uses robust, updated TLS 1.3 encryption and
   identity verification between the client connector and the server-side proxy,
   independent of the database protocol.
 * **Convenience:** removes the requirement to use and distribute SSL
