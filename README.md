@@ -48,38 +48,11 @@ Option](#using-options) below.
 [adc]: https://cloud.google.com/docs/authentication
 [google-auth]: https://pkg.go.dev/golang.org/x/oauth2/google#hdr-Credentials
 
-#### pgx for Postgres
+### Postgres
 
-To use the dialer with [pgx](https://github.com/jackc/pgx), configure the
-[pgConn.DialFunc field][pgconn-cfg] to create connections:
-
-```go
-// Configure the driver to connect to the database
-dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", pgUser, pgPass, pgDB)
-config, err := pgx.ParseConfig(dsn)
-if err != nil {
-    log.Fatalf("failed to parse pgx config: %v", err)
-}
-
-// Tell the driver to use the Cloud SQL Go Connector to create connections
-d, err := cloudsqlconn.NewDialer(ctx)
-if err != nil {
-    log.Fatalf("failed to initialize dialer: %v", err)
-}
-defer d.Close()
-config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
-    return d.Dial(ctx, "project:region:instance")
-}
-
-// Interact with the driver directly as you normally would
-conn, connErr := pgx.ConnectConfig(ctx, config)
-if connErr != nil {
-    log.Fatalf("failed to connect: %v", connErr)
-}
-defer conn.Close(ctx)
-```
-
-To use the dialer with [pgxpool](https://pkg.go.dev/github.com/jackc/pgx/v4/pgxpool), the configuration is similar:
+To use the dialer with [pgx](https://github.com/jackc/pgx), use
+[pgxpool](https://pkg.go.dev/github.com/jackc/pgx/v4/pgxpool) by configuring
+a [pgConn.DialFunc field][pgconn-cfg] like so:
 
 ``` go
 // Configure the driver to connect to the database
@@ -89,6 +62,7 @@ if err != nil {
     log.Fatalf("failed to parse pgx config: %v", err)
 }
 
+// Create a new dialer with any options
 d, err := cloudsqlconn.NewDialer(ctx)
 if err != nil {
     log.Fatalf("failed to initialize dialer: %v", err)
@@ -100,7 +74,7 @@ config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string
     return d.Dial(ctx, "project:region:instance")
 }
 
-// Interact with the driver directly as you normally would
+// Interact with the dirver directly as you normally would
 conn, err := pgxpool.ConnectConfig(context.Background(), config)
 if err != nil {
     log.Fatalf("failed to connect: %v", connErr)
@@ -110,7 +84,7 @@ defer conn.Close()
 
 [pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
 
-#### go-sql-driver/mysql for MySQL
+### MySQL
 
 The [Go MySQL driver][mysql] does not provide a stand-alone interface for
 interacting with a database and instead uses `database/sql`. See [the section
@@ -119,7 +93,7 @@ instance.
 
 [mysql]: https://github.com/go-sql-driver/mysql
 
-#### SQL Server Support
+### SQL Server
 
 [Go-mssql][go-mssqldb] does not provide a stand-alone interface for interacting
 with a database and instead uses `database/sql`. See [the section below](#SQL-Server)
@@ -323,12 +297,12 @@ supported for 1 year.
 **Unsupported** - Any major version that has been deprecated for >=1 year is
 considered unsupported.
 
-## Supported Go Versions 
+## Supported Go Versions
 
 We support the latest four Go versions. Changes in supported Go versions will be
 considered a minor change.
 
 ### Release cadence
-This project aims for a release on at least a monthly basis. If no new features 
+This project aims for a release on at least a monthly basis. If no new features
 or fixes have been added, a new PATCH version with the latest dependencies is
 released.
