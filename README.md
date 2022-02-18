@@ -52,7 +52,7 @@ Option](#using-options) below.
 
 To use the dialer with [pgx](https://github.com/jackc/pgx), use
 [pgxpool](https://pkg.go.dev/github.com/jackc/pgx/v4/pgxpool) by configuring
-a [pgConn.DialFunc field][pgconn-cfg] like so:
+a [Config.DialFunc][dial-func] like so:
 
 ``` go
 // Configure the driver to connect to the database
@@ -82,7 +82,7 @@ if err != nil {
 defer conn.Close()
 ```
 
-[pgconn-cfg]: https://pkg.go.dev/github.com/jackc/pgconn#Config
+[dial-func]: https://pkg.go.dev/github.com/jackc/pgconn#Config
 
 ### MySQL
 
