@@ -299,8 +299,8 @@ considered unsupported.
 
 ## Supported Go Versions
 
-We support the latest four Go versions. Changes in supported Go versions will be
-considered a minor change.
+We test and support at minimum, the latest three Go versions. Changes in supported Go versions will be
+considered a minor change, and will be listed in the realease notes. 
 
 ### Release cadence
 This project aims for a release on at least a monthly basis. If no new features
