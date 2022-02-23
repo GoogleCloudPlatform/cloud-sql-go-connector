@@ -38,6 +38,11 @@ var (
 		"A connect or disconnect event to Cloud SQL",
 		stats.UnitDimensionless,
 	)
+	mDialError = stats.Int64(
+		"/cloudsqlconn/dial_failure",
+		"A failure to successfully dial a Cloud SQL instance",
+		stats.UnitDimensionless,
+	)
 
 	latencyView = &view.View{
 		Name:        "/cloudsqlconn/dial_latency",
@@ -54,6 +59,14 @@ var (
 		Aggregation: view.LastValue(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
+	dialFailureView = &view.View{
+		Name:        "/cloudsqlconn/dial_failure_count",
+		Measure:     mDialError,
+		Description: "The number of failed dial attempts",
+		Aggregation: view.Count(),
+		TagKeys:     []tag.Key{keyInstance, keyDialerID},
+	}
+
 
 	registerOnce sync.Once
 	registerErr  error
@@ -64,7 +77,7 @@ var (
 // returns an error to indicate an internal configuration problem.
 func InitMetrics() error {
 	registerOnce.Do(func() {
-		if rErr := view.Register(latencyView, connectionsView); rErr != nil {
+		if rErr := view.Register(latencyView, connectionsView, dialFailureView); rErr != nil {
 			registerErr = fmt.Errorf("failed to initialize metrics: %v", rErr)
 		}
 	})
@@ -86,4 +99,15 @@ func RecordOpenConnections(ctx context.Context, num int64, dialerID, instance st
 	// Why are we ignoring this error? See above under RecordDialLatency.
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
 	stats.Record(ctx, mConnections.M(num))
+}
+
+// RecordDialError reports a failed dial attempt. If err is nil, RecordDialError
+// is a no-op.
+func RecordDialError(ctx context.Context, instance, dialerID string, err error) {
+	if err == nil {
+		return
+	}
+	// Why are we ignoring this error? See above under RecordDialLatency.
+	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
+	stats.Record(ctx, mDialError.M(1))
 }

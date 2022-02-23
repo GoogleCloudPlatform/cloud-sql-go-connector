@@ -169,7 +169,10 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		trace.AddInstanceName(instance),
 		trace.AddDialerID(d.dialerID),
 	)
-	defer func() { endDial(err) }()
+	defer func() {
+		go trace.RecordDialError(context.Background(), instance, d.dialerID, err)
+		endDial(err)
+	}()
 	cfg := d.defaultDialCfg
 	for _, opt := range opts {
 		opt(&cfg)
