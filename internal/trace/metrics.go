@@ -67,7 +67,6 @@ var (
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 
-
 	registerOnce sync.Once
 	registerErr  error
 )
