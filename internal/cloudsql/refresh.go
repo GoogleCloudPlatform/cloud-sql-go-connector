@@ -263,9 +263,11 @@ func newRefresher(
 	burst int,
 	svc *sqladmin.Service,
 	ts oauth2.TokenSource,
+	dialerID string,
 ) refresher {
 	return refresher{
 		timeout:       timeout,
+		dialerID:      dialerID,
 		clientLimiter: rate.NewLimiter(rate.Every(interval), burst),
 		client:        svc,
 		tokenSource:   ts,
@@ -278,6 +280,9 @@ type refresher struct {
 	// timeout is the maximum amount of time a refresh operation should be allowed to take.
 	timeout time.Duration
 
+	// dialerID is the unique ID of the associated dialer.
+	dialerID string
+
 	clientLimiter *rate.Limiter
 	client        *sqladmin.Service
 	tokenSource   oauth2.TokenSource
@@ -289,7 +294,11 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.RefreshConnection",
 		trace.AddInstanceName(cn.String()),
 	)
-	defer func() { refreshEnd(err) }()
+	defer func() {
+		go trace.RecordRefreshResult(context.Background(), cn.String(), r.dialerID, err)
+		refreshEnd(err)
+	}()
+
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 	if ctx.Err() == context.Canceled {
