@@ -16,17 +16,21 @@ package trace
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
+	"google.golang.org/api/googleapi"
 )
 
 var (
-	keyInstance, _ = tag.NewKey("cloudsql_instance")
-	keyDialerID, _ = tag.NewKey("cloudsql_dialer_id")
+	keyInstance, _  = tag.NewKey("cloudsql_instance")
+	keyDialerID, _  = tag.NewKey("cloudsql_dialer_id")
+	keyErrorCode, _ = tag.NewKey("cloudsql_error_code")
 
 	mLatencyMS = stats.Int64(
 		"/cloudsqlconn/latency",
@@ -88,7 +92,7 @@ var (
 		Measure:     mFailedRefresh,
 		Description: "The number of failed refresh operations",
 		Aggregation: view.Count(),
-		TagKeys:     []tag.Key{keyInstance, keyDialerID},
+		TagKeys:     []tag.Key{keyInstance, keyDialerID, keyErrorCode},
 	}
 
 	registerOnce sync.Once
@@ -144,8 +148,30 @@ func RecordDialError(ctx context.Context, instance, dialerID string, err error) 
 func RecordRefreshResult(ctx context.Context, instance, dialerID string, err error) {
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
 	if err != nil {
+		if c := errorCode(err); c != "" {
+			ctx, _ = tag.New(ctx, tag.Upsert(keyErrorCode, c))
+		}
 		stats.Record(ctx, mFailedRefresh.M(1))
 		return
 	}
 	stats.Record(ctx, mSuccessfulRefresh.M(1))
+}
+
+// errorCode returns an error code as given from the SQL Admin API, provided the
+// error wraps a googleapi.Error type. If multiple error codes are returned from
+// the API, then a comma-separated string of all codes is returned.
+//
+// For possible error codes and their meaning see:
+// https://cloud.google.com/sql/docs/mysql/admin-api-error-messages
+func errorCode(err error) string {
+	var apiErr *googleapi.Error
+	ok := errors.As(err, &apiErr)
+	if !ok {
+		return ""
+	}
+	var codes []string
+	for _, e := range apiErr.Errors {
+		codes = append(codes, e.Reason)
+	}
+	return strings.Join(codes, ",")
 }
