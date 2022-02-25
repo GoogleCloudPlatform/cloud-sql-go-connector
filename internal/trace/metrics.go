@@ -40,7 +40,7 @@ var (
 	)
 	mDialError = stats.Int64(
 		"/cloudsqlconn/dial_failure",
-		"A failure to successfully dial a Cloud SQL instance",
+		"A failure to dial a Cloud SQL instance",
 		stats.UnitDimensionless,
 	)
 
