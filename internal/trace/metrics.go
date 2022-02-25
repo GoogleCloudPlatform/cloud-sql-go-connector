@@ -48,13 +48,13 @@ var (
 		stats.UnitDimensionless,
 	)
 	mSuccessfulRefresh = stats.Int64(
-		"/cloudsqlconn/admin_api/refresh",
-		"A completed refresh operation",
+		"/cloudsqlconn/refresh_success",
+		"A successful certificate refresh operation",
 		stats.UnitDimensionless,
 	)
 	mFailedRefresh = stats.Int64(
-		"/cloudsqlconn/admin_api/refresh_failure",
-		"A failed refresh operation",
+		"/cloudsqlconn/refresh_failure",
+		"A failed certificate refresh operation",
 		stats.UnitDimensionless,
 	)
 
@@ -81,16 +81,16 @@ var (
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 	refreshCountView = &view.View{
-		Name:        "/cloudsqlconn/admin_api/refresh_count",
+		Name:        "/cloudsqlconn/refresh_count",
 		Measure:     mSuccessfulRefresh,
-		Description: "The number of successfully completed refresh operations",
+		Description: "The number of successfully completed certificate refresh operations",
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 	failedRefreshCountView = &view.View{
-		Name:        "/cloudsqlconn/admin_api/refresh_failure_count",
+		Name:        "/cloudsqlconn/refresh_failure_count",
 		Measure:     mFailedRefresh,
-		Description: "The number of failed refresh operations",
+		Description: "The number of failed certificate refresh operations",
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID, keyErrorCode},
 	}
