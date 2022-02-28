@@ -16,17 +16,21 @@ package trace
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
+	"google.golang.org/api/googleapi"
 )
 
 var (
-	keyInstance, _ = tag.NewKey("cloudsql_instance")
-	keyDialerID, _ = tag.NewKey("cloudsql_dialer_id")
+	keyInstance, _  = tag.NewKey("cloudsql_instance")
+	keyDialerID, _  = tag.NewKey("cloudsql_dialer_id")
+	keyErrorCode, _ = tag.NewKey("cloudsql_error_code")
 
 	mLatencyMS = stats.Int64(
 		"/cloudsqlconn/latency",
@@ -41,6 +45,16 @@ var (
 	mDialError = stats.Int64(
 		"/cloudsqlconn/dial_failure",
 		"A failure to dial a Cloud SQL instance",
+		stats.UnitDimensionless,
+	)
+	mSuccessfulRefresh = stats.Int64(
+		"/cloudsqlconn/refresh_success",
+		"A successful certificate refresh operation",
+		stats.UnitDimensionless,
+	)
+	mFailedRefresh = stats.Int64(
+		"/cloudsqlconn/refresh_failure",
+		"A failed certificate refresh operation",
 		stats.UnitDimensionless,
 	)
 
@@ -66,6 +80,20 @@ var (
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
+	refreshCountView = &view.View{
+		Name:        "/cloudsqlconn/refresh_success_count",
+		Measure:     mSuccessfulRefresh,
+		Description: "The number of successful certificate refresh operations",
+		Aggregation: view.Count(),
+		TagKeys:     []tag.Key{keyInstance, keyDialerID},
+	}
+	failedRefreshCountView = &view.View{
+		Name:        "/cloudsqlconn/refresh_failure_count",
+		Measure:     mFailedRefresh,
+		Description: "The number of failed certificate refresh operations",
+		Aggregation: view.Count(),
+		TagKeys:     []tag.Key{keyInstance, keyDialerID, keyErrorCode},
+	}
 
 	registerOnce sync.Once
 	registerErr  error
@@ -76,7 +104,13 @@ var (
 // returns an error to indicate an internal configuration problem.
 func InitMetrics() error {
 	registerOnce.Do(func() {
-		if rErr := view.Register(latencyView, connectionsView, dialFailureView); rErr != nil {
+		if rErr := view.Register(
+			latencyView,
+			connectionsView,
+			dialFailureView,
+			refreshCountView,
+			failedRefreshCountView,
+		); rErr != nil {
 			registerErr = fmt.Errorf("failed to initialize metrics: %v", rErr)
 		}
 	})
@@ -95,7 +129,6 @@ func RecordDialLatency(ctx context.Context, instance, dialerID string, latency i
 
 // RecordOpenConnections records the number of open connections
 func RecordOpenConnections(ctx context.Context, num int64, dialerID, instance string) {
-	// Why are we ignoring this error? See above under RecordDialLatency.
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
 	stats.Record(ctx, mConnections.M(num))
 }
@@ -106,7 +139,39 @@ func RecordDialError(ctx context.Context, instance, dialerID string, err error) 
 	if err == nil {
 		return
 	}
-	// Why are we ignoring this error? See above under RecordDialLatency.
 	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
 	stats.Record(ctx, mDialError.M(1))
+}
+
+// RecordRefreshResult reports the result of a refresh operation, either
+// successfull or failed.
+func RecordRefreshResult(ctx context.Context, instance, dialerID string, err error) {
+	ctx, _ = tag.New(ctx, tag.Upsert(keyInstance, instance), tag.Upsert(keyDialerID, dialerID))
+	if err != nil {
+		if c := errorCode(err); c != "" {
+			ctx, _ = tag.New(ctx, tag.Upsert(keyErrorCode, c))
+		}
+		stats.Record(ctx, mFailedRefresh.M(1))
+		return
+	}
+	stats.Record(ctx, mSuccessfulRefresh.M(1))
+}
+
+// errorCode returns an error code as given from the SQL Admin API, provided the
+// error wraps a googleapi.Error type. If multiple error codes are returned from
+// the API, then a comma-separated string of all codes is returned.
+//
+// For possible error codes and their meaning see:
+// https://cloud.google.com/sql/docs/mysql/admin-api-error-messages
+func errorCode(err error) string {
+	var apiErr *googleapi.Error
+	ok := errors.As(err, &apiErr)
+	if !ok {
+		return ""
+	}
+	var codes []string
+	for _, e := range apiErr.Errors {
+		codes = append(codes, e.Reason)
+	}
+	return strings.Join(codes, ",")
 }
