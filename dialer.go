@@ -296,7 +296,7 @@ func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
 		if !ok {
 			// Create a new instance
 			var err error
-			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.iamTokenSource)
+			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.iamTokenSource, d.dialerID)
 			if err != nil {
 				d.lock.Unlock()
 				return nil, err

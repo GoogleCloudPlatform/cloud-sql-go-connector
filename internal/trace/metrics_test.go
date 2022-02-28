@@ -12,16 +12,59 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package trace_test
+package trace
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
-	"cloud.google.com/go/cloudsqlconn/internal/trace"
+	"google.golang.org/api/googleapi"
 )
 
 func TestMetricsInitializes(t *testing.T) {
-	if err := trace.InitMetrics(); err != nil {
+	if err := InitMetrics(); err != nil {
 		t.Fatalf("want no error, got = %v", err)
+	}
+}
+
+func TestErrorCodes(t *testing.T) {
+	tcs := []struct {
+		desc string
+		in   error
+		want string
+	}{
+		{
+			desc: "without an API error",
+			in:   errors.New("not an API error"),
+			want: "",
+		},
+		{
+			desc: "with a single API error",
+			in: fmt.Errorf("outer: %w", &googleapi.Error{
+				Errors: []googleapi.ErrorItem{
+					{Reason: "instanceDoesNotExist"},
+				},
+			}),
+			want: "instanceDoesNotExist",
+		},
+		{
+			desc: "with multiple API errors",
+			in: fmt.Errorf("outer: %w", &googleapi.Error{
+				Errors: []googleapi.ErrorItem{
+					{Reason: "instanceDoesNotExist"},
+					{Reason: "someOtherError"},
+				},
+			}),
+			want: "instanceDoesNotExist,someOtherError",
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			if got := errorCode(tc.in); got != tc.want {
+				t.Errorf("want = %v, got = %v", got, tc.want)
+			}
+		})
 	}
 }
