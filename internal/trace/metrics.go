@@ -83,7 +83,7 @@ var (
 	refreshCountView = &view.View{
 		Name:        "/cloudsqlconn/refresh_count",
 		Measure:     mSuccessfulRefresh,
-		Description: "The number of successfully completed certificate refresh operations",
+		Description: "The number of successful certificate refresh operations",
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
