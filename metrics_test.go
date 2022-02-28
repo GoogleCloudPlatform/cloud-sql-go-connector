@@ -142,7 +142,7 @@ func TestDialerWithMetrics(t *testing.T) {
 	// success metrics
 	wantLastValueMetric(t, "/cloudsqlconn/open_connections", spy.Data())
 	wantDistributionMetric(t, "/cloudsqlconn/dial_latency", spy.Data())
-	wantCountMetric(t, "/cloudsqlconn/refresh_count", spy.Data())
+	wantCountMetric(t, "/cloudsqlconn/refresh_success_count", spy.Data())
 
 	// failure metrics from dialing bogus instance
 	wantCountMetric(t, "/cloudsqlconn/dial_failure_count", spy.Data())
