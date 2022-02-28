@@ -10,7 +10,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	go.opencensus.io v0.23.0
 	golang.org/x/net v0.0.0-20220127200216-cd36cc0744dd
-	golang.org/x/oauth2 v0.0.0-20211104180415-d3ed0bb246c8
+	golang.org/x/oauth2 v0.0.0-20220223155221-ee480838109b
 	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65
 	google.golang.org/api v0.70.0
 	google.golang.org/genproto v0.0.0-20220222213610-43724f9ea8cf
