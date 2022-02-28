@@ -147,6 +147,7 @@ func NewInstance(
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
 	ts oauth2.TokenSource,
+	dialerID string,
 ) (*Instance, error) {
 	cn, err := parseConnName(instance)
 	if err != nil {
@@ -162,6 +163,7 @@ func NewInstance(
 			2,
 			client,
 			ts,
+			dialerID,
 		),
 		ctx:    ctx,
 		cancel: cancel,
