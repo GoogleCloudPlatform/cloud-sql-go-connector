@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.2.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.1.0...v0.2.0) (2022-03-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* use singular name for package (#101)
+
+### Features
+
+* add dial_failure_count metric ([#127](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/127)) ([34cdbb9](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/34cdbb92efa6f186bd8afdde3c8dcc810e77911e))
+* add metrics for refresh success and failure ([#133](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/133)) ([a36a212](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/a36a212dbd30474721669f10fbfda1e76a22d325))
+* drop support and testing for Go 1.14 ([#128](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/128)) ([aceadcc](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/aceadcc4835b6fe18639a696755302bb00f82bc2))
+
+
+### Bug Fixes
+
+* custom drivers report error on cleanup ([#102](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/102)) ([648b75a](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/648b75a4d8e43b3641d827086047a9c6783c1306))
+* use singular name for package ([#101](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/101)) ([5e5589d](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/5e5589db3bb0a86d9c167cd6b85358535238176a))
+
+
+### Miscellaneous Chores
+
+* release 0.2.0 ([#134](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/134)) ([4d60bb9](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/4d60bb908c58cb1a01dd5827e785477895c45cb8))
+
 ## 0.1.0 (2022-02-08)
 
 
