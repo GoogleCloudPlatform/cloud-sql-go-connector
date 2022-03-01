@@ -38,7 +38,7 @@ import (
 
 const (
 	// versionString indicates the version of this library.
-	versionString = "0.1.0-dev"
+	versionString = "0.2.0"
 	userAgent     = "cloud-sql-go-connector/" + versionString
 
 	// defaultTCPKeepAlive is the default keep alive value used on connections to a Cloud SQL instance.
