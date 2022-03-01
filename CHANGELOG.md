@@ -20,10 +20,6 @@
 * use singular name for package ([#101](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/101)) ([5e5589d](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/5e5589db3bb0a86d9c167cd6b85358535238176a))
 
 
-### Miscellaneous Chores
-
-* release 0.2.0 ([#134](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/134)) ([4d60bb9](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/4d60bb908c58cb1a01dd5827e785477895c45cb8))
-
 ## 0.1.0 (2022-02-08)
 
 
@@ -71,8 +67,3 @@
 * schedule refreshes based on result expiration instead of fixed interval ([#21](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/21)) ([65073d0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/65073d0ea9582abbe01c7ca0698681624e3c7834))
 * **trace:** use LastValue for open connections ([#58](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/58)) ([4ee6bea](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/4ee6bea069c196454dd48034457a16ba416b725c))
 * use ctx for NewService ([#24](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/24)) ([77fd677](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/77fd677ccb827feb89e6bb41eb45c22f3a2b1861))
-
-
-### Miscellaneous Chores
-
-* set release version to 0.1.0 ([#97](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/97)) ([1829c6f](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/1829c6f3f8071304d4d6c4ed9bc726fd71e78c9d))
