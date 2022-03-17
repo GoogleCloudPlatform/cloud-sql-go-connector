@@ -123,6 +123,14 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
+// WithEndpoint configures the underlying SQL Admin API client to use the
+// provided URL.
+func WithEndpoint(url string) Option {
+	return func(d *dialerConfig) {
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithEndpoint(url))
+	}
+}
+
 // WithDialFunc configures the function used to connect to the address on the
 // named network. This option is generally unnecessary except for advanced
 // use-cases.
