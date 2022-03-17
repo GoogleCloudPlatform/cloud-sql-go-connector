@@ -37,28 +37,31 @@ format "project:region:instance".
 
 ### APIs and Services
 
-This package requires that the [Cloud SQL Admin API][admin-api] be enabled
-within your Google Cloud Project.
+This package requires the following to successfully make Cloud SQL Connections:
+
+- IAM Principal (user, service account, etc.) with the
+[Cloud SQL Client][client-role] role. This IAM Principal will be used for
+[credentials](#credentials).
+- The [Cloud SQL Admin API][admin-api] to be enabled within your Google Cloud
+Project. By default, the API will be called in the project associated with
+the IAM Principal.
 
 [admin-api]: https://console.cloud.google.com/apis/api/sqladmin.googleapis.com
+[client-role]: https://cloud.google.com/sql/docs/mysql/roles-and-permissions
 
 ### Credentials
 
 This repo uses the [Application Default Credentials (ADC)][adc] strategy for
-resolving credentials. Please see the
+resolving credentials from an IAM Principal. Please see the
 [golang.org/x/oauth2/google][google-auth] documentation for more information in
 how these credentials are sourced.
 
 To explicitly set a specific source for the Credentials to use, see [Using
-Option](#using-options) below.
+Options](#using-options) below.
 
-The source identity of the credentials (user, service account, etc.) must have
-the [Cloud SQL Client][client-role] IAM Role in order to successfully 
-make Cloud SQL connections.
 
 [adc]: https://cloud.google.com/docs/authentication
 [google-auth]: https://pkg.go.dev/golang.org/x/oauth2/google#hdr-Credentials
-[client-role]: https://console.cloud.google.com/iam-admin/roles/details/roles%3Ccloudsql.client
 
 ### Postgres
 
