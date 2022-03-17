@@ -52,7 +52,7 @@ the IAM Principal.
 ### Credentials
 
 This repo uses the [Application Default Credentials (ADC)][adc] strategy for
-resolving credentials from an IAM Principal. Please see the
+resolving credentials. Please see the
 [golang.org/x/oauth2/google][google-auth] documentation for more information in
 how these credentials are sourced.
 
