@@ -123,9 +123,9 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
-// WithEndpoint configures the underlying SQL Admin API client to use the
-// provided URL.
-func WithEndpoint(url string) Option {
+// WithAdminAPIEndpoint configures the underlying SQL Admin API client to use
+// the provided URL.
+func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithEndpoint(url))
 	}
