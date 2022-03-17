@@ -35,18 +35,30 @@ your Cloud SQL instance.
 The instance connection name for your Cloud SQL instance is always in the
 format "project:region:instance".
 
+### APIs and Services
+
+This package requires that the [Cloud SQL Admin API][admin-api] be enabled
+within your Google Cloud Project.
+
+[admin-api]: https://console.cloud.google.com/apis/api/sqladmin.googleapis.com
+
 ### Credentials
 
 This repo uses the [Application Default Credentials (ADC)][adc] strategy for
-typing providing credentials. Please see the
+resolving credentials. Please see the
 [golang.org/x/oauth2/google][google-auth] documentation for more information in
 how these credentials are sourced.
 
 To explicitly set a specific source for the Credentials to use, see [Using
 Option](#using-options) below.
 
+The source identity of the credentials (user, service account, etc.) must have
+the [Cloud SQL Client][client-role] IAM Role in order to successfully 
+make Cloud SQL connections.
+
 [adc]: https://cloud.google.com/docs/authentication
 [google-auth]: https://pkg.go.dev/golang.org/x/oauth2/google#hdr-Credentials
+[client-role]: https://console.cloud.google.com/iam-admin/roles/details/roles%3Ccloudsql.client
 
 ### Postgres
 
