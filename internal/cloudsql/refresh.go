@@ -48,7 +48,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.FetchMetadata")
 	defer func() { end(err) }()
-	db, err := client.Instances.Get(inst.project, inst.name).Context(ctx).Do()
+	db, err := client.Connect.Get(inst.project, inst.name).Context(ctx).Do()
 	if err != nil {
 		return metadata{}, errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
