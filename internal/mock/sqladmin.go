@@ -116,20 +116,17 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 	if err != nil {
 		panic(err)
 	}
-	db := &sqladmin.DatabaseInstance{
+	db := &sqladmin.ConnectSettings{
 		BackendType:     i.backendType,
-		ConnectionName:  fmt.Sprintf("%s:%s:%s", i.project, i.region, i.name),
 		DatabaseVersion: i.dbVersion,
-		Project:         i.project,
-		Region:          i.region,
-		Name:            i.name,
 		IpAddresses:     ips,
+		Region:          i.region,
 		ServerCaCert:    &sqladmin.SslCert{Cert: string(certBytes)},
 	}
 
 	r := &Request{
 		reqMethod: http.MethodGet,
-		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s", i.project, i.name),
+		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s/connectSettings", i.project, i.name),
 		reqCt:     ct,
 		handle: func(resp http.ResponseWriter, req *http.Request) {
 			b, err := db.MarshalJSON()
