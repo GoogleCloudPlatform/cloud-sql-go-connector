@@ -71,9 +71,9 @@ func parseConnName(cn string) (connName, error) {
 	return c, nil
 }
 
-// refreshResult is a pending result of a refresh operation of data used to connect securely. It should
+// refreshOperation is a pending result of a refresh operation of data used to connect securely. It should
 // only be initialized by the Instance struct as part of a refresh cycle.
-type refreshResult struct {
+type refreshOperation struct {
 	md     metadata
 	tlsCfg *tls.Config
 	expiry time.Time
@@ -87,12 +87,12 @@ type refreshResult struct {
 
 // Cancel prevents the instanceInfo from starting, if it hasn't already started. Returns true if timer
 // was stopped successfully, or false if it has already started.
-func (r *refreshResult) Cancel() bool {
+func (r *refreshOperation) Cancel() bool {
 	return r.timer.Stop()
 }
 
 // Wait blocks until the refreshResult attempt is completed.
-func (r *refreshResult) Wait(ctx context.Context) error {
+func (r *refreshOperation) Wait(ctx context.Context) error {
 	select {
 	case <-r.ready:
 		return r.err
@@ -102,7 +102,7 @@ func (r *refreshResult) Wait(ctx context.Context) error {
 }
 
 // IsValid returns true if this result is complete, successful, and is still valid.
-func (r *refreshResult) IsValid() bool {
+func (r *refreshOperation) IsValid() bool {
 	// verify the result has finished running
 	select {
 	default:
@@ -126,10 +126,10 @@ type Instance struct {
 	resultGuard sync.RWMutex
 	// cur represents the current refreshResult that will be used to create connections. If a valid complete
 	// refreshResult isn't available it's possible for cur to be equal to next.
-	cur *refreshResult
+	cur *refreshOperation
 	// next represents a future or ongoing refreshResult. Once complete, it will replace cur and schedule a
 	// replacement to occur.
-	next *refreshResult
+	next *refreshOperation
 
 	// OpenConns is the number of open connections to the instance.
 	OpenConns uint64
@@ -226,7 +226,7 @@ func (i *Instance) ForceRefresh() {
 }
 
 // result returns the most recent refresh result (waiting for it to complete if necessary)
-func (i *Instance) result(ctx context.Context) (*refreshResult, error) {
+func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 	i.resultGuard.RLock()
 	res := i.cur
 	i.resultGuard.RUnlock()
@@ -239,8 +239,8 @@ func (i *Instance) result(ctx context.Context) (*refreshResult, error) {
 
 // scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshResult
 // can be used to either Cancel or Wait for the operations result.
-func (i *Instance) scheduleRefresh(d time.Duration) *refreshResult {
-	res := &refreshResult{}
+func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
+	res := &refreshOperation{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
 		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key)
