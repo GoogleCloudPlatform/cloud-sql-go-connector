@@ -19,6 +19,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -271,5 +272,15 @@ func TestDialerEngineVersion(t *testing.T) {
 		if wantEV != gotEV {
 			t.Errorf("InstanceEngineVersion(%s) failed: want %v, got %v", wantEV, gotEV, err)
 		}
+	}
+}
+
+func TestDialerVersion(t *testing.T) {
+	want, err := os.ReadFile("version.txt")
+	if err != nil {
+		t.Fatalf("failed to read version.txt: %v", err)
+	}
+	if string(want) != versionString {
+		t.Errorf("embed version mismatched: want %s, got %s", want, versionString)
 	}
 }
