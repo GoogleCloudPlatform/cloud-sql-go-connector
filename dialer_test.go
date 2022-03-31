@@ -19,6 +19,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -271,5 +272,17 @@ func TestDialerEngineVersion(t *testing.T) {
 		if wantEV != gotEV {
 			t.Errorf("InstanceEngineVersion(%s) failed: want %v, got %v", wantEV, gotEV, err)
 		}
+	}
+}
+
+func TestDialerUserAgent(t *testing.T) {
+	data, err := os.ReadFile("version.txt")
+	if err != nil {
+		t.Fatalf("failed to read version.txt: %v", err)
+	}
+	ver := strings.TrimSpace(string(data))
+	want := "cloud-sql-go-connector/" + ver
+	if want != userAgent {
+		t.Errorf("embed version mismatched: want %q, got %q", want, userAgent)
 	}
 }

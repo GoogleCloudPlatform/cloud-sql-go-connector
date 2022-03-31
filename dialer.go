@@ -19,8 +19,10 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
+	_ "embed"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,10 +39,6 @@ import (
 )
 
 const (
-	// versionString indicates the version of this library.
-	versionString = "0.2.1-dev"
-	userAgent     = "cloud-sql-go-connector/" + versionString
-
 	// defaultTCPKeepAlive is the default keep alive value used on connections to a Cloud SQL instance.
 	defaultTCPKeepAlive = 30 * time.Second
 	// serverProxyPort is the port the server-side proxy receives connections on.
@@ -48,6 +46,11 @@ const (
 )
 
 var (
+	// versionString indicates the version of this library.
+	//go:embed version.txt
+	versionString string
+	userAgent     = "cloud-sql-go-connector/" + strings.TrimSpace(versionString)
+
 	// defaultKey is the default RSA public/private keypair used by the clients.
 	defaultKey    *rsa.PrivateKey
 	defaultKeyErr error
