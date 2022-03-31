@@ -275,12 +275,14 @@ func TestDialerEngineVersion(t *testing.T) {
 	}
 }
 
-func TestDialerVersion(t *testing.T) {
-	want, err := os.ReadFile("version.txt")
+func TestDialerUserAgent(t *testing.T) {
+	data, err := os.ReadFile("version.txt")
 	if err != nil {
 		t.Fatalf("failed to read version.txt: %v", err)
 	}
-	if string(want) != versionString {
-		t.Errorf("embed version mismatched: want %s, got %s", want, versionString)
+	ver := strings.TrimSpace(string(data))
+	want := "cloud-sql-go-connector/" + ver
+	if want != userAgent {
+		t.Errorf("embed version mismatched: want %q, got %q", want, userAgent)
 	}
 }
