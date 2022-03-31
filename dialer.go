@@ -102,8 +102,8 @@ type Dialer struct {
 func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg := &dialerConfig{
 		refreshTimeout: 30 * time.Second,
-		sqladminOpts:   []option.ClientOption{option.WithUserAgent(userAgent)},
 		dialFunc:       proxy.Dial,
+		useragents:     []string{userAgent},
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -111,6 +111,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return nil, cfg.err
 		}
 	}
+	// Add this to the end to make sure it's not overridden
+	cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
+
 	// If callers have not provided a token source, either explicitly with
 	// WithTokenSource or implicitly with WithCredentialsJSON etc, then use the
 	// default token source.
