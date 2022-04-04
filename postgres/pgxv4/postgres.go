@@ -72,6 +72,14 @@ func (p *pgDriver) Open(name string) (driver.Conn, error) {
 		return stdlib.GetDefaultDriver().Open(dbURI)
 	}
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// Recheck to ensure dbURI wasn't created between locks
+	dbURI, ok = p.dbURIs[name]
+	if ok {
+		return stdlib.GetDefaultDriver().Open(dbURI)
+	}
+
 	config, err := pgx.ParseConfig(name)
 	if err != nil {
 		return nil, err
@@ -82,12 +90,8 @@ func (p *pgDriver) Open(name string) (driver.Conn, error) {
 		return p.d.Dial(ctx, instConnName)
 	}
 
-	p.mu.Lock()
-	dbURI, ok = p.dbURIs[name] // check again if another goroutine already registered config
-	if !ok {
-		dbURI = stdlib.RegisterConnConfig(config)
-		p.dbURIs[name] = dbURI
-	}
-	p.mu.Unlock()
+	dbURI = stdlib.RegisterConnConfig(config)
+	p.dbURIs[name] = dbURI
+
 	return stdlib.GetDefaultDriver().Open(dbURI)
 }
