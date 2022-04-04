@@ -48,8 +48,8 @@ func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, err
 
 type pgDriver struct {
 	d      *cloudsqlconn.Dialer
-	mu     sync.Mutex
-	dbURIs map[string]string
+	mu     sync.RWMutex
+	dbURIs map[string]string // key is string in a driver-specific format, value is dbURI for registered connection name
 }
 
 // Open accepts a keyword/value formatted connection string and returns a
@@ -58,32 +58,33 @@ type pgDriver struct {
 //
 // "host=my-project:us-central1:my-db-instance user=myuser password=mypass"
 func (p *pgDriver) Open(name string) (driver.Conn, error) {
-	dbURI, err := p.getDbURI(name)
+	var dbURI string
+	var ok bool
+
+	p.mu.RLock()
+	dbURI, ok = p.dbURIs[name]
+	p.mu.RUnlock()
+
+	if ok {
+		return stdlib.GetDefaultDriver().Open(dbURI)
+	}
+
+	config, err := pgx.ParseConfig(name)
 	if err != nil {
 		return nil, err
 	}
-	return stdlib.GetDefaultDriver().Open(dbURI)
-}
+	instConnName := config.Config.Host // Extract instance connection name
+	config.Config.Host = "localhost"   // Replace it with a default value
+	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return p.d.Dial(ctx, instConnName)
+	}
 
-//getDbURI returns and caches database URI for the connection name
-func (p *pgDriver) getDbURI(name string) (string, error) {
-	var dbURI string
-	var ok bool
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if dbURI, ok = p.dbURIs[name]; !ok {
-		config, err := pgx.ParseConfig(name)
-		if err != nil {
-			return "", err
-		}
-		instConnName := config.Config.Host // Extract instance connection name
-		config.Config.Host = "localhost"   // Replace it with a default value
-		config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return p.d.Dial(ctx, instConnName)
-		}
+	dbURI, ok = p.dbURIs[name] // check again if another goroutine already registered config
+	if !ok {
 		dbURI = stdlib.RegisterConnConfig(config)
 		p.dbURIs[name] = dbURI
 	}
-	return dbURI, nil
+	p.mu.Unlock()
+	return stdlib.GetDefaultDriver().Open(dbURI)
 }
