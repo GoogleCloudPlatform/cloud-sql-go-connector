@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"net"
+	"sync"
 
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v4"
@@ -39,13 +40,16 @@ func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, err
 		return func() error { return nil }, err
 	}
 	sql.Register(name, &pgDriver{
-		d: d,
+		d:      d,
+		dbURIs: make(map[string]string),
 	})
 	return func() error { return d.Close() }, nil
 }
 
 type pgDriver struct {
-	d *cloudsqlconn.Dialer
+	d      *cloudsqlconn.Dialer
+	mu     sync.Mutex
+	dbURIs map[string]string
 }
 
 // Open accepts a keyword/value formatted connection string and returns a
@@ -54,15 +58,32 @@ type pgDriver struct {
 //
 // "host=my-project:us-central1:my-db-instance user=myuser password=mypass"
 func (p *pgDriver) Open(name string) (driver.Conn, error) {
-	config, err := pgx.ParseConfig(name)
+	dbURI, err := p.getDbURI(name)
 	if err != nil {
 		return nil, err
 	}
-	instConnName := config.Config.Host // Extract instance connection name
-	config.Config.Host = "localhost"   // Replace it with a default value
-	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return p.d.Dial(ctx, instConnName)
-	}
-	dbURI := stdlib.RegisterConnConfig(config)
 	return stdlib.GetDefaultDriver().Open(dbURI)
+}
+
+//getDbURI returns and caches database URI for the connection name
+func (p *pgDriver) getDbURI(name string) (string, error) {
+	var dbURI string
+	var ok bool
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if dbURI, ok = p.dbURIs[name]; !ok {
+		config, err := pgx.ParseConfig(name)
+		if err != nil {
+			return "", err
+		}
+		instConnName := config.Config.Host // Extract instance connection name
+		config.Config.Host = "localhost"   // Replace it with a default value
+		config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return p.d.Dial(ctx, instConnName)
+		}
+		dbURI = stdlib.RegisterConnConfig(config)
+		p.dbURIs[name] = dbURI
+	}
+	return dbURI, nil
 }
