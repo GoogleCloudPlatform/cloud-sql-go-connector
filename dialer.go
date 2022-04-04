@@ -253,11 +253,10 @@ func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, er
 
 // Warmup starts the background refresh neccesary to connect to the instance. Use Warmup
 // to start if the refresh process early if you don't know when you'll need to call "Dial".
-func (d *Dialer) Warmup(ctx context.Context, instance string, opts ...DialOption) (error) {
+func (d *Dialer) Warmup(ctx context.Context, instance string, opts ...DialOption) error {
 	_, err := d.instance(instance)
 	return err
 }
-
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
 // decrement the number of open connects and record the result.
