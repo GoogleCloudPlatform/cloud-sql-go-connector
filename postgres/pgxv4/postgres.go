@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"net"
+	"sync"
 
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v4"
@@ -39,13 +40,17 @@ func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, err
 		return func() error { return nil }, err
 	}
 	sql.Register(name, &pgDriver{
-		d: d,
+		d:      d,
+		dbURIs: make(map[string]string),
 	})
 	return func() error { return d.Close() }, nil
 }
 
 type pgDriver struct {
-	d *cloudsqlconn.Dialer
+	d  *cloudsqlconn.Dialer
+	mu sync.RWMutex
+	// dbURIs is a map of DSN to DB URI for registered connection names.
+	dbURIs map[string]string
 }
 
 // Open accepts a keyword/value formatted connection string and returns a
@@ -54,6 +59,19 @@ type pgDriver struct {
 //
 // "host=my-project:us-central1:my-db-instance user=myuser password=mypass"
 func (p *pgDriver) Open(name string) (driver.Conn, error) {
+	var (
+		dbURI string
+		ok    bool
+	)
+
+	p.mu.RLock()
+	dbURI, ok = p.dbURIs[name]
+	p.mu.RUnlock()
+
+	if ok {
+		return stdlib.GetDefaultDriver().Open(dbURI)
+	}
+
 	config, err := pgx.ParseConfig(name)
 	if err != nil {
 		return nil, err
@@ -63,6 +81,13 @@ func (p *pgDriver) Open(name string) (driver.Conn, error) {
 	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return p.d.Dial(ctx, instConnName)
 	}
-	dbURI := stdlib.RegisterConnConfig(config)
+
+	p.mu.Lock()
+	dbURI, ok = p.dbURIs[name] // check again if another goroutine already registered config
+	if !ok {
+		dbURI = stdlib.RegisterConnConfig(config)
+		p.dbURIs[name] = dbURI
+	}
+	p.mu.Unlock()
 	return stdlib.GetDefaultDriver().Open(dbURI)
 }
