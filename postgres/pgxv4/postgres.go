@@ -47,9 +47,10 @@ func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, err
 }
 
 type pgDriver struct {
-	d      *cloudsqlconn.Dialer
-	mu     sync.RWMutex
-	dbURIs map[string]string // key is string in a driver-specific format, value is dbURI for registered connection name
+	d  *cloudsqlconn.Dialer
+	mu sync.RWMutex
+	// dbURIs is a map of DSN to DB URI for registered connection names.
+	dbURIs map[string]string
 }
 
 // Open accepts a keyword/value formatted connection string and returns a
@@ -58,8 +59,10 @@ type pgDriver struct {
 //
 // "host=my-project:us-central1:my-db-instance user=myuser password=mypass"
 func (p *pgDriver) Open(name string) (driver.Conn, error) {
-	var dbURI string
-	var ok bool
+	var (
+		dbURI string
+		ok    bool
+	)
 
 	p.mu.RLock()
 	dbURI, ok = p.dbURIs[name]
