@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.2.0...v0.3.0) (2022-04-04)
+
+
+### Features
+
+* add option to configure SQL Admin API URL ([#148](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/148)) ([c791369](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/c79136972083480d16f65a4696a7747bae942afe))
+* add WithUserAgent opt ([#156](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/156)) ([bd89dc5](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/bd89dc50bb50d1d6ff9cf5a146071b307a54683a))
+* drop support for Go 1.15 ([#145](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/145)) ([791641b](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/791641bb2d0ab93955b218b9bc6f5335b8ead243))
+* use connect API for instance metadata ([#150](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/150)) ([1086ad0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/1086ad01cc7907051147d572f4f27ab1ba538027))
+
+
+### Bug Fixes
+
+* memory leak in database/sql integration ([#162](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/162)) ([47cdf2d](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/47cdf2da2230801b591bf4f459bfcbe7e9432cd1))
+* prevent unnecessary allocation of conn config ([#164](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/164)) ([49c7828](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/49c782809aff84b6141027f1a2634b0a0db2b18a))
+
 ## [0.2.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.1.0...v0.2.0) (2022-03-01)
 
 
