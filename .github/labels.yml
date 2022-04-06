@@ -62,9 +62,10 @@
   description: Indicates a pull request not ready for merge, due to either quality
     or timing.
 
-- name: autorelease: pending
+- name: 'autorelease: pending'
   color: ededed
   description: Release please needs to do its work on this.
-- name: autorelease: tagged
+
+- name: 'autorelease: tagged'
   color: ededed
   description: Release please has completed a release for this.
