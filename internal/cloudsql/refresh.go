@@ -270,7 +270,7 @@ func newRefresher(
 		dialerID:      dialerID,
 		clientLimiter: rate.NewLimiter(rate.Every(interval), burst),
 		client:        svc,
-		tokenSource:   ts,
+		iamTS:         ts,
 	}
 }
 
@@ -285,7 +285,9 @@ type refresher struct {
 
 	clientLimiter *rate.Limiter
 	client        *sqladmin.Service
-	tokenSource   oauth2.TokenSource
+
+	// iamTS is the TokenSource used for IAM DB AuthN. It is only set if IAM DB AuthN is being used.
+	iamTS oauth2.TokenSource
 }
 
 // performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
@@ -335,7 +337,7 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 	ecC := make(chan ecRes, 1)
 	go func() {
 		defer close(ecC)
-		ec, err := fetchEphemeralCert(ctx, r.client, cn, k, r.tokenSource)
+		ec, err := fetchEphemeralCert(ctx, r.client, cn, k, r.iamTS)
 		ecC <- ecRes{ec, err}
 	}()
 

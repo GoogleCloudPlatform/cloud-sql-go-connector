@@ -184,19 +184,19 @@ var fakeServiceAccount = []byte(`{
 
 func TestIAMAuthn(t *testing.T) {
 	tcs := []struct {
-		desc            string
-		opts            Option
-		wantTokenSource bool
+		desc         string
+		opts         Option
+		wantIAMAuthN bool
 	}{
 		{
-			desc:            "When Credentials are provided with IAM Authn ENABLED",
-			opts:            WithOptions(WithIAMAuthN(), WithCredentialsJSON(fakeServiceAccount)),
-			wantTokenSource: true,
+			desc:         "When Credentials are provided with IAM Authn ENABLED",
+			opts:         WithOptions(WithIAMAuthN(), WithCredentialsJSON(fakeServiceAccount)),
+			wantIAMAuthN: true,
 		},
 		{
-			desc:            "When Credentials are provided with IAM Authn DISABLED",
-			opts:            WithCredentialsJSON(fakeServiceAccount),
-			wantTokenSource: false,
+			desc:         "When Credentials are provided with IAM Authn DISABLED",
+			opts:         WithCredentialsJSON(fakeServiceAccount),
+			wantIAMAuthN: false,
 		},
 	}
 
@@ -206,8 +206,8 @@ func TestIAMAuthn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewDialer failed with error = %v", err)
 			}
-			if gotTokenSource := d.iamTokenSource != nil; gotTokenSource != tc.wantTokenSource {
-				t.Fatalf("want = %v, got = %v", tc.wantTokenSource, gotTokenSource)
+			if gotIAMAuthN := d.defaultDialCfg.refreshCfg.UseIAMAuthN; gotIAMAuthN != tc.wantIAMAuthN {
+				t.Fatalf("want = %v, got = %v", tc.wantIAMAuthN, gotIAMAuthN)
 			}
 		})
 	}

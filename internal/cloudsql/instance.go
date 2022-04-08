@@ -91,7 +91,7 @@ func (r *refreshOperation) Cancel() bool {
 	return r.timer.Stop()
 }
 
-// Wait blocks until the refreshResult attempt is completed.
+// Wait blocks until the refreshOperation attempt is completed.
 func (r *refreshOperation) Wait(ctx context.Context) error {
 	select {
 	case <-r.ready:
@@ -115,6 +115,11 @@ func (r *refreshOperation) IsValid() bool {
 	}
 }
 
+// RefreshCfg is a of attributes that trigger new refresh operations.
+type RefreshCfg struct {
+	UseIAMAuthN bool
+}
+
 // Instance manages the information used to connect to the Cloud SQL instance by periodically calling
 // the Cloud SQL Admin API. It automatically refreshes the required information approximately 5 minutes
 // before the previous certificate expires (every 55 minutes).
@@ -123,14 +128,15 @@ type Instance struct {
 	OpenConns uint64
 
 	connName
-	key *rsa.PrivateKey
-	r   refresher
+	key        *rsa.PrivateKey
+	r          refresher
+	RefreshCfg RefreshCfg
 
 	resultGuard sync.RWMutex
-	// cur represents the current refreshResult that will be used to create connections. If a valid complete
-	// refreshResult isn't available it's possible for cur to be equal to next.
+	// cur represents the current refreshOperation that will be used to create connections. If a valid complete
+	// refreshOperation isn't available it's possible for cur to be equal to next.
 	cur *refreshOperation
-	// next represents a future or ongoing refreshResult. Once complete, it will replace cur and schedule a
+	// next represents a future or ongoing refreshOperation. Once complete, it will replace cur and schedule a
 	// replacement to occur.
 	next *refreshOperation
 
@@ -148,12 +154,17 @@ func NewInstance(
 	refreshTimeout time.Duration,
 	ts oauth2.TokenSource,
 	dialerID string,
+	rCfg RefreshCfg,
 ) (*Instance, error) {
 	cn, err := parseConnName(instance)
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	var iamTs oauth2.TokenSource
+	if rCfg.UseIAMAuthN {
+		iamTs = ts
+	}
 	i := &Instance{
 		connName: cn,
 		key:      key,
@@ -162,7 +173,7 @@ func NewInstance(
 			30*time.Second,
 			2,
 			client,
-			ts,
+			iamTs,
 			dialerID,
 		),
 		ctx:    ctx,
@@ -237,7 +248,7 @@ func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 	return res, nil
 }
 
-// scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshResult
+// scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshOperation
 // can be used to either Cancel or Wait for the operations result.
 func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 	res := &refreshOperation{}
