@@ -128,11 +128,11 @@ type Instance struct {
 	OpenConns uint64
 
 	connName
-	key        *rsa.PrivateKey
-	r          refresher
-	RefreshCfg RefreshCfg
+	key *rsa.PrivateKey
 
 	resultGuard sync.RWMutex
+	r           refresher
+	RefreshCfg  RefreshCfg
 	// cur represents the current refreshOperation that will be used to create connections. If a valid complete
 	// refreshOperation isn't available it's possible for cur to be equal to next.
 	cur *refreshOperation
@@ -161,10 +161,6 @@ func NewInstance(
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	var iamTs oauth2.TokenSource
-	if rCfg.UseIAMAuthN {
-		iamTs = ts
-	}
 	i := &Instance{
 		connName: cn,
 		key:      key,
@@ -173,7 +169,7 @@ func NewInstance(
 			30*time.Second,
 			2,
 			client,
-			iamTs,
+			ts,
 			dialerID,
 		),
 		ctx:    ctx,
@@ -224,6 +220,19 @@ func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
 	return res.md.version, nil
 }
 
+func (i *Instance) UpdateRefresh(cfg RefreshCfg) {
+	i.resultGuard.Lock()
+	// Cancel any pending refreshes
+	i.cur.Cancel()
+	i.next.Cancel()
+	// update the refreshcfg as needed
+	i.RefreshCfg = cfg
+	// reschedule a new refresh immiediately
+	i.cur = i.scheduleRefresh(0)
+	i.next = i.cur
+	i.resultGuard.Unlock()
+}
+
 // ForceRefresh triggers an immediate refresh operation to be scheduled and used for future connection attempts.
 func (i *Instance) ForceRefresh() {
 	i.resultGuard.Lock()
@@ -254,7 +263,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 	res := &refreshOperation{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key)
+		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key, i.RefreshCfg.UseIAMAuthN)
 		close(res.ready)
 
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh

@@ -186,7 +186,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	i, err := d.instance(instance, cfg.refreshCfg)
+	i, err := d.instance(instance, &cfg.refreshCfg)
 	if err != nil {
 		endInfo(err)
 		return nil, err
@@ -240,7 +240,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 // corespond to one of the following types for the instance:
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
 func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, error) {
-	i, err := d.instance(instance, d.defaultDialCfg.refreshCfg)
+	i, err := d.instance(instance, nil)
 	if err != nil {
 		return "", err
 	}
@@ -258,7 +258,7 @@ func (d *Dialer) Warmup(ctx context.Context, instance string, opts ...DialOption
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	_, err := d.instance(instance, d.defaultDialCfg.refreshCfg)
+	_, err := d.instance(instance, &d.defaultDialCfg.refreshCfg)
 	return err
 }
 
@@ -301,30 +301,33 @@ func (d *Dialer) Close() error {
 	return nil
 }
 
-func (d *Dialer) instance(connName string, rCfg cloudsql.RefreshCfg) (*cloudsql.Instance, error) {
+// instance is a helper function for returning the appropriate instance object in a threadsafe way.
+// It will create a new instance object, modify the existing one, or leave it unchanged as needed.
+func (d *Dialer) instance(connName string, rCfg *cloudsql.RefreshCfg) (*cloudsql.Instance, error) {
 	// Check instance cache
 	d.lock.RLock()
 	i, ok := d.instances[connName]
 	d.lock.RUnlock()
 	// Check if the instance exists and that the refresh cfg is the same
-	if !ok || rCfg != i.RefreshCfg {
+	if !ok || (rCfg != nil && *rCfg != i.RefreshCfg) {
 		d.lock.Lock()
 		// Recheck to ensure instance wasn't created or changed between locks
 		i, ok = d.instances[connName]
-		if !ok || rCfg != i.RefreshCfg {
+		if !ok {
 			// Create a new instance
+			if rCfg == nil {
+				rCfg = &d.defaultDialCfg.refreshCfg
+			}
 			var err error
-			newI, err := cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.iamTokenSource, d.dialerID, rCfg)
+			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.iamTokenSource, d.dialerID, *rCfg)
 			if err != nil {
 				d.lock.Unlock()
 				return nil, err
 			}
-			// If we created a new instance to match RefreshCfg, close the old one
-			if ok {
-				defer i.Close()
-			}
-			d.instances[connName] = newI
-			i = newI
+			d.instances[connName] = i
+		} else if rCfg != nil && *rCfg != i.RefreshCfg {
+			// Update the instance with the new refresh cfg
+			i.UpdateRefresh(*rCfg)
 		}
 		d.lock.Unlock()
 	}

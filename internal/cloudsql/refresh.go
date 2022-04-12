@@ -270,7 +270,7 @@ func newRefresher(
 		dialerID:      dialerID,
 		clientLimiter: rate.NewLimiter(rate.Every(interval), burst),
 		client:        svc,
-		iamTS:         ts,
+		ts:            ts,
 	}
 }
 
@@ -286,12 +286,12 @@ type refresher struct {
 	clientLimiter *rate.Limiter
 	client        *sqladmin.Service
 
-	// iamTS is the TokenSource used for IAM DB AuthN. It is only set if IAM DB AuthN is being used.
-	iamTS oauth2.TokenSource
+	// ts is the TokenSource used for IAM DB AuthN.
+	ts oauth2.TokenSource
 }
 
 // performRefresh immediately performs a full refresh operation using the Cloud SQL Admin API.
-func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey) (md metadata, c *tls.Config, expiry time.Time, err error) {
+func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.PrivateKey, iamAuthN bool) (md metadata, c *tls.Config, expiry time.Time, err error) {
 	var refreshEnd trace.EndSpanFunc
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.RefreshConnection",
 		trace.AddInstanceName(cn.String()),
@@ -337,7 +337,11 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 	ecC := make(chan ecRes, 1)
 	go func() {
 		defer close(ecC)
-		ec, err := fetchEphemeralCert(ctx, r.client, cn, k, r.iamTS)
+		var iamTS oauth2.TokenSource
+		if iamAuthN {
+			iamTS = r.ts
+		}
+		ec, err := fetchEphemeralCert(ctx, r.client, cn, k, iamTS)
 		ecC <- ecRes{ec, err}
 	}()
 
