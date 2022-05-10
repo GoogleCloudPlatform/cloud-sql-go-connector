@@ -23,7 +23,7 @@ if [ -n "$KOKORO_GFILE_DIR" ]; then
   # install fuse project
   apt-get -qq update && apt-get -qq install fuse -y
   # source secrets from secret manager
-  source "${KOKORO_GFILE_DIR}/secret_manager/cloud-sql-go-env-vars"
+  source "${KOKORO_GFILE_DIR}/TEST_SECRETS.sh"
   export GOOGLE_APPLICATION_CREDENTIALS="${KOKORO_GFILE_DIR}/testing-service-account.json"
 fi
 
