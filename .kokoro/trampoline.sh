@@ -20,5 +20,5 @@ function cleanup() {
     echo "cleanup";
 }
 trap cleanup EXIT
-
+export KOKORO_ROOT='/tmpfs'
 python3 "${KOKORO_GFILE_DIR}/trampoline_v1.py"
