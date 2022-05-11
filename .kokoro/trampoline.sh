@@ -21,4 +21,5 @@ function cleanup() {
 }
 trap cleanup EXIT
 export KOKORO_ROOT='/tmpfs'
+sudo chown $USER /var/run/docker.sock
 python3 "${KOKORO_GFILE_DIR}/trampoline_v1.py"
