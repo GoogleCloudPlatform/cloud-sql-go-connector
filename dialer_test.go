@@ -118,7 +118,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 func TestDialWithConfigurationErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance",
 		mock.WithCertExpiry(time.Now().Add(-time.Hour)))
-	
+
 	// TODO: Windows tests send an extra request to the mock server. Figure out why.
 	var reqCt int
 	if runtime.GOOS == "windows" {
