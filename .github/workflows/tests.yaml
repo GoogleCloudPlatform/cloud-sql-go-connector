@@ -39,7 +39,7 @@ jobs:
         run: |
           go test -v -race -cover -short ./...
   build-32bit:
-    name: "unit tests (386)"
+    name: "unit tests (32-bit)"
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
