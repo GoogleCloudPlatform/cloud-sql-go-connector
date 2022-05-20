@@ -119,8 +119,8 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		mock.WithCertExpiry(time.Now().Add(-time.Hour)))
 	svc, cleanup, err := mock.NewSQLAdminService(
 		context.Background(),
-		mock.InstanceGetSuccess(inst, 2),
-		mock.CreateEphemeralSuccess(inst, 2),
+		mock.InstanceGetSuccess(inst, 3),
+		mock.CreateEphemeralSuccess(inst, 3),
 	)
 	if err != nil {
 		t.Fatalf("failed to init SQLAdminService: %v", err)
