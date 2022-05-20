@@ -1,5 +1,12 @@
 # Changelog
 
+### [0.3.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.3.1...v0.3.2) (2022-05-20)
+
+
+### Bug Fixes
+
+* adjust alignment for 32-bit arch ([#197](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/197)) ([86e96ad](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/86e96adf30cbc82ba170dc70ce4d0694a3b595ce))
+
 ### [0.3.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.3.0...v0.3.1) (2022-05-03)
 
 
