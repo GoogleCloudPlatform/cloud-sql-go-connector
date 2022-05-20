@@ -91,7 +91,6 @@ func (r *Request) matches(hR *http.Request) bool {
 		return false
 	}
 	if r.reqCt <= 0 {
-		fmt.Println("Too many requests sent")
 		return false
 	}
 	r.reqCt--

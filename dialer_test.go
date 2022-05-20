@@ -20,6 +20,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -117,10 +118,18 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 func TestDialWithConfigurationErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance",
 		mock.WithCertExpiry(time.Now().Add(-time.Hour)))
+	
+	// TODO: Windows tests send an extra request to the mock server. Figure out why.
+	var reqCt int
+	if runtime.GOOS == "windows" {
+		reqCt = 3
+	} else {
+		reqCt = 2
+	}
 	svc, cleanup, err := mock.NewSQLAdminService(
 		context.Background(),
-		mock.InstanceGetSuccess(inst, 3),
-		mock.CreateEphemeralSuccess(inst, 3),
+		mock.InstanceGetSuccess(inst, reqCt),
+		mock.CreateEphemeralSuccess(inst, reqCt),
 	)
 	if err != nil {
 		t.Fatalf("failed to init SQLAdminService: %v", err)
