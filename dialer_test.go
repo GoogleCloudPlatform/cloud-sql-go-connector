@@ -350,7 +350,7 @@ func TestWarmup(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to init SQLAdminService: %v", err)
 			}
-			d, err := NewDialer(context.Background())
+			d, err := NewDialer(context.Background(), WithTokenSource(mock.EmptyTokenSource{}))
 			if err != nil {
 				t.Fatalf("failed to init Dialer: %v", err)
 			}
@@ -420,7 +420,7 @@ func TestDialDialerOptsConflicts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to init SQLAdminService: %v", err)
 			}
-			d, err := NewDialer(context.Background(), test.dialerOpts...)
+			d, err := NewDialer(context.Background(), WithTokenSource(mock.EmptyTokenSource{}), WithOptions(test.dialerOpts...))
 			if err != nil {
 				t.Fatalf("failed to init Dialer: %v", err)
 			}
