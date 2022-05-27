@@ -29,6 +29,22 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
 
+func testSuccessfulDial(t *testing.T, d *Dialer, ctx context.Context, i string, opts ...DialOption) {
+	conn, err := d.Dial(ctx, i, opts...)
+	if err != nil {
+		t.Fatalf("expected Dial to succeed, but got error: %v", err)
+	}
+	defer conn.Close()
+
+	data, err := ioutil.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("expected ReadAll to succeed, got error %v", err)
+	}
+	if string(data) != "my-instance" {
+		t.Fatalf("expected known response from the server, but got %v", string(data))
+	}
+}
+
 func TestDialerCanConnectToInstance(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	svc, cleanup, err := mock.NewSQLAdminService(
@@ -56,19 +72,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	}
 	d.sqladmin = svc
 
-	conn, err := d.Dial(context.Background(), "my-project:my-region:my-instance", WithPublicIP())
-	if err != nil {
-		t.Fatalf("expected Dial to succeed, but got error: %v", err)
-	}
-	defer conn.Close()
-
-	data, err := ioutil.ReadAll(conn)
-	if err != nil {
-		t.Fatalf("expected ReadAll to succeed, got error %v", err)
-	}
-	if string(data) != "my-instance" {
-		t.Fatalf("expected known response from the server, but got %v", string(data))
-	}
+	testSuccessfulDial(t, d, context.Background(), "my-project:my-region:my-instance", WithPublicIP())
 }
 
 func TestDialWithAdminAPIErrors(t *testing.T) {
@@ -293,5 +297,145 @@ func TestDialerUserAgent(t *testing.T) {
 	want := "cloud-sql-go-connector/" + ver
 	if want != userAgent {
 		t.Errorf("embed version mismatched: want %q, got %q", want, userAgent)
+	}
+}
+
+func TestWarmup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
+	stop := mock.StartServerProxy(t, inst)
+	defer func() {
+		stop()
+	}()
+	tests := []struct {
+		desc          string
+		warmupOpts    []DialOption
+		dialOpts      []DialOption
+		expectedCalls []*mock.Request
+	}{
+		{
+			desc:       "warmup and dial are the same",
+			warmupOpts: []DialOption{WithDialIAMAuthN(true)},
+			dialOpts:   []DialOption{WithDialIAMAuthN(true)},
+			expectedCalls: []*mock.Request{
+				mock.InstanceGetSuccess(inst, 1),
+				mock.CreateEphemeralSuccess(inst, 1),
+			},
+		},
+		{
+			desc:       "warmup and dial are different",
+			warmupOpts: []DialOption{WithDialIAMAuthN(true)},
+			dialOpts:   []DialOption{WithDialIAMAuthN(false)},
+			expectedCalls: []*mock.Request{
+				mock.InstanceGetSuccess(inst, 2),
+				mock.CreateEphemeralSuccess(inst, 2),
+			},
+		},
+		{
+			desc:       "warmup and default dial are different",
+			warmupOpts: []DialOption{WithDialIAMAuthN(true)},
+			dialOpts:   []DialOption{},
+			expectedCalls: []*mock.Request{
+				mock.InstanceGetSuccess(inst, 2),
+				mock.CreateEphemeralSuccess(inst, 2),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			svc, cleanup, err := mock.NewSQLAdminService(ctx, test.expectedCalls...)
+			if err != nil {
+				t.Fatalf("failed to init SQLAdminService: %v", err)
+			}
+			d, err := NewDialer(context.Background())
+			if err != nil {
+				t.Fatalf("failed to init Dialer: %v", err)
+			}
+			d.sqladmin = svc
+			defer func() {
+				if err := cleanup(); err != nil {
+					t.Fatalf("%v", err)
+				}
+			}()
+
+			// Dial once with the "default" options
+			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance", test.warmupOpts...)
+
+			// Dial once with the "dial" options
+			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance", test.dialOpts...)
+		})
+	}
+}
+
+func TestDialDialerOptsConflicts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
+	stop := mock.StartServerProxy(t, inst)
+	defer func() {
+		stop()
+	}()
+	tests := []struct {
+		desc          string
+		dialerOpts    []Option
+		dialOpts      []DialOption
+		expectedCalls []*mock.Request
+	}{
+		{
+			desc:       "dialer opts set and dial uses default",
+			dialerOpts: []Option{WithIAMAuthN()},
+			dialOpts:   []DialOption{},
+			expectedCalls: []*mock.Request{
+				mock.InstanceGetSuccess(inst, 1),
+				mock.CreateEphemeralSuccess(inst, 1),
+			},
+		},
+		{
+			desc:       "dialer and dial opts are the same",
+			dialerOpts: []Option{WithIAMAuthN()},
+			dialOpts:   []DialOption{WithDialIAMAuthN(true)},
+			expectedCalls: []*mock.Request{
+				mock.InstanceGetSuccess(inst, 1),
+				mock.CreateEphemeralSuccess(inst, 1),
+			},
+		},
+		{
+			desc:       "dialer and dial opts are different",
+			dialerOpts: []Option{WithIAMAuthN()},
+			dialOpts:   []DialOption{WithDialIAMAuthN(false)},
+			expectedCalls: []*mock.Request{
+				mock.InstanceGetSuccess(inst, 2),
+				mock.CreateEphemeralSuccess(inst, 2),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			svc, cleanup, err := mock.NewSQLAdminService(ctx, test.expectedCalls...)
+			if err != nil {
+				t.Fatalf("failed to init SQLAdminService: %v", err)
+			}
+			d, err := NewDialer(context.Background(), test.dialerOpts...)
+			if err != nil {
+				t.Fatalf("failed to init Dialer: %v", err)
+			}
+			d.sqladmin = svc
+			defer func() {
+				if err := cleanup(); err != nil {
+					t.Fatalf("%v", err)
+				}
+			}()
+
+			// Dial once with the "default" options
+			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance")
+
+			// Dial once with the "dial" options
+			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance", test.dialOpts...)
+		})
 	}
 }

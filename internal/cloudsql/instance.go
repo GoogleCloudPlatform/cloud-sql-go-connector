@@ -172,8 +172,9 @@ func NewInstance(
 			ts,
 			dialerID,
 		),
-		ctx:    ctx,
-		cancel: cancel,
+		RefreshCfg: rCfg,
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 	// For the initial refresh operation, set cur = next so that connection requests block
 	// until the first refresh is complete.

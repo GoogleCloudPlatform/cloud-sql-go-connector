@@ -203,7 +203,7 @@ func WithPrivateIP() DialOption {
 
 // WithDialIAMAuthN allows you to enable or disable IAM Authentication for this
 // instance as descibed in the documentation for WithIAMAuthN. This value will
-// overwrite the Dialer-level configuration set with WithIAMAuthN.
+// overide the Dialer-level configuration set with WithIAMAuthN.
 //
 // WARNING: This DialOption can cause a new Refresh operation to be triggered.
 // Toggling this option on or off between Dials may caused increased API usage
