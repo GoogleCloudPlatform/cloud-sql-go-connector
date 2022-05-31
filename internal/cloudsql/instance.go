@@ -154,7 +154,7 @@ func NewInstance(
 	refreshTimeout time.Duration,
 	ts oauth2.TokenSource,
 	dialerID string,
-	rCfg RefreshCfg,
+	r RefreshCfg,
 ) (*Instance, error) {
 	cn, err := parseConnName(instance)
 	if err != nil {
@@ -172,7 +172,7 @@ func NewInstance(
 			ts,
 			dialerID,
 		),
-		RefreshCfg: rCfg,
+		RefreshCfg: r,
 		ctx:        ctx,
 		cancel:     cancel,
 	}
@@ -223,6 +223,7 @@ func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
 
 func (i *Instance) UpdateRefresh(cfg RefreshCfg) {
 	i.resultGuard.Lock()
+	defer i.resultGuard.Unlock()
 	// Cancel any pending refreshes
 	i.cur.Cancel()
 	i.next.Cancel()
@@ -231,7 +232,6 @@ func (i *Instance) UpdateRefresh(cfg RefreshCfg) {
 	// reschedule a new refresh immiediately
 	i.cur = i.scheduleRefresh(0)
 	i.next = i.cur
-	i.resultGuard.Unlock()
 }
 
 // ForceRefresh triggers an immediate refresh operation to be scheduled and used for future connection attempts.

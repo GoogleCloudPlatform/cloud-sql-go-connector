@@ -206,7 +206,7 @@ func WithPrivateIP() DialOption {
 // overide the Dialer-level configuration set with WithIAMAuthN.
 //
 // WARNING: This DialOption can cause a new Refresh operation to be triggered.
-// Toggling this option on or off between Dials may caused increased API usage
+// Toggling this option on or off between Dials may cause increased API usage
 // and/or delayed connection attempts.
 func WithDialIAMAuthN(b bool) DialOption {
 	return func(cfg *dialCfg) {

@@ -303,31 +303,31 @@ func (d *Dialer) Close() error {
 
 // instance is a helper function for returning the appropriate instance object in a threadsafe way.
 // It will create a new instance object, modify the existing one, or leave it unchanged as needed.
-func (d *Dialer) instance(connName string, rCfg *cloudsql.RefreshCfg) (*cloudsql.Instance, error) {
+func (d *Dialer) instance(connName string, r *cloudsql.RefreshCfg) (*cloudsql.Instance, error) {
 	// Check instance cache
 	d.lock.RLock()
 	i, ok := d.instances[connName]
 	d.lock.RUnlock()
-	// Check if the instance exists and that the refresh cfg is the same
-	if !ok || (rCfg != nil && *rCfg != i.RefreshCfg) {
+	// If the instance hasn't been creted yet or if the needed refreshCfg has changed
+	if !ok || (r != nil && *r != i.RefreshCfg) {
 		d.lock.Lock()
 		// Recheck to ensure instance wasn't created or changed between locks
 		i, ok = d.instances[connName]
 		if !ok {
 			// Create a new instance
-			if rCfg == nil {
-				rCfg = &d.defaultDialCfg.refreshCfg
+			if r == nil {
+				r = &d.defaultDialCfg.refreshCfg
 			}
 			var err error
-			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.iamTokenSource, d.dialerID, *rCfg)
+			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.iamTokenSource, d.dialerID, *r)
 			if err != nil {
 				d.lock.Unlock()
 				return nil, err
 			}
 			d.instances[connName] = i
-		} else if rCfg != nil && *rCfg != i.RefreshCfg {
+		} else if r != nil && *r != i.RefreshCfg {
 			// Update the instance with the new refresh cfg
-			i.UpdateRefresh(*rCfg)
+			i.UpdateRefresh(*r)
 		}
 		d.lock.Unlock()
 	}

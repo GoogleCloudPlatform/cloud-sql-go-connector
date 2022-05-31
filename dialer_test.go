@@ -306,9 +306,7 @@ func TestWarmup(t *testing.T) {
 
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	stop := mock.StartServerProxy(t, inst)
-	defer func() {
-		stop()
-	}()
+	defer stop()
 	tests := []struct {
 		desc          string
 		warmupOpts    []DialOption
@@ -361,9 +359,16 @@ func TestWarmup(t *testing.T) {
 				}
 			}()
 
-			// Dial once with the "default" options
-			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance", test.warmupOpts...)
-
+			// Warmup once with the "default" options
+			err = d.Warmup(ctx, "my-project:my-region:my-instance", test.warmupOpts...)
+			if err != nil {
+				t.Fatalf("Warmup failed: %v", err)
+			}
+			// Call EngineVersion to make sure we block until both API calls are completed.
+			_, err = d.EngineVersion(ctx, "my-project:my-region:my-instance")
+			if err != nil {
+				t.Fatalf("Warmup failed: %v", err)
+			}
 			// Dial once with the "dial" options
 			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance", test.dialOpts...)
 		})
@@ -376,9 +381,7 @@ func TestDialDialerOptsConflicts(t *testing.T) {
 
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	stop := mock.StartServerProxy(t, inst)
-	defer func() {
-		stop()
-	}()
+	defer stop()
 	tests := []struct {
 		desc          string
 		dialerOpts    []Option
