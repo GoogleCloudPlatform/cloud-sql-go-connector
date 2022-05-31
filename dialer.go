@@ -308,7 +308,7 @@ func (d *Dialer) instance(connName string, r *cloudsql.RefreshCfg) (*cloudsql.In
 	d.lock.RLock()
 	i, ok := d.instances[connName]
 	d.lock.RUnlock()
-	// If the instance hasn't been creted yet or if the needed refreshCfg has changed
+	// If the instance hasn't been creted yet or if the refreshCfg has changed
 	if !ok || (r != nil && *r != i.RefreshCfg) {
 		d.lock.Lock()
 		// Recheck to ensure instance wasn't created or changed between locks
