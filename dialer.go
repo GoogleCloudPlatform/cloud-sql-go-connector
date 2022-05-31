@@ -258,7 +258,7 @@ func (d *Dialer) Warmup(ctx context.Context, instance string, opts ...DialOption
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	_, err := d.instance(instance, &d.defaultDialCfg.refreshCfg)
+	_, err := d.instance(instance, &cfg.refreshCfg)
 	return err
 }
 
