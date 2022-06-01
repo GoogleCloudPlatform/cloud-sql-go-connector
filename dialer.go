@@ -117,16 +117,13 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// If callers have not provided a token source, either explicitly with
 	// WithTokenSource or implicitly with WithCredentialsJSON etc, then use the
 	// default token source.
-	if cfg.useIAMAuthN && cfg.tokenSource == nil {
+	if cfg.tokenSource == nil {
 		ts, err := google.DefaultTokenSource(ctx, sqladmin.SqlserviceAdminScope)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create token source: %v", err)
 		}
 		cfg.tokenSource = ts
-	}
-	// If IAM Authn is not explicitly enabled, remove the token source.
-	if !cfg.useIAMAuthN {
-		cfg.tokenSource = nil
+		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithTokenSource(ts))
 	}
 
 	if cfg.rsaKey == nil {
@@ -145,6 +142,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	dialCfg := dialCfg{
 		ipType:       cloudsql.PublicIP,
 		tcpKeepAlive: defaultTCPKeepAlive,
+		refreshCfg: cloudsql.RefreshCfg{
+			UseIAMAuthN: cfg.useIAMAuthN,
+		},
 	}
 	for _, opt := range cfg.dialOpts {
 		opt(&dialCfg)
@@ -186,7 +186,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	i, err := d.instance(instance)
+	i, err := d.instance(instance, &cfg.refreshCfg)
 	if err != nil {
 		endInfo(err)
 		return nil, err
@@ -240,7 +240,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 // corespond to one of the following types for the instance:
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
 func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, error) {
-	i, err := d.instance(instance)
+	i, err := d.instance(instance, nil)
 	if err != nil {
 		return "", err
 	}
@@ -254,7 +254,11 @@ func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, er
 // Warmup starts the background refresh neccesary to connect to the instance. Use Warmup
 // to start the refresh process early if you don't know when you'll need to call "Dial".
 func (d *Dialer) Warmup(ctx context.Context, instance string, opts ...DialOption) error {
-	_, err := d.instance(instance)
+	cfg := d.defaultDialCfg
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	_, err := d.instance(instance, &cfg.refreshCfg)
 	return err
 }
 
@@ -297,24 +301,33 @@ func (d *Dialer) Close() error {
 	return nil
 }
 
-func (d *Dialer) instance(connName string) (*cloudsql.Instance, error) {
+// instance is a helper function for returning the appropriate instance object in a threadsafe way.
+// It will create a new instance object, modify the existing one, or leave it unchanged as needed.
+func (d *Dialer) instance(connName string, r *cloudsql.RefreshCfg) (*cloudsql.Instance, error) {
 	// Check instance cache
 	d.lock.RLock()
 	i, ok := d.instances[connName]
 	d.lock.RUnlock()
-	if !ok {
+	// If the instance hasn't been creted yet or if the refreshCfg has changed
+	if !ok || (r != nil && *r != i.RefreshCfg) {
 		d.lock.Lock()
-		// Recheck to ensure instance wasn't created between locks
+		// Recheck to ensure instance wasn't created or changed between locks
 		i, ok = d.instances[connName]
 		if !ok {
 			// Create a new instance
+			if r == nil {
+				r = &d.defaultDialCfg.refreshCfg
+			}
 			var err error
-			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.iamTokenSource, d.dialerID)
+			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.iamTokenSource, d.dialerID, *r)
 			if err != nil {
 				d.lock.Unlock()
 				return nil, err
 			}
 			d.instances[connName] = i
+		} else if r != nil && *r != i.RefreshCfg {
+			// Update the instance with the new refresh cfg
+			i.UpdateRefresh(*r)
 		}
 		d.lock.Unlock()
 	}
