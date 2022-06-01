@@ -91,7 +91,7 @@ func (r *refreshOperation) Cancel() bool {
 	return r.timer.Stop()
 }
 
-// Wait blocks until the refreshResult attempt is completed.
+// Wait blocks until the refreshOperation attempt is completed.
 func (r *refreshOperation) Wait(ctx context.Context) error {
 	select {
 	case <-r.ready:
@@ -115,6 +115,11 @@ func (r *refreshOperation) IsValid() bool {
 	}
 }
 
+// RefreshCfg is a of attributes that trigger new refresh operations.
+type RefreshCfg struct {
+	UseIAMAuthN bool
+}
+
 // Instance manages the information used to connect to the Cloud SQL instance by periodically calling
 // the Cloud SQL Admin API. It automatically refreshes the required information approximately 5 minutes
 // before the previous certificate expires (every 55 minutes).
@@ -124,13 +129,14 @@ type Instance struct {
 
 	connName
 	key *rsa.PrivateKey
-	r   refresher
 
 	resultGuard sync.RWMutex
-	// cur represents the current refreshResult that will be used to create connections. If a valid complete
-	// refreshResult isn't available it's possible for cur to be equal to next.
+	r           refresher
+	RefreshCfg  RefreshCfg
+	// cur represents the current refreshOperation that will be used to create connections. If a valid complete
+	// refreshOperation isn't available it's possible for cur to be equal to next.
 	cur *refreshOperation
-	// next represents a future or ongoing refreshResult. Once complete, it will replace cur and schedule a
+	// next represents a future or ongoing refreshOperation. Once complete, it will replace cur and schedule a
 	// replacement to occur.
 	next *refreshOperation
 
@@ -148,6 +154,7 @@ func NewInstance(
 	refreshTimeout time.Duration,
 	ts oauth2.TokenSource,
 	dialerID string,
+	r RefreshCfg,
 ) (*Instance, error) {
 	cn, err := parseConnName(instance)
 	if err != nil {
@@ -165,8 +172,9 @@ func NewInstance(
 			ts,
 			dialerID,
 		),
-		ctx:    ctx,
-		cancel: cancel,
+		RefreshCfg: r,
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 	// For the initial refresh operation, set cur = next so that connection requests block
 	// until the first refresh is complete.
@@ -213,6 +221,19 @@ func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
 	return res.md.version, nil
 }
 
+func (i *Instance) UpdateRefresh(cfg RefreshCfg) {
+	i.resultGuard.Lock()
+	defer i.resultGuard.Unlock()
+	// Cancel any pending refreshes
+	i.cur.Cancel()
+	i.next.Cancel()
+	// update the refreshcfg as needed
+	i.RefreshCfg = cfg
+	// reschedule a new refresh immiediately
+	i.cur = i.scheduleRefresh(0)
+	i.next = i.cur
+}
+
 // ForceRefresh triggers an immediate refresh operation to be scheduled and used for future connection attempts.
 func (i *Instance) ForceRefresh() {
 	i.resultGuard.Lock()
@@ -237,13 +258,13 @@ func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 	return res, nil
 }
 
-// scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshResult
+// scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshOperation
 // can be used to either Cancel or Wait for the operations result.
 func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 	res := &refreshOperation{}
 	res.ready = make(chan struct{})
 	res.timer = time.AfterFunc(d, func() {
-		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key)
+		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key, i.RefreshCfg.UseIAMAuthN)
 		close(res.ready)
 
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh

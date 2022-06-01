@@ -167,6 +167,8 @@ type DialOption func(d *dialCfg)
 type dialCfg struct {
 	tcpKeepAlive time.Duration
 	ipType       string
+
+	refreshCfg cloudsql.RefreshCfg
 }
 
 // DialOptions turns a list of DialOption instances into an DialOption.
@@ -196,5 +198,18 @@ func WithPublicIP() DialOption {
 func WithPrivateIP() DialOption {
 	return func(cfg *dialCfg) {
 		cfg.ipType = cloudsql.PrivateIP
+	}
+}
+
+// WithDialIAMAuthN allows you to enable or disable IAM Authentication for this
+// instance as descibed in the documentation for WithIAMAuthN. This value will
+// overide the Dialer-level configuration set with WithIAMAuthN.
+//
+// WARNING: This DialOption can cause a new Refresh operation to be triggered.
+// Toggling this option on or off between Dials may cause increased API usage
+// and/or delayed connection attempts.
+func WithDialIAMAuthN(b bool) DialOption {
+	return func(cfg *dialCfg) {
+		cfg.refreshCfg.UseIAMAuthN = b
 	}
 }

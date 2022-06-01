@@ -36,7 +36,7 @@ type EmptyTokenSource struct{}
 
 // Token provides an empty oauth2.Token.
 func (EmptyTokenSource) Token() (*oauth2.Token, error) {
-	return &oauth2.Token{}, nil
+	return &oauth2.Token{Expiry: time.Now().Add(time.Hour)}, nil
 }
 
 // FakeCSQLInstance represents settings for a specific Cloud SQL instance.
