@@ -143,6 +143,12 @@ func (f *fakeTokenSource) Token() (*oauth2.Token, error) {
 	return resp.tok, resp.err
 }
 
+func (f *fakeTokenSource) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ct
+}
+
 func TestRefreshAdjustsCertExpiry(t *testing.T) {
 	certExpiry := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
 	t1 := time.Now().Add(59 * time.Minute).UTC().Truncate(time.Second)
@@ -236,8 +242,8 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected get failed error, got = %v", err)
 			}
-			if ts.ct != tc.wantCount {
-				t.Fatalf("expected fake token source to be called %v time, got = %v", tc.wantCount, ts.ct)
+			if count := ts.count(); count != tc.wantCount {
+				t.Fatalf("expected fake token source to be called %v time, got = %v", tc.wantCount, count)
 			}
 		})
 	}
