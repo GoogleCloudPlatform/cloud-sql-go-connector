@@ -20,6 +20,7 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	_ "embed"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -285,7 +286,10 @@ type instrumentedConn struct {
 // SyscallConn supports a connection check in the MySQL driver by delegating to
 // the underlying non-TLS net.Conn.
 func (i *instrumentedConn) SyscallConn() (syscall.RawConn, error) {
-	sconn := i.rawConn.(syscall.Conn)
+	sconn, ok := i.rawConn.(syscall.Conn)
+	if !ok {
+		return nil, errors.New("connection is not a syscall.Conn")
+	}
 	return sconn.SyscallConn()
 }
 
