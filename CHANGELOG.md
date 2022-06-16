@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.3.1...v0.4.0) (2022-06-07)
+
+
+### Features
+
+* add DialOption for IAM DB Authentication ([#171](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/171)) ([c103acc](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/c103acc6b49f94a1a733dc0e5c8b41890172dd8b))
+* Add Warmup function for starting background refresh ([#163](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/163)) ([2459f92](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/2459f92911eeca46102f56966c8cefa7cee8a0ae))
+
+
+### Bug Fixes
+
+* adjust alignment for 32-bit arch ([#197](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/197)) ([86e96ad](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/86e96adf30cbc82ba170dc70ce4d0694a3b595ce))
+
 ### [0.3.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.3.0...v0.3.1) (2022-05-03)
 
 

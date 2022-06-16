@@ -20,11 +20,13 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	_ "embed"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
@@ -230,7 +232,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
 
-	return newInstrumentedConn(tlsConn, func() {
+	return newInstrumentedConn(conn, tlsConn, func() {
 		n := atomic.AddUint64(&i.OpenConns, ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, i.String())
 	}), nil
@@ -264,9 +266,10 @@ func (d *Dialer) Warmup(ctx context.Context, instance string, opts ...DialOption
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
 // decrement the number of open connects and record the result.
-func newInstrumentedConn(conn net.Conn, closeFunc func()) *instrumentedConn {
+func newInstrumentedConn(rawConn, conn net.Conn, closeFunc func()) *instrumentedConn {
 	return &instrumentedConn{
 		Conn:      conn,
+		rawConn:   rawConn,
 		closeFunc: closeFunc,
 	}
 }
@@ -275,7 +278,19 @@ func newInstrumentedConn(conn net.Conn, closeFunc func()) *instrumentedConn {
 // is closed.
 type instrumentedConn struct {
 	net.Conn
+	// rawConn is the underlying net.Conn without TLS
+	rawConn   net.Conn
 	closeFunc func()
+}
+
+// SyscallConn supports a connection check in the MySQL driver by delegating to
+// the underlying non-TLS net.Conn.
+func (i *instrumentedConn) SyscallConn() (syscall.RawConn, error) {
+	sconn, ok := i.rawConn.(syscall.Conn)
+	if !ok {
+		return nil, errors.New("connection is not a syscall.Conn")
+	}
+	return sconn.SyscallConn()
 }
 
 // Close delegates to the underylying net.Conn interface and reports the close
