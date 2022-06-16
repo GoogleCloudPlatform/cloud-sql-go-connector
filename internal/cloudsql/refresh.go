@@ -21,6 +21,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"log"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
@@ -48,10 +49,12 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst connName)
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.FetchMetadata")
 	defer func() { end(err) }()
+	log.Println("[start] Connect.Get")
 	db, err := client.Connect.Get(inst.project, inst.name).Context(ctx).Do()
 	if err != nil {
 		return metadata{}, errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
+	log.Println("[end  ] Connect.Get")
 	// validate the instance is supported for authenticated connections
 	if db.Region != inst.region {
 		msg := fmt.Sprintf("provided region was mismatched - got %s, want %s", inst.region, db.Region)
@@ -158,6 +161,7 @@ func fetchEphemeralCert(
 		}
 		req.AccessToken = tok.AccessToken
 	}
+	log.Println("[start] Connect.GenerateEphemeralCert")
 	resp, err := client.Connect.GenerateEphemeralCert(inst.project, inst.name, &req).Context(ctx).Do()
 	if err != nil {
 		return tls.Certificate{}, errtype.NewRefreshError(
@@ -166,6 +170,7 @@ func fetchEphemeralCert(
 			err,
 		)
 	}
+	log.Println("[end  ] Connect.GenerateEphemeralCert")
 
 	// parse the client cert
 	b, _ := pem.Decode([]byte(resp.EphemeralCert.Cert))
