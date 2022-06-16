@@ -122,10 +122,14 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance",
 		mock.WithCertExpiry(time.Now().Add(-time.Hour)))
 
-	svc, cleanup, err := mock.NewSQLAdminService(
+	// Don't use the cleanup function. Because this test is about error
+	// cases, API requests (started in two separate goroutines) will
+	// sometimes succeed and clear the mock, and sometimes not.
+	// This test is about error return values from Dial, not API interaction.
+	svc, _, err := mock.NewSQLAdminService(
 		context.Background(),
-		mock.InstanceGetSuccess(inst, 2),
-		mock.CreateEphemeralSuccess(inst, 2),
+		mock.InstanceGetSuccess(inst, 3),
+		mock.CreateEphemeralSuccess(inst, 3),
 	)
 	if err != nil {
 		t.Fatalf("failed to init SQLAdminService: %v", err)
@@ -138,37 +142,26 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
 	d.sqladmin = svc
-	defer func() {
-		if err := cleanup(); err != nil {
-			t.Fatalf("%v", err)
-		}
-	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	_, err = d.Dial(ctx, "my-project:my-region:my-instance", WithPrivateIP())
+	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance", WithPrivateIP())
 	var wantErr1 *errtype.ConfigError
 	if !errors.As(err, &wantErr1) {
 		t.Fatalf("when IP type is invalid, want = %T, got = %v", wantErr1, err)
 	}
-	cancel() // stop any background goroutines
 
-	ctx, cancel = context.WithCancel(context.Background())
-	_, err = d.Dial(ctx, "my-project:my-region:my-instance")
+	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")
 	var wantErr2 *errtype.DialError
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when server proxy socket is unavailable, want = %T, got = %v", wantErr2, err)
 	}
-	cancel() // stop any background goroutines
 
 	stop := mock.StartServerProxy(t, inst)
 	defer stop()
 
-	ctx, cancel = context.WithCancel(context.Background())
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when TLS handshake fails, want = %T, got = %v", wantErr2, err)
 	}
-	cancel() // stop any background goroutines
 }
 
 var fakeServiceAccount = []byte(`{
