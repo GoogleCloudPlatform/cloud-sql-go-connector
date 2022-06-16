@@ -144,25 +144,31 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		}
 	}()
 
-	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance", WithPrivateIP())
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err = d.Dial(ctx, "my-project:my-region:my-instance", WithPrivateIP())
 	var wantErr1 *errtype.ConfigError
 	if !errors.As(err, &wantErr1) {
 		t.Fatalf("when IP type is invalid, want = %T, got = %v", wantErr1, err)
 	}
+	cancel() // stop any background goroutines
 
-	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")
+	ctx, cancel = context.WithCancel(context.Background())
+	_, err = d.Dial(ctx, "my-project:my-region:my-instance")
 	var wantErr2 *errtype.DialError
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when server proxy socket is unavailable, want = %T, got = %v", wantErr2, err)
 	}
+	cancel() // stop any background goroutines
 
 	stop := mock.StartServerProxy(t, inst)
 	defer stop()
 
+	ctx, cancel = context.WithCancel(context.Background())
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")
 	if !errors.As(err, &wantErr2) {
 		t.Fatalf("when TLS handshake fails, want = %T, got = %v", wantErr2, err)
 	}
+	cancel() // stop any background goroutines
 }
 
 var fakeServiceAccount = []byte(`{
