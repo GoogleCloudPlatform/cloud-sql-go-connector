@@ -20,7 +20,6 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
-	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -166,17 +165,14 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance",
 		mock.WithCertExpiry(time.Now().Add(-time.Hour)))
 
-	// TODO: Windows tests send an extra request to the mock server. Figure out why.
-	var reqCt int
-	if runtime.GOOS == "windows" {
-		reqCt = 3
-	} else {
-		reqCt = 2
-	}
-	svc, cleanup, err := mock.NewSQLAdminService(
+	// Don't use the cleanup function. Because this test is about error
+	// cases, API requests (started in two separate goroutines) will
+	// sometimes succeed and clear the mock, and sometimes not.
+	// This test is about error return values from Dial, not API interaction.
+	svc, _, err := mock.NewSQLAdminService(
 		context.Background(),
-		mock.InstanceGetSuccess(inst, reqCt),
-		mock.CreateEphemeralSuccess(inst, reqCt),
+		mock.InstanceGetSuccess(inst, 3),
+		mock.CreateEphemeralSuccess(inst, 3),
 	)
 	if err != nil {
 		t.Fatalf("failed to init SQLAdminService: %v", err)
@@ -189,11 +185,6 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
 	}
 	d.sqladmin = svc
-	defer func() {
-		if err := cleanup(); err != nil {
-			t.Fatalf("%v", err)
-		}
-	}()
 
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance", WithPrivateIP())
 	var wantErr1 *errtype.ConfigError
