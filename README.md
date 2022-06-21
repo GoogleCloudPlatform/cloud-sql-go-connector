@@ -2,8 +2,13 @@
 *Warning*: This project is in Public Preview, and may contain breaking changes
 before it becomes Generally Available.
 
-![CI](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/actions/workflows/tests.yaml/badge.svg)
-[![Go Reference](https://pkg.go.dev/badge/cloud.google.com/go/cloudsqlconn.svg)](https://pkg.go.dev/cloud.google.com/go/cloudsqlconn)
+[![CI][ci-badge]][ci-build]
+[![Go Reference][pkg-badge]][pkg-docs]
+
+[ci-badge]: https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/actions/workflows/tests.yaml/badge.svg?event=push
+[ci-build]: https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/actions/workflows/tests.yaml?query=event%3Apush+branch%3Amain
+[pkg-badge]: https://pkg.go.dev/badge/cloud.google.com/go/cloudsqlconn.svg
+[pkg-docs]: https://pkg.go.dev/cloud.google.com/go/cloudsqlconn
 
 The _Cloud SQL Go Connector_ is a Cloud SQL connector designed for use with the
 Go language. Using a Cloud SQL connector provides the following benefits:
