@@ -139,6 +139,13 @@ func WithAdminAPIEndpoint(url string) Option {
 	}
 }
 
+// WithQuotaProject returns an Option that specifies the project used for quota and billing purposes.
+func WithQuotaProject(p string) Option {
+	return func(cfg *dialerConfig) {
+		cfg.sqladminOpts = append(cfg.sqladminOpts, apiopt.WithQuotaProject(p))
+	}
+}
+
 // WithDialFunc configures the function used to connect to the address on the
 // named network. This option is generally unnecessary except for advanced
 // use-cases.
