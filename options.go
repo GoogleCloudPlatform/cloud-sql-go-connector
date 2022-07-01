@@ -139,8 +139,7 @@ func WithAdminAPIEndpoint(url string) Option {
 	}
 }
 
-// WithQuotaProject allows you to change the gcloud project used to track the
-// api request quota.
+// WithQuotaProject returns an Option that specifies the project used for quota and billing purposes.
 func WithQuotaProject(p string) Option {
 	return func(cfg *dialerConfig) {
 		cfg.sqladminOpts = append(cfg.sqladminOpts, apiopt.WithQuotaProject(p))
