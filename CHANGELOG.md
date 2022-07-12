@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.4.0...v0.5.0) (2022-07-12)
+
+
+### Features
+
+* expose the WithQuotaProject dialer option ([#237](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/237)) ([bda8917](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/bda891776d5d44d49ed3e4a268f27bd10a23427e))
+
+
+### Bug Fixes
+
+* support MySQL driver’s conn check. ([#226](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/226)) ([4b48e3b](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/4b48e3bfe7a5bd8c398592f21eb25ac43644e123))
+
 ## [0.4.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.3.1...v0.4.0) (2022-06-07)
 
 
