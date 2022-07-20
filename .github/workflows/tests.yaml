@@ -26,8 +26,14 @@ jobs:
     strategy:
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
+        goarch: ["", "386"]
         go-version: [1.16, 1.17, 1.18]
+        exclude:
+          - os: macos-latest
+            goarch: "386"
       fail-fast: false
+    env:
+      GOARCH: ${{ matrix.goarch }}
     steps:
       - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v3
@@ -36,24 +42,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
       - name: Run tests
+        if: ${{ matrix.goarch == "" }}
         run: |
           go test -v -race -cover -short ./...
-  build-32bit:
-    name: "unit tests (32-bit)"
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest]
-      fail-fast: false
-    env:
-      GOARCH: 386 
-    steps:
-      - name: Setup Go 1.18
-        uses: actions/setup-go@v3
-        with:
-          go-version: 1.18
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Run tests
+      - name: Run tests (386)
+        # 386 archs don't support race detector
+        if: ${{ matrix.goarch == "386" }}
         run: |
           go test -v -cover -short ./...
