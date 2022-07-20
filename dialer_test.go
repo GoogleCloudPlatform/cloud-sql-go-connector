@@ -119,17 +119,12 @@ func TestDialerConnectionSupportsSyscalls(t *testing.T) {
 
 func TestDialWithAdminAPIErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
-	svc, cleanup, err := mock.NewSQLAdminService(context.Background())
+	svc, _, err := mock.NewSQLAdminService(context.Background())
 	if err != nil {
 		t.Fatalf("failed to init SQLAdminService: %v", err)
 	}
 	stop := mock.StartServerProxy(t, inst)
-	defer func() {
-		stop()
-		if err := cleanup(); err != nil {
-			t.Fatalf("%v", err)
-		}
-	}()
+	defer stop()
 
 	d, err := NewDialer(context.Background(),
 		WithDefaultDialOptions(WithPublicIP()),
