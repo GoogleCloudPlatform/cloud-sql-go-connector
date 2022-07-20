@@ -58,7 +58,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	stop := mock.StartServerProxy(t, inst)
 	defer func() {
 		stop()
-		if err := cleanup(); err != nil {
+		if err := cleanup(true); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()
@@ -88,7 +88,7 @@ func TestDialerConnectionSupportsSyscalls(t *testing.T) {
 	stop := mock.StartServerProxy(t, inst)
 	defer func() {
 		stop()
-		if err := cleanup(); err != nil {
+		if err := cleanup(true); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()
@@ -119,12 +119,15 @@ func TestDialerConnectionSupportsSyscalls(t *testing.T) {
 
 func TestDialWithAdminAPIErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
-	svc, _, err := mock.NewSQLAdminService(context.Background())
+	svc, cleanup, err := mock.NewSQLAdminService(context.Background())
 	if err != nil {
 		t.Fatalf("failed to init SQLAdminService: %v", err)
 	}
 	stop := mock.StartServerProxy(t, inst)
-	defer stop()
+	defer func() {
+		stop()
+		_ = cleanup(false)
+	}()
 
 	d, err := NewDialer(context.Background(),
 		WithDefaultDialOptions(WithPublicIP()),
@@ -160,11 +163,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance",
 		mock.WithCertExpiry(time.Now().Add(-time.Hour)))
 
-	// Don't use the cleanup function. Because this test is about error
-	// cases, API requests (started in two separate goroutines) will
-	// sometimes succeed and clear the mock, and sometimes not.
-	// This test is about error return values from Dial, not API interaction.
-	svc, _, err := mock.NewSQLAdminService(
+	svc, cleanup, err := mock.NewSQLAdminService(
 		context.Background(),
 		mock.InstanceGetSuccess(inst, 3),
 		mock.CreateEphemeralSuccess(inst, 3),
@@ -172,6 +171,8 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init SQLAdminService: %v", err)
 	}
+	defer cleanup(false)
+
 	d, err := NewDialer(context.Background(),
 		WithDefaultDialOptions(WithPublicIP()),
 		WithTokenSource(mock.EmptyTokenSource{}),
@@ -267,7 +268,7 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 	}
 	d.sqladmin = svc
 	defer func() {
-		if err := cleanup(); err != nil {
+		if err := cleanup(true); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()
@@ -302,7 +303,7 @@ func TestDialerEngineVersion(t *testing.T) {
 		}
 		d.sqladmin = svc
 		defer func() {
-			if err := cleanup(); err != nil {
+			if err := cleanup(true); err != nil {
 				t.Fatalf("%v", err)
 			}
 		}()
@@ -383,7 +384,7 @@ func TestWarmup(t *testing.T) {
 			}
 			d.sqladmin = svc
 			defer func() {
-				if err := cleanup(); err != nil {
+				if err := cleanup(true); err != nil {
 					t.Fatalf("%v", err)
 				}
 			}()
@@ -458,7 +459,7 @@ func TestDialDialerOptsConflicts(t *testing.T) {
 			}
 			d.sqladmin = svc
 			defer func() {
-				if err := cleanup(); err != nil {
+				if err := cleanup(true); err != nil {
 					t.Fatalf("%v", err)
 				}
 			}()

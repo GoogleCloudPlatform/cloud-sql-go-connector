@@ -54,7 +54,7 @@ func TestRefresh(t *testing.T) {
 		t.Fatalf("failed to create test SQL admin service: %s", err)
 	}
 	defer func() {
-		if err := cleanup(); err != nil {
+		if err := cleanup(true); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()
@@ -98,7 +98,7 @@ func TestRefreshFailsFast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create test SQL admin service: %s", err)
 	}
-	defer cleanup()
+	defer cleanup(true)
 
 	r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
 	_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
@@ -186,7 +186,7 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create test SQL admin service: %s", err)
 	}
-	defer cleanup()
+	defer cleanup(true)
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
@@ -232,7 +232,7 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create test SQL admin service: %s", err)
 	}
-	defer cleanup()
+	defer cleanup(true)
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
@@ -329,7 +329,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to create test SQL admin service: %s", err)
 			}
-			defer cleanup()
+			defer cleanup(true)
 
 			r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
 			_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
@@ -395,7 +395,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create test SQL admin service: %s", err)
 		}
-		defer cleanup()
+		defer cleanup(true)
 
 		r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
 		_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
@@ -422,7 +422,7 @@ func TestRefreshBuildsTLSConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create test SQL admin service: %s", err)
 	}
-	defer cleanup()
+	defer cleanup(true)
 
 	r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
 	_, tlsCfg, _, err := r.performRefresh(context.Background(), cn, RSAKey, false)

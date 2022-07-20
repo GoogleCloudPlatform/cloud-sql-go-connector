@@ -36,7 +36,7 @@ import (
 // respond to HTTP requests defined, or return a 5xx server error for unexpected ones.
 // The cleanup function will close the server, and return an error if any expected calls
 // weren't received.
-func httpClient(requests ...*Request) (*http.Client, string, func() error) {
+func httpClient(requests ...*Request) (*http.Client, string, func(bool) error) {
 	// Create a TLS Server that responses to the requests defined
 	s := httptest.NewTLSServer(http.HandlerFunc(
 		func(resp http.ResponseWriter, req *http.Request) {
@@ -53,8 +53,11 @@ func httpClient(requests ...*Request) (*http.Client, string, func() error) {
 		},
 	))
 	// cleanup stops the test server and checks for uncalled requests
-	cleanup := func() error {
+	cleanup := func(verify bool) error {
 		s.Close()
+		if !verify {
+			return nil
+		}
 		for i, e := range requests {
 			if e.reqCt > 0 {
 				return fmt.Errorf("%d calls left for specified call in pos %d: %v", e.reqCt, i, e)
@@ -210,7 +213,7 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 // backend. Callers should use the cleanup function to close down the server. If
 // the cleanup function returns an error, a caller has not exercised all the
 // registered requests.
-func NewSQLAdminService(ctx context.Context, reqs ...*Request) (*sqladmin.Service, func() error, error) {
+func NewSQLAdminService(ctx context.Context, reqs ...*Request) (*sqladmin.Service, func(bool) error, error) {
 	mc, url, cleanup := httpClient(reqs...)
 	client, err := sqladmin.NewService(
 		ctx,
