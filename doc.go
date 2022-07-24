@@ -14,4 +14,4 @@
 
 // Package cloudsqlconn contains methods for creating secure, authorized
 // connections to a Cloud SQL instance.
-package cloudsqlconn // import "cloud.google.com/go/cloudsqlconn
+package cloudsqlconn // import "cloud.google.com/go/cloudsqlconn"
