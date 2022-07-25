@@ -58,7 +58,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	stop := mock.StartServerProxy(t, inst)
 	defer func() {
 		stop()
-		if err := cleanup(true); err != nil {
+		if err := cleanup(); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()
@@ -88,7 +88,7 @@ func TestDialerConnectionSupportsSyscalls(t *testing.T) {
 	stop := mock.StartServerProxy(t, inst)
 	defer func() {
 		stop()
-		if err := cleanup(true); err != nil {
+		if err := cleanup(); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()
@@ -126,7 +126,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	stop := mock.StartServerProxy(t, inst)
 	defer func() {
 		stop()
-		_ = cleanup(false)
+		cleanup()
 	}()
 
 	d, err := NewDialer(context.Background(),
@@ -171,7 +171,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init SQLAdminService: %v", err)
 	}
-	defer cleanup(false)
+	defer cleanup()
 
 	d, err := NewDialer(context.Background(),
 		WithDefaultDialOptions(WithPublicIP()),
@@ -268,7 +268,7 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 	}
 	d.sqladmin = svc
 	defer func() {
-		if err := cleanup(true); err != nil {
+		if err := cleanup(); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()
@@ -303,7 +303,7 @@ func TestDialerEngineVersion(t *testing.T) {
 		}
 		d.sqladmin = svc
 		defer func() {
-			if err := cleanup(true); err != nil {
+			if err := cleanup(); err != nil {
 				t.Fatalf("%v", err)
 			}
 		}()
@@ -384,7 +384,7 @@ func TestWarmup(t *testing.T) {
 			}
 			d.sqladmin = svc
 			defer func() {
-				if err := cleanup(true); err != nil {
+				if err := cleanup(); err != nil {
 					t.Fatalf("%v", err)
 				}
 			}()
@@ -459,7 +459,7 @@ func TestDialDialerOptsConflicts(t *testing.T) {
 			}
 			d.sqladmin = svc
 			defer func() {
-				if err := cleanup(true); err != nil {
+				if err := cleanup(); err != nil {
 					t.Fatalf("%v", err)
 				}
 			}()

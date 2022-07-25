@@ -111,7 +111,7 @@ func TestDialerWithMetrics(t *testing.T) {
 	stop := mock.StartServerProxy(t, inst)
 	defer func() {
 		stop()
-		if err := cleanup(true); err != nil {
+		if err := cleanup(); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()

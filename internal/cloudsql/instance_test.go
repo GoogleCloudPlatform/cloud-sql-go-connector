@@ -85,7 +85,7 @@ func TestInstanceEngineVersion(t *testing.T) {
 			t.Fatalf("%s", err)
 		}
 		defer func() {
-			if err := cleanup(true); err != nil {
+			if err := cleanup(); err != nil {
 				t.Fatalf("%v", err)
 			}
 		}()
@@ -118,7 +118,7 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("%s", err)
 	}
 	defer func() {
-		if err := cleanup(true); err != nil {
+		if err := cleanup(); err != nil {
 			t.Fatalf("%v", err)
 		}
 	}()
@@ -156,7 +156,7 @@ func TestConnectInfoErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
-	defer cleanup(true)
+	defer cleanup()
 
 	// Use a timeout that should fail instantly
 	im, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 0, nil, "", RefreshCfg{})
@@ -184,7 +184,7 @@ func TestClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
-	defer cleanup(true)
+	defer cleanup()
 
 	// Set up an instance and then close it immediately
 	im, err := NewInstance("my-proj:my-region:my-inst", client, RSAKey, 30, nil, "", RefreshCfg{})
