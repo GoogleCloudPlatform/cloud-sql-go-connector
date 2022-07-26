@@ -126,7 +126,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	stop := mock.StartServerProxy(t, inst)
 	defer func() {
 		stop()
-		cleanup()
+		_ = cleanup()
 	}()
 
 	d, err := NewDialer(context.Background(),
