@@ -43,10 +43,11 @@ func (EmptyTokenSource) Token() (*oauth2.Token, error) {
 //
 // Use NewFakeCSQLInstance to instantiate.
 type FakeCSQLInstance struct {
-	project   string
-	region    string
-	name      string
-	dbVersion string
+	project    string
+	region     string
+	name       string
+	dbVersion  string
+	serverName string
 	// ipAddrs is a map of IP type (PUBLIC or PRIVATE) to IP address.
 	ipAddrs      map[string]string
 	backendType  string
@@ -78,6 +79,13 @@ func WithPublicIP(addr string) FakeCSQLInstanceOption {
 func WithPrivateIP(addr string) FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
 		f.ipAddrs["PRIVATE"] = addr
+	}
+}
+
+// WithServerName configured the common name used by the server.
+func WithServerName(name string) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.serverName = name
 	}
 }
 
@@ -144,27 +152,30 @@ func WithMissingIPAddrs() FakeCSQLInstanceOption {
 
 // NewFakeCSQLInstance returns a CloudSQLInst object for configuring mocks.
 func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceOption) FakeCSQLInstance {
-	// TODO: consider options for this?
-	key, cert, err := generateCerts(project, name)
-	if err != nil {
-		panic(err)
-	}
-
 	f := FakeCSQLInstance{
 		project:      project,
 		region:       region,
 		name:         name,
+		serverName:   fmt.Sprintf("%s:%s", project, name),
 		ipAddrs:      map[string]string{"PUBLIC": "0.0.0.0"},
 		dbVersion:    "POSTGRES_12", // default of no particular importance
 		backendType:  "SECOND_GEN",
 		signer:       SelfSign,
 		clientSigner: SignWithClientKey,
-		Key:          key,
-		Cert:         cert,
 	}
 	for _, o := range opts {
 		o(&f)
 	}
+
+	// Generate certs after applying options which may alter the serverName
+	// TODO: consider options for this?
+	key, cert, err := generateCerts(f.serverName)
+	if err != nil {
+		panic(err)
+	}
+	f.Key = key
+	f.Cert = cert
+
 	return f
 }
 
@@ -236,7 +247,7 @@ func GenerateCertWithCommonName(i FakeCSQLInstance, cn string) []byte {
 
 // generateCerts generates a private key, an X.509 certificate, and a TLS
 // certificate for a particular fake Cloud SQL database instance.
-func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, error) {
+func generateCerts(commonName string) (*rsa.PrivateKey, *x509.Certificate, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, nil, err
@@ -245,7 +256,7 @@ func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, er
 	cert := &x509.Certificate{
 		SerialNumber: &big.Int{},
 		Subject: pkix.Name{
-			CommonName: fmt.Sprintf("%s:%s", project, name),
+			CommonName: commonName,
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(0, 0, 1),
