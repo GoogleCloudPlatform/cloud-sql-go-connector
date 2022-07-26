@@ -176,6 +176,8 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	d, err := NewDialer(context.Background(),
 		WithDefaultDialOptions(WithPublicIP()),
 		WithTokenSource(mock.EmptyTokenSource{}),
+		// give refresh plenty of time to complete in slower CI builds
+		WithRefreshTimeout(time.Minute),
 	)
 	if err != nil {
 		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
