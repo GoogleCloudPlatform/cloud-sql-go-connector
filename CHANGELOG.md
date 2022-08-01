@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.5.0...v0.5.1) (2022-08-01)
+
+
+### Bug Fixes
+
+* remove unnecessary import path restrictions ([#258](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/258)) ([bc57877](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/bc57877f16a61e42c603d4dc50ff4d01fc01d9d9))
+
 ## [0.5.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.4.0...v0.5.0) (2022-07-12)
 
 
