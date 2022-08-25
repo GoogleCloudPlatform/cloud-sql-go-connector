@@ -14,5 +14,5 @@ require (
 	golang.org/x/time v0.0.0-20220722155302-e5dcc9cfc0b9
 	google.golang.org/api v0.93.0
 	google.golang.org/genproto v0.0.0-20220817144833-d7fd3f11b9b1
-	google.golang.org/grpc v1.48.0
+	google.golang.org/grpc v1.49.0
 )
