@@ -1,4 +1,11 @@
-# cloud-sql-go-connector
+<p align="center">
+    <a href="https://pkg.go.dev/cloud.google.com/go/cloudsqlconn">
+        <img src="docs/images/cloud-sql-go-connector.png" alt="cloud-sql-go-connector image">
+    </a>
+</p>
+
+<h1 align="center">Cloud SQL Go Connector</h1>
+
 *Warning*: This project is in Public Preview, and may contain breaking changes
 before it becomes Generally Available.
 
