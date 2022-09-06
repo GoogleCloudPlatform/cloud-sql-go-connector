@@ -63,16 +63,16 @@ the IAM principal.
 
 ### Credentials
 
-This repo uses the [Application Default Credentials (ADC)][adc] strategy for
-resolving credentials. Please see the
-[golang.org/x/oauth2/google][google-auth] documentation for more information in
-how these credentials are sourced.
+This library uses the [Application Default Credentials (ADC)][adc] strategy for
+resolving credentials. Please see [these instructions for how to set your ADC][set-adc]
+(Google Cloud Application vs Local Development, IAM user vs service account credentials),
+or consult the [golang.org/x/oauth2/google][google-auth] documentation.
 
-To explicitly set a specific source for the Credentials to use, see [Using
+To explicitly set a specific source for the Credentials, see [Using
 Options](#using-options) below.
 
-
-[adc]: https://cloud.google.com/docs/authentication
+[adc]: https://cloud.google.com/docs/authentication#adc
+[set-adc]: https://cloud.google.com/docs/authentication/provide-credentials-adc
 [google-auth]: https://pkg.go.dev/golang.org/x/oauth2/google#hdr-Credentials
 
 ### Postgres
