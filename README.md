@@ -63,7 +63,7 @@ the IAM principal.
 
 ### Credentials
 
-This library uses the [Application Default Credentials (ADC)][adc] strategy for
+This repo uses the [Application Default Credentials (ADC)][adc] strategy for
 resolving credentials. Please see [these instructions for how to set your ADC][set-adc]
 (Google Cloud Application vs Local Development, IAM user vs service account credentials),
 or consult the [golang.org/x/oauth2/google][google-auth] documentation.
