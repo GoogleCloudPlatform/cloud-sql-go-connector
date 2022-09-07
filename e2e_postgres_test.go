@@ -153,10 +153,6 @@ func TestPostgresHook(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
 	}
-	// throw error
-	if true {
-		panic("THROWING ERROR FOR FLAKYBOT TO CATCH")
-	}
 	testConn := func(db *sql.DB) {
 		var now time.Time
 		if err := db.QueryRow("SELECT NOW()").Scan(&now); err != nil {
