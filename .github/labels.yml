@@ -69,7 +69,3 @@
 - name: 'autorelease: tagged'
   color: ededed
   description: Release please has completed a release for this.
-
-- name: 'kokoro:force-run'
-  color: ade628
-  description: Force Kokoro to re-run CI checks
