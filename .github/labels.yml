@@ -70,6 +70,18 @@
   color: ededed
   description: Release please has completed a release for this.
 
-- name: 'kokoro:force-run'
-  color: ade628
-  description: Force Kokoro to re-run CI checks
+- name: 'tests: run'
+  color: 3DED97
+  description: Label to trigger Github Action tests.
+
+- name: 'flakybot: flaky'
+  color: 86d9d7
+  description: Tells the Flaky Bot not to close or comment on this issue.
+
+- name: 'flakybot: quiet'
+  color: 86d9d7
+  description: Tells the Flaky Bot to comment less.
+
+- name: 'flakybot: issue'
+  color: a9f9f7
+  description: An issue filed by the Flaky Bot. Should not be added manually.
