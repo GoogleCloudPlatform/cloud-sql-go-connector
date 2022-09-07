@@ -19,7 +19,7 @@ on:
     types: [labeled]
 
 jobs:
-  coverage:
+  build:
     if: "${{ github.event.action != 'labeled' || github.event.label.name == 'tests: run' }}"
     runs-on: ubuntu-latest
     steps:
