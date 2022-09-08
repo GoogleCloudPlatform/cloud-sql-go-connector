@@ -112,7 +112,8 @@ jobs:
         shell: bash
         run: |
           go test -v -race -cover ./e2e_mysql_test.go ./e2e_postgres_test.go ./e2e_sqlserver_test.go | tee test_results.txt
-      - name: Convert Test to XML
+      
+      - name: Convert test output to XML
         if: always()
         run: |
           go install github.com/jstemmer/go-junit-report/v2@latest
@@ -127,7 +128,7 @@ jobs:
           ./flakybot --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
       - name: FlakyBot (Windows)
         # only run flakybot on periodic (schedule) and continuous (push) events
-        if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && runner.os == 'Windows' && always() }}
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && runner.os == 'Windows' && always() }}
         run: |
           curl https://github.com/googleapis/repo-automation-bots/releases/download/flakybot-1.1.0/flakybot.exe -o flakybot.exe -s -L
           ./flakybot.exe --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
