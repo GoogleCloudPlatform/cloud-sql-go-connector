@@ -111,8 +111,11 @@ jobs:
         # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
         shell: bash
         run: |
-          go install github.com/jstemmer/go-junit-report/v2@latest
           go test -v -race -cover ./e2e_mysql_test.go ./e2e_postgres_test.go ./e2e_sqlserver_test.go | tee test_results.txt
+      - name: Convert Test to XML
+        if: always()
+        run: |
+          go install github.com/jstemmer/go-junit-report/v2@latest
           go-junit-report -in test_results.txt -set-exit-code -out integration_sponge_log.xml
         
       - name: FlakyBot (Linux)
