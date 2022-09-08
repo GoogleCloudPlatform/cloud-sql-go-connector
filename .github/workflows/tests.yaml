@@ -111,8 +111,12 @@ jobs:
         # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
         shell: bash
         run: |
-          go install github.com/jstemmer/go-junit-report/v2@latest
           go test -v -race -cover ./e2e_mysql_test.go ./e2e_postgres_test.go ./e2e_sqlserver_test.go | tee test_results.txt
+      
+      - name: Convert test output to XML
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() }}
+        run: |
+          go install github.com/jstemmer/go-junit-report/v2@latest
           go-junit-report -in test_results.txt -set-exit-code -out integration_sponge_log.xml
         
       - name: FlakyBot (Linux)
@@ -193,14 +197,17 @@ jobs:
         # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
         shell: bash
         run: |
-          go install github.com/jstemmer/go-junit-report/v2@latest
           go test -v -race -cover -short ./... | tee test_results.txt
-          go-junit-report -in test_results.txt -set-exit-code -out unit_sponge_log.xml
       - name: Run tests (386)
         # 386 archs don't support race detector
         if: matrix.goarch == '386'
         run: |
-          go test -v -cover -short ./...      
+          go test -v -cover -short ./...
+      - name: Convert test output to XML
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() && matrix.goarch == '' }}
+        run: |
+          go install github.com/jstemmer/go-junit-report/v2@latest
+          go-junit-report -in test_results.txt -set-exit-code -out unit_sponge_log.xml      
       - name: FlakyBot (Linux)
         # only run flakybot on periodic (schedule) and continuous (push) events
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && runner.os == 'Linux' && always() }}
