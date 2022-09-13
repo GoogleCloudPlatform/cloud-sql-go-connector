@@ -85,7 +85,11 @@ func TestMySQLDriverIAMAuthN(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	cleanup, err := mysql.RegisterDriver("cloudsql-mysql", cloudsqlconn.WithIAMAuthN())
+	cleanup, err := mysql.RegisterDriver("cloudsql-mysql",
+		cloudsqlconn.WithIAMAuthN(),
+		cloudsqlconn.WithAdminAPIEndpoint(os.Getenv("ADMIN_API_ENDPOINT")),
+		cloudsqlconn.WithQuotaProject(os.Getenv("QUOTA_PROJECT")),
+	)
 	if err != nil {
 		t.Fatalf("failed to register driver: %v", err)
 	}
