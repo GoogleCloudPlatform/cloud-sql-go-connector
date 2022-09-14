@@ -334,8 +334,17 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 			r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
 			_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 
-			if !errors.As(err, &tc.wantErr) {
-				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
+			switch we := tc.wantErr.(type) {
+			case *errtype.RefreshError:
+				if !errors.As(err, &we) {
+					t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
+				}
+			case *errtype.ConfigError:
+				if !errors.As(err, &we) {
+					t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
+				}
+			default:
+				t.Fatalf("unexpected error type %T", we)
 			}
 		})
 	}
@@ -400,8 +409,17 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
 		_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 
-		if !errors.As(err, &tc.wantErr) {
-			t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
+		switch we := tc.wantErr.(type) {
+		case *errtype.RefreshError:
+			if !errors.As(err, &we) {
+				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
+			}
+		case *errtype.ConfigError:
+			if !errors.As(err, &we) {
+				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
+			}
+		default:
+			t.Fatalf("unexpected error type %T", we)
 		}
 	}
 }
