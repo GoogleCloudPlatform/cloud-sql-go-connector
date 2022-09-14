@@ -128,7 +128,9 @@ func TestConnectInfo(t *testing.T) {
 		t.Fatalf("failed to create mock instance: %v", err)
 	}
 
-	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, PublicIP)
+	ci, err := i.ConnectInfo(ctx, PublicIP)
+	gotAddr := ci.Addr
+	gotTLSCfg := ci.Config
 	if err != nil {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
@@ -164,16 +166,16 @@ func TestConnectInfoErrors(t *testing.T) {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
 
-	_, _, err = im.ConnectInfo(ctx, PublicIP)
+	_, err = im.ConnectInfo(ctx, PublicIP)
 	var wantErr *errtype.DialError
 	if !errors.As(err, &wantErr) {
 		t.Fatalf("when connect info fails, want = %T, got = %v", wantErr, err)
 	}
 
 	// when client asks for wrong IP address type
-	gotAddr, _, err := im.ConnectInfo(ctx, PrivateIP)
+	ci, err := im.ConnectInfo(ctx, PrivateIP)
 	if err == nil {
-		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", gotAddr)
+		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", ci.Addr)
 	}
 }
 
@@ -193,7 +195,7 @@ func TestClose(t *testing.T) {
 	}
 	im.Close()
 
-	_, _, err = im.ConnectInfo(ctx, PublicIP)
+	_, err = im.ConnectInfo(ctx, PublicIP)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
