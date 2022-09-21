@@ -249,27 +249,14 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 	}
 }
 
-func TestRefreshWithFailedMetadataCall(t *testing.T) {
+func TestRefreshMetadataConfigError(t *testing.T) {
 	cn, _ := parseConnName("my-project:my-region:my-instance")
 
 	testCases := []struct {
 		req     *mock.Request
-		wantErr error
+		wantErr *errtype.ConfigError
 		desc    string
 	}{
-		{
-			req: mock.CreateEphemeralSuccess(
-				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name), 1),
-			wantErr: &errtype.RefreshError{},
-			desc:    "When the Metadata call fails",
-		},
-		{
-			req: mock.InstanceGetSuccess(
-				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
-					mock.WithRegion("some-other-region")), 1),
-			wantErr: &errtype.RefreshError{},
-			desc:    "When the region does not match",
-		},
 		{
 			req: mock.InstanceGetSuccess(
 				mock.NewFakeCSQLInstance(
@@ -289,6 +276,49 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 				), 1),
 			wantErr: &errtype.ConfigError{},
 			desc:    "When the instance has no supported IP addresses",
+		},
+	}
+
+	for i, tc := range testCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			client, cleanup, err := mock.NewSQLAdminService(
+				context.Background(),
+				tc.req,
+			)
+			if err != nil {
+				t.Fatalf("failed to create test SQL admin service: %s", err)
+			}
+			defer cleanup()
+
+			r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
+			_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
+			if !errors.As(err, &tc.wantErr) {
+				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestRefreshMetadataRefreshError(t *testing.T) {
+	cn, _ := parseConnName("my-project:my-region:my-instance")
+
+	testCases := []struct {
+		req     *mock.Request
+		wantErr *errtype.RefreshError
+		desc    string
+	}{
+		{
+			req: mock.CreateEphemeralSuccess(
+				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name), 1),
+			wantErr: &errtype.RefreshError{},
+			desc:    "When the Metadata call fails",
+		},
+		{
+			req: mock.InstanceGetSuccess(
+				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
+					mock.WithRegion("some-other-region")), 1),
+			wantErr: &errtype.RefreshError{},
+			desc:    "When the region does not match",
 		},
 		{
 			req: mock.InstanceGetSuccess(
@@ -320,6 +350,7 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 			desc:    "When the cert is not a valid X.509 cert",
 		},
 	}
+
 	for i, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
 			client, cleanup, err := mock.NewSQLAdminService(
@@ -333,18 +364,8 @@ func TestRefreshWithFailedMetadataCall(t *testing.T) {
 
 			r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
 			_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
-
-			switch we := tc.wantErr.(type) {
-			case *errtype.RefreshError:
-				if !errors.As(err, &we) {
-					t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
-				}
-			case *errtype.ConfigError:
-				if !errors.As(err, &we) {
-					t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
-				}
-			default:
-				t.Fatalf("unexpected error type %T", we)
+			if !errors.As(err, &tc.wantErr) {
+				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 			}
 		})
 	}
@@ -356,7 +377,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 
 	testCases := []struct {
 		reqs    []*mock.Request
-		wantErr error
+		wantErr *errtype.RefreshError
 		desc    string
 	}{
 		{
@@ -409,17 +430,8 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
 		_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 
-		switch we := tc.wantErr.(type) {
-		case *errtype.RefreshError:
-			if !errors.As(err, &we) {
-				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
-			}
-		case *errtype.ConfigError:
-			if !errors.As(err, &we) {
-				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
-			}
-		default:
-			t.Fatalf("unexpected error type %T", we)
+		if !errors.As(err, &tc.wantErr) {
+			t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 		}
 	}
 }
