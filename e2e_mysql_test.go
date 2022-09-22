@@ -26,11 +26,19 @@ import (
 )
 
 var (
-	mysqlConnName = os.Getenv("MYSQL_CONNECTION_NAME") // "Cloud SQL MySQL instance connection name, in the form of 'project:region:instance'.
-	mysqlUser     = os.Getenv("MYSQL_USER")            // Name of database user.
-	mysqlIAMUser  = os.Getenv("MYSQL_USER_IAM")        // Name of database IAM user.
-	mysqlPass     = os.Getenv("MYSQL_PASS")            // Password for the database user; be careful when entering a password on the command line (it may go into your terminal's history).
-	mysqlDB       = os.Getenv("MYSQL_DB")              // Name of the database to connect to.
+	// "Cloud SQL MySQL instance connection name, in the form of 'project:region:instance'.
+	mysqlConnName = os.Getenv("MYSQL_CONNECTION_NAME")
+	// "Cloud SQL MySQL instance connection name, in the form of 'project:region:instance'.
+	mysqlIAMConnName = os.Getenv("MYSQL_IAM_CONNECTION_NAME")
+	// Name of database user.
+	mysqlUser = os.Getenv("MYSQL_USER")
+	// Name of database IAM user.
+	mysqlIAMUser = os.Getenv("MYSQL_USER_IAM")
+	// Password for the database user; be careful when entering a password on
+	// the command line (it may go into your terminal's history).
+	mysqlPass = os.Getenv("MYSQL_PASS")
+	// Name of the database to connect to.
+	mysqlDB = os.Getenv("MYSQL_DB")
 )
 
 func requireMySQLVars(t *testing.T) {
@@ -88,11 +96,7 @@ func TestMySQLDriverIAMAuthN(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	cleanup, err := mysql.RegisterDriver("cloudsql-mysql",
-		cloudsqlconn.WithIAMAuthN(),
-		cloudsqlconn.WithAdminAPIEndpoint(os.Getenv("ADMIN_API_ENDPOINT")),
-		cloudsqlconn.WithQuotaProject(os.Getenv("QUOTA_PROJECT")),
-	)
+	cleanup, err := mysql.RegisterDriver("cloudsql-mysql", cloudsqlconn.WithIAMAuthN())
 	if err != nil {
 		t.Fatalf("failed to register driver: %v", err)
 	}
@@ -100,7 +104,7 @@ func TestMySQLDriverIAMAuthN(t *testing.T) {
 	db, err := sql.Open(
 		"mysql",
 		fmt.Sprintf("%s:empty@cloudsql-mysql(%s)/%s?parseTime=true",
-			mysqlIAMUser, mysqlConnName, mysqlDB),
+			mysqlIAMUser, mysqlIAMConnName, mysqlDB),
 	)
 	if err != nil {
 		t.Fatalf("sql.Open want err = nil, got = %v", err)
