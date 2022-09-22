@@ -101,7 +101,6 @@ func TestMySQLDriverIAMAuthN(t *testing.T) {
 		t.Fatalf("failed to register driver: %v", err)
 	}
 	defer cleanup()
-	fmt.Println(mysqlIAMUser, mysqlIAMConnName, mysqlDB)
 	db, err := sql.Open(
 		"mysql",
 		fmt.Sprintf("%s:empty@cloudsql-mysql-iam(%s)/%s?parseTime=true",
