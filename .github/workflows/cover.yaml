@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: code coverage
-on: 
+on:
   pull_request:
   pull_request_target:
     types: [labeled]
@@ -42,7 +42,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.18"
+          go-version: "1.19"
 
       - name: Checkout base branch
         uses: actions/checkout@v3
