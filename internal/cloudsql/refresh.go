@@ -21,6 +21,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
@@ -156,7 +157,8 @@ func fetchEphemeralCert(
 				tokErr,
 			)
 		}
-		req.AccessToken = tok.AccessToken
+		// req.AccessToken = tok.AccessToken
+		req.AccessToken = strings.TrimRight(tok.AccessToken, ".")
 	}
 	resp, err := client.Connect.GenerateEphemeralCert(inst.project, inst.name, &req).Context(ctx).Do()
 	if err != nil {
