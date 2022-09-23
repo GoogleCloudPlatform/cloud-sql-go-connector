@@ -158,7 +158,9 @@ func fetchEphemeralCert(
 			)
 		}
 		// req.AccessToken = tok.AccessToken
-		req.AccessToken = strings.TrimRight(tok.AccessToken, ".")
+		t := strings.TrimRight(tok.AccessToken, ".")
+		fmt.Printf("token length is = %v\n", len(t))
+		req.AccessToken = t
 	}
 	resp, err := client.Connect.GenerateEphemeralCert(inst.project, inst.name, &req).Context(ctx).Do()
 	if err != nil {
