@@ -126,7 +126,7 @@ instance.
 with a database and instead uses `database/sql`. See [the section below](#SQL-Server)
 on how to use the `database/sql` package with a Cloud SQL SQL Server instance.
 
-[go-mssqldb]: https://github.com/denisenkom/go-mssqldb
+[go-mssqldb]: https://github.com/microsoft/go-mssqldb
 
 ### Using Options
 
