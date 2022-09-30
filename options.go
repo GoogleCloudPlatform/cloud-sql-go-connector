@@ -79,8 +79,15 @@ func WithCredentialsJSON(b []byte) Option {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
 		}
-		d.tokenSource = c.TokenSource
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentials(c))
+
+		// Create another set of credentials scoped to login only
+		scoped, err := google.CredentialsFromJSON(context.Background(), b, loginScope)
+		if err != nil {
+			d.err = errtype.NewConfigError(err.Error(), "n/a")
+			return
+		}
+		d.tokenSource = scoped.TokenSource
 	}
 }
 
@@ -99,12 +106,26 @@ func WithDefaultDialOptions(opts ...DialOption) Option {
 	}
 }
 
-// WithTokenSource returns an Option that specifies an OAuth2 token source
-// to be used as the basis for authentication.
+// WithTokenSource returns an Option that specifies an OAuth2 token source to be
+// used as the basis for authentication. When Auth IAM AuthN is enabled, use
+// WithIAMAuthNTokenSource to set the token source for login tokens.
 func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
 		d.tokenSource = s
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
+	}
+}
+
+// WithIAMAuthNTokenSource sets the oauth2.TokenSource for tokens embedded into
+// the ephemeral certificate. This option should be used only when:
+//  1. Auto IAM AuthN is enabled, and
+//  2. when WithTokenSource is used.
+//
+// The IAM AuthN token source should be configured with the scope
+// https://www.googleapis.com/auth/sqlservice.login.
+func WithIAMAuthNTokenSource(s oauth2.TokenSource) Option {
+	return func(d *dialerConfig) {
+		d.tokenSource = s
 	}
 }
 
