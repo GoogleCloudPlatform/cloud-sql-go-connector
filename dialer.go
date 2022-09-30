@@ -47,9 +47,9 @@ const (
 	defaultTCPKeepAlive = 30 * time.Second
 	// serverProxyPort is the port the server-side proxy receives connections on.
 	serverProxyPort = "3307"
-	// loginScope is the OAuth2 scope used for tokens embedded in the ephemeral
+	// iamLoginScope is the OAuth2 scope used for tokens embedded in the ephemeral
 	// certificate.
-	loginScope = "https://www.googleapis.com/auth/sqlservice.login"
+	iamLoginScope = "https://www.googleapis.com/auth/sqlservice.login"
 )
 
 var (
@@ -124,17 +124,17 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// If callers have not provided a token source, either explicitly with
 	// WithTokenSource or implicitly with WithCredentialsJSON etc, then use the
 	// default token source.
-	if cfg.tokenSource == nil {
+	if cfg.iamTokenSource == nil {
 		ts, err := google.DefaultTokenSource(ctx, sqladmin.SqlserviceAdminScope)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create token source: %v", err)
 		}
 		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithTokenSource(ts))
-		scoped, err := google.DefaultTokenSource(ctx, loginScope)
+		scoped, err := google.DefaultTokenSource(ctx, iamLoginScope)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create scoped token source: %v", err)
 		}
-		cfg.tokenSource = scoped
+		cfg.iamTokenSource = scoped
 	}
 
 	if cfg.rsaKey == nil {
@@ -171,7 +171,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqladmin:       client,
 		defaultDialCfg: dc,
 		dialerID:       uuid.New().String(),
-		iamTokenSource: cfg.tokenSource,
+		iamTokenSource: cfg.iamTokenSource,
 		dialFunc:       cfg.dialFunc,
 	}
 	return d, nil

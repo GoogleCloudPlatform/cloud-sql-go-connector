@@ -40,7 +40,7 @@ type dialerConfig struct {
 	dialFunc       func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout time.Duration
 	useIAMAuthN    bool
-	tokenSource    oauth2.TokenSource
+	iamTokenSource    oauth2.TokenSource
 	useragents     []string
 	// err tracks any dialer options that may have failed.
 	err error
@@ -82,12 +82,12 @@ func WithCredentialsJSON(b []byte) Option {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentials(c))
 
 		// Create another set of credentials scoped to login only
-		scoped, err := google.CredentialsFromJSON(context.Background(), b, loginScope)
+		scoped, err := google.CredentialsFromJSON(context.Background(), b, iamLoginScope)
 		if err != nil {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
 		}
-		d.tokenSource = scoped.TokenSource
+		d.iamTokenSource = scoped.TokenSource
 	}
 }
 
@@ -111,7 +111,7 @@ func WithDefaultDialOptions(opts ...DialOption) Option {
 // WithIAMAuthNTokenSource to set the token source for login tokens.
 func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
-		d.tokenSource = s
+		d.iamTokenSource = s
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
 	}
 }
@@ -125,7 +125,7 @@ func WithTokenSource(s oauth2.TokenSource) Option {
 // https://www.googleapis.com/auth/sqlservice.login.
 func WithIAMAuthNTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
-		d.tokenSource = s
+		d.iamTokenSource = s
 	}
 }
 
