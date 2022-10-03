@@ -40,7 +40,7 @@ type dialerConfig struct {
 	dialFunc       func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout time.Duration
 	useIAMAuthN    bool
-	iamTokenSource    oauth2.TokenSource
+	iamTokenSource oauth2.TokenSource
 	useragents     []string
 	// err tracks any dialer options that may have failed.
 	err error
