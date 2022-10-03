@@ -170,20 +170,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	return d, nil
 }
 
-func verifyIAMAuthNConfig(version string, wantsIAMAuthN bool) error {
-	// Don't check engine version if IAM AuthN isn't requested.
-	if !wantsIAMAuthN {
-		return nil
-	}
-	v := strings.ToLower(version)
-	switch {
-	case strings.HasPrefix(v, "postgres"):
-		return nil
-	default:
-		return errors.New("unsupported")
-	}
-}
-
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
 // instance's connection name, which is in the format "project-name:region:instance-name".
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
@@ -209,20 +195,17 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		endInfo(err)
 		return nil, err
 	}
-	ci, err := i.ConnectInfo(ctx, cfg.ipType)
+	addr, tlsCfg, err := i.ConnectInfo(ctx, cfg.ipType)
 	if err != nil {
 		endInfo(err)
 		return nil, err
 	}
 	endInfo(err)
-	if cErr := verifyIAMAuthNConfig(ci.Version, cfg.refreshCfg.UseIAMAuthN); cErr != nil {
-		return nil, errtype.NewConfigError("instance does not support Auto IAM AuthN", instance)
-	}
 
 	var connectEnd trace.EndSpanFunc
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
 	defer func() { connectEnd(err) }()
-	addr := net.JoinHostPort(ci.Addr, serverProxyPort)
+	addr = net.JoinHostPort(addr, serverProxyPort)
 	conn, err = d.dialFunc(ctx, "tcp", addr)
 	if err != nil {
 		// refresh the instance info in case it caused the connection failure
@@ -237,7 +220,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 			return nil, errtype.NewDialError("failed to set keep-alive period", i.String(), err)
 		}
 	}
-	tlsConn := tls.Client(conn, ci.Config)
+	tlsConn := tls.Client(conn, tlsCfg)
 	if err := tlsConn.Handshake(); err != nil {
 		// refresh the instance info in case it caused the handshake failure
 		i.ForceRefresh()

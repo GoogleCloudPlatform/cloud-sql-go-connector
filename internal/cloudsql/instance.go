@@ -191,20 +191,13 @@ func (i *Instance) Close() {
 	i.cancel()
 }
 
-// ConnectInfo describes a Cloud SQL instance's connection information.
-type ConnectInfo struct {
-	Addr    string
-	Config  *tls.Config
-	Version string
-}
-
 // ConnectInfo returns an IP address specified by ipType (i.e., public or
 // private) and a TLS config that can be used to connect to a Cloud SQL
 // instance.
-func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (ConnectInfo, error) {
+func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls.Config, error) {
 	res, err := i.result(ctx)
 	if err != nil {
-		return ConnectInfo{}, err
+		return "", nil, err
 	}
 	addr, ok := res.md.ipAddrs[ipType]
 	if !ok {
@@ -212,9 +205,9 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (ConnectInfo,
 			fmt.Sprintf("instance does not have IP of type %q", ipType),
 			i.String(),
 		)
-		return ConnectInfo{}, err
+		return "", nil, err
 	}
-	return ConnectInfo{Addr: addr, Config: res.tlsCfg, Version: res.md.version}, nil
+	return addr, res.tlsCfg, nil
 }
 
 // InstanceEngineVersion returns the engine type and version for the instance. The value
