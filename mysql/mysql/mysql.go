@@ -54,8 +54,7 @@ type mysqlDriver struct {
 // example, a connection string might look like this where "cloudsql-mysql" is
 // the named used when registering the driver:
 //
-//     my-user:mypass@cloudsql-mysql(my-proj:us-central1:my-inst)/my-db
-//
+//	my-user:mypass@cloudsql-mysql(my-proj:us-central1:my-inst)/my-db
 func (d *mysqlDriver) Open(name string) (driver.Conn, error) {
 	return d.d.Open(name)
 }
