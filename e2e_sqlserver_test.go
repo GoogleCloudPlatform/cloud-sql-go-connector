@@ -51,6 +51,8 @@ func TestSqlServerHook(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping SqlServer integration tests")
 	}
+	requireSQLServerVars(t)
+
 	testConn := func(db *sql.DB) {
 		var now time.Time
 		if err := db.QueryRow("SELECT getdate()").Scan(&now); err != nil {
