@@ -49,6 +49,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
+      - name: go mod tidy
+        run: |
+          go mod tidy && git diff --exit-code
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v3
         with:
