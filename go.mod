@@ -7,7 +7,6 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/jackc/pgx/v4 v4.17.2
 	github.com/microsoft/go-mssqldb v0.17.0
-	github.com/denisenkom/go-mssqldb v0.16.0
 	github.com/pkg/errors v0.9.1 // indirect
 	go.opencensus.io v0.23.0
 	golang.org/x/net v0.0.0-20220909164309-bea034e7d591
