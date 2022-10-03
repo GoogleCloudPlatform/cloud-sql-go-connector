@@ -34,7 +34,7 @@ var (
 	sqlserverDB       = os.Getenv("SQLSERVER_DB")              // Name of the database to connect to.
 )
 
-func requireSqlServerVars(t *testing.T) {
+func requireSQLServerVars(t *testing.T) {
 	switch "" {
 	case sqlserverConnName:
 		t.Fatal("'SQLSERVER_CONNECTION_NAME' env var not set")
