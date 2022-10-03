@@ -17,6 +17,7 @@
 package cloudsqlconn
 
 import (
+		"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
