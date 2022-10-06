@@ -34,7 +34,7 @@ var (
 	sqlserverDB       = os.Getenv("SQLSERVER_DB")              // Name of the database to connect to.
 )
 
-func requireSqlServerVars(t *testing.T) {
+func requireSQLServerVars(t *testing.T) {
 	switch "" {
 	case sqlserverConnName:
 		t.Fatal("'SQLSERVER_CONNECTION_NAME' env var not set")
@@ -51,6 +51,8 @@ func TestSqlServerHook(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping SqlServer integration tests")
 	}
+	requireSQLServerVars(t)
+
 	testConn := func(db *sql.DB) {
 		var now time.Time
 		if err := db.QueryRow("SELECT getdate()").Scan(&now); err != nil {

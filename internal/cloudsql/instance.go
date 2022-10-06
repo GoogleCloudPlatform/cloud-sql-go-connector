@@ -221,6 +221,8 @@ func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
 	return res.md.version, nil
 }
 
+// UpdateRefresh cancels all existing refresh attempts and schedules new
+// attempts with the provided config.
 func (i *Instance) UpdateRefresh(cfg RefreshCfg) {
 	i.resultGuard.Lock()
 	defer i.resultGuard.Unlock()
