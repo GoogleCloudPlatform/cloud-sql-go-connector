@@ -170,21 +170,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	return d, nil
 }
 
-// verifyIAMAuthNConfig checks that the engine support automatic IAM authn. If
-// auto IAM authn was not request, this is a no-op.
-func verifyIAMAuthNConfig(version string, wantsIAMAuthN bool) error {
-	// Don't check engine version if IAM AuthN isn't requested.
-	if !wantsIAMAuthN {
-		return nil
-	}
-	switch {
-	case strings.HasPrefix(version, "POSTGRES"):
-		return nil
-	default:
-		return fmt.Errorf("%s does not support Auto IAM AuthN", version)
-	}
-}
-
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
 // instance's connection name, which is in the format "project-name:region:instance-name".
 func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
@@ -216,14 +201,6 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		return nil, err
 	}
 	endInfo(err)
-
-	v, err := i.InstanceEngineVersion(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if vErr := verifyIAMAuthNConfig(v, cfg.refreshCfg.UseIAMAuthN); vErr != nil {
-		return nil, vErr
-	}
 
 	var connectEnd trace.EndSpanFunc
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
