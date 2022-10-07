@@ -390,6 +390,6 @@ func supportsAutoIAMAuthN(version string) error {
 	case strings.HasPrefix(version, "POSTGRES"):
 		return nil
 	default:
-		return fmt.Errorf("%s does not support Auto IAM AuthN", version)
+		return fmt.Errorf("%s does not support Auto IAM DB Authentication", version)
 	}
 }
