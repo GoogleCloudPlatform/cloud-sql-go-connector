@@ -32,7 +32,9 @@ import (
 )
 
 const (
-	PublicIP  = "PUBLIC"
+	// PublicIP is the value for public IP Cloud SQL instances.
+	PublicIP = "PUBLIC"
+	// PrivateIP is the value for private IP Cloud SQL instances.
 	PrivateIP = "PRIVATE"
 )
 

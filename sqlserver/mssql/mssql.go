@@ -50,7 +50,7 @@ type csqlDialer struct {
 }
 
 // DialContext adheres to the mssql.Dialer interface.
-func (c *csqlDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+func (c *csqlDialer) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
 	return c.d.Dial(ctx, c.connName)
 }
 

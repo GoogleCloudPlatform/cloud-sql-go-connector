@@ -257,7 +257,7 @@ func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, er
 
 // Warmup starts the background refresh neccesary to connect to the instance. Use Warmup
 // to start the refresh process early if you don't know when you'll need to call "Dial".
-func (d *Dialer) Warmup(ctx context.Context, instance string, opts ...DialOption) error {
+func (d *Dialer) Warmup(_ context.Context, instance string, opts ...DialOption) error {
 	cfg := d.defaultDialCfg
 	for _, opt := range opts {
 		opt(&cfg)

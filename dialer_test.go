@@ -29,7 +29,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
 
-func testSuccessfulDial(t *testing.T, d *Dialer, ctx context.Context, i string, opts ...DialOption) {
+func testSuccessfulDial(ctx context.Context, t *testing.T, d *Dialer, i string, opts ...DialOption) {
 	conn, err := d.Dial(ctx, i, opts...)
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
@@ -72,7 +72,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	}
 	d.sqladmin = svc
 
-	testSuccessfulDial(t, d, context.Background(), "my-project:my-region:my-instance", WithPublicIP())
+	testSuccessfulDial(context.Background(), t, d, "my-project:my-region:my-instance", WithPublicIP())
 }
 
 func TestDialerConnectionSupportsSyscalls(t *testing.T) {
@@ -454,7 +454,7 @@ func TestWarmup(t *testing.T) {
 				t.Fatalf("Warmup failed: %v", err)
 			}
 			// Dial once with the "dial" options
-			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance", test.dialOpts...)
+			testSuccessfulDial(ctx, t, d, "my-project:my-region:my-instance", test.dialOpts...)
 		})
 	}
 }
@@ -519,10 +519,10 @@ func TestDialDialerOptsConflicts(t *testing.T) {
 			}()
 
 			// Dial once with the "default" options
-			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance")
+			testSuccessfulDial(ctx, t, d, "my-project:my-region:my-instance")
 
 			// Dial once with the "dial" options
-			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance", test.dialOpts...)
+			testSuccessfulDial(ctx, t, d, "my-project:my-region:my-instance", test.dialOpts...)
 		})
 	}
 }
