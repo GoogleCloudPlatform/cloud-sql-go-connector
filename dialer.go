@@ -124,7 +124,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// If callers have not provided a token source, either explicitly with
 	// WithTokenSource or implicitly with WithCredentialsJSON etc, then use the
 	// default token source.
-	if cfg.iamTokenSource == nil {
+	if cfg.iamLoginTokenSource == nil {
 		ts, err := google.DefaultTokenSource(ctx, sqladmin.SqlserviceAdminScope)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create token source: %v", err)
@@ -134,7 +134,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create scoped token source: %v", err)
 		}
-		cfg.iamTokenSource = scoped
+		cfg.iamLoginTokenSource = scoped
 	}
 
 	if cfg.rsaKey == nil {
@@ -171,7 +171,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqladmin:       client,
 		defaultDialCfg: dc,
 		dialerID:       uuid.New().String(),
-		iamTokenSource: cfg.iamTokenSource,
+		iamTokenSource: cfg.iamLoginTokenSource,
 		dialFunc:       cfg.dialFunc,
 	}
 	return d, nil
