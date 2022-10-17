@@ -272,7 +272,7 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 				mock.NewFakeCSQLInstance(
 					cn.project, cn.region, cn.name,
 					mock.WithRegion("my-region"),
-					mock.WithMissingIPAddrs(),
+					mock.WithNoIPAddrs(),
 				), 1),
 			wantErr: &errtype.ConfigError{},
 			desc:    "When the instance has no supported IP addresses",

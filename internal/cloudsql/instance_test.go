@@ -149,6 +149,67 @@ func TestConnectInfo(t *testing.T) {
 	}
 }
 
+func TestConnectInfoAutoIP(t *testing.T) {
+	tcs := []struct {
+		desc   string
+		ips    []mock.FakeCSQLInstanceOption
+		wantIP string
+	}{
+		{
+			desc: "when public IP is enabled",
+			ips: []mock.FakeCSQLInstanceOption{
+				mock.WithPublicIP("8.8.8.8"),
+				mock.WithPrivateIP("10.0.0.1"),
+			},
+			wantIP: "8.8.8.8",
+		},
+		{
+			desc: "when only private IP is enabled",
+			ips: []mock.FakeCSQLInstanceOption{
+				mock.WithPrivateIP("10.0.0.1"),
+			},
+			wantIP: "10.0.0.1",
+		},
+	}
+
+	for _, tc := range tcs {
+		var opts []mock.FakeCSQLInstanceOption
+		opts = append(opts, mock.WithNoIPAddrs())
+		opts = append(opts, tc.ips...)
+		inst := mock.NewFakeCSQLInstance("p", "r", "i", opts...)
+		client, cleanup, err := mock.NewSQLAdminService(
+			context.Background(),
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		)
+		if err != nil {
+			t.Fatalf("%s", err)
+		}
+		defer func() {
+			if cErr := cleanup(); cErr != nil {
+				t.Fatalf("%v", cErr)
+			}
+		}()
+
+		i, err := NewInstance("p:r:i", client, RSAKey, 30*time.Second, nil, "", RefreshCfg{})
+		if err != nil {
+			t.Fatalf("failed to create mock instance: %v", err)
+		}
+
+		got, _, err := i.ConnectInfo(context.Background(), AutoIP)
+		if err != nil {
+			t.Fatalf("failed to retrieve connect info: %v", err)
+		}
+
+		if got != tc.wantIP {
+			t.Fatalf(
+				"ConnectInfo returned unexpected IP address, want = %v, got = %v",
+				tc.wantIP, got,
+			)
+		}
+	}
+}
+
 func TestConnectInfoErrors(t *testing.T) {
 	ctx := context.Background()
 

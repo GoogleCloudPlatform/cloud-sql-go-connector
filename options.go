@@ -240,6 +240,15 @@ func WithPrivateIP() DialOption {
 	}
 }
 
+// WithAutoIP returns a DialOption that selects the public IP if available and
+// otherwise falls back to private IP. This option is present for backwards
+// compatibility only and is not recommended for use in production.
+func WithAutoIP() DialOption {
+	return func(cfg *dialCfg) {
+		cfg.ipType = cloudsql.AutoIP
+	}
+}
+
 // WithDialIAMAuthN allows you to enable or disable IAM Authentication for this
 // instance as descibed in the documentation for WithIAMAuthN. This value will
 // overide the Dialer-level configuration set with WithIAMAuthN.
