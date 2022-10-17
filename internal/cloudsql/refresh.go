@@ -35,6 +35,8 @@ const (
 	PublicIP = "PUBLIC"
 	// PrivateIP is the value for private IP Cloud SQL instances.
 	PrivateIP = "PRIVATE"
+	// AutoIP selects public IP if available and otherwise selects private IP.
+	AutoIP = "AutoIP"
 )
 
 // metadata contains information about a Cloud SQL instance needed to create connections.
