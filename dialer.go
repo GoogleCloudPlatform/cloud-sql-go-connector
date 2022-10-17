@@ -47,6 +47,9 @@ const (
 	defaultTCPKeepAlive = 30 * time.Second
 	// serverProxyPort is the port the server-side proxy receives connections on.
 	serverProxyPort = "3307"
+	// iamLoginScope is the OAuth2 scope used for tokens embedded in the ephemeral
+	// certificate.
+	iamLoginScope = "https://www.googleapis.com/auth/sqlservice.login"
 )
 
 var (
@@ -121,13 +124,17 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// If callers have not provided a token source, either explicitly with
 	// WithTokenSource or implicitly with WithCredentialsJSON etc, then use the
 	// default token source.
-	if cfg.tokenSource == nil {
+	if cfg.iamLoginTokenSource == nil {
 		ts, err := google.DefaultTokenSource(ctx, sqladmin.SqlserviceAdminScope)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create token source: %v", err)
 		}
-		cfg.tokenSource = ts
 		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithTokenSource(ts))
+		scoped, err := google.DefaultTokenSource(ctx, iamLoginScope)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create scoped token source: %v", err)
+		}
+		cfg.iamLoginTokenSource = scoped
 	}
 
 	if cfg.rsaKey == nil {
@@ -143,7 +150,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)
 	}
 
-	dialCfg := dialCfg{
+	dc := dialCfg{
 		ipType:       cloudsql.PublicIP,
 		tcpKeepAlive: defaultTCPKeepAlive,
 		refreshCfg: cloudsql.RefreshCfg{
@@ -151,7 +158,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		},
 	}
 	for _, opt := range cfg.dialOpts {
-		opt(&dialCfg)
+		opt(&dc)
 	}
 
 	if err := trace.InitMetrics(); err != nil {
@@ -162,9 +169,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		key:            cfg.rsaKey,
 		refreshTimeout: cfg.refreshTimeout,
 		sqladmin:       client,
-		defaultDialCfg: dialCfg,
+		defaultDialCfg: dc,
 		dialerID:       uuid.New().String(),
-		iamTokenSource: cfg.tokenSource,
+		iamTokenSource: cfg.iamLoginTokenSource,
 		dialFunc:       cfg.dialFunc,
 	}
 	return d, nil

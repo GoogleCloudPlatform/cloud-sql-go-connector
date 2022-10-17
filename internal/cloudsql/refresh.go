@@ -21,6 +21,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
@@ -359,6 +360,12 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 	case <-ctx.Done():
 		return md, nil, time.Time{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
+	if iamAuthN {
+		if vErr := supportsAutoIAMAuthN(md.version); vErr != nil {
+			return metadata{}, nil, time.Time{}, vErr
+		}
+	}
+
 	var ec tls.Certificate
 	select {
 	case r := <-ecC:
@@ -376,4 +383,15 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 		expiry = c.Certificates[0].Leaf.NotAfter
 	}
 	return md, c, expiry, nil
+}
+
+// supportsAutoIAMAuthN checks that the engine support automatic IAM authn. If
+// auto IAM authn was not request, this is a no-op.
+func supportsAutoIAMAuthN(version string) error {
+	switch {
+	case strings.HasPrefix(version, "POSTGRES"):
+		return nil
+	default:
+		return fmt.Errorf("%s does not support Auto IAM DB Authentication", version)
+	}
 }

@@ -34,14 +34,14 @@ import (
 type Option func(d *dialerConfig)
 
 type dialerConfig struct {
-	rsaKey         *rsa.PrivateKey
-	sqladminOpts   []apiopt.ClientOption
-	dialOpts       []DialOption
-	dialFunc       func(ctx context.Context, network, addr string) (net.Conn, error)
-	refreshTimeout time.Duration
-	useIAMAuthN    bool
-	tokenSource    oauth2.TokenSource
-	useragents     []string
+	rsaKey              *rsa.PrivateKey
+	sqladminOpts        []apiopt.ClientOption
+	dialOpts            []DialOption
+	dialFunc            func(ctx context.Context, network, addr string) (net.Conn, error)
+	refreshTimeout      time.Duration
+	useIAMAuthN         bool
+	iamLoginTokenSource oauth2.TokenSource
+	useragents          []string
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -79,8 +79,15 @@ func WithCredentialsJSON(b []byte) Option {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
 		}
-		d.tokenSource = c.TokenSource
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentials(c))
+
+		// Create another set of credentials scoped to login only
+		scoped, err := google.CredentialsFromJSON(context.Background(), b, iamLoginScope)
+		if err != nil {
+			d.err = errtype.NewConfigError(err.Error(), "n/a")
+			return
+		}
+		d.iamLoginTokenSource = scoped.TokenSource
 	}
 }
 
@@ -99,12 +106,37 @@ func WithDefaultDialOptions(opts ...DialOption) Option {
 	}
 }
 
-// WithTokenSource returns an Option that specifies an OAuth2 token source
-// to be used as the basis for authentication.
+// WithTokenSource returns an Option that specifies an OAuth2 token source to be
+// used as the basis for authentication.
+//
+// When Auth IAM AuthN is enabled, use WithIAMAuthNTokenSources to set the token
+// source for login tokens separately from the API client token source.
+// WithTokenSource should not be used with WithIAMAuthNTokenSources.
 func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
-		d.tokenSource = s
+		d.iamLoginTokenSource = s
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
+	}
+}
+
+// WithIAMAuthNTokenSources sets the oauth2.TokenSource for the API client and a
+// second token source for IAM AuthN login tokens. The API client token source
+// should have the following scopes:
+//
+//  1. https://www.googleapis.com/auth/sqlservice.admin, and
+//  2. https://www.googleapis.com/auth/cloud-platform
+//
+// The IAM AuthN token source on the other hand should only have:
+//
+//  1. https://www.googleapis.com/auth/sqlservice.login.
+//
+// Prefer this option over WithTokenSource when using IAM AuthN which does not
+// distinguish between the two token sources. WithIAMAuthNTokenSources should
+// not be used with WithTokenSource.
+func WithIAMAuthNTokenSources(apiTS, iamLoginTS oauth2.TokenSource) Option {
+	return func(d *dialerConfig) {
+		d.iamLoginTokenSource = iamLoginTS
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(apiTS))
 	}
 }
 
