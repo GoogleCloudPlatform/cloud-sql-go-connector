@@ -199,7 +199,21 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 	if err != nil {
 		return "", nil, err
 	}
-	addr, ok := res.md.ipAddrs[ipType]
+	var (
+		addr string
+		ok   bool
+	)
+	switch ipType {
+	case AutoIP:
+		// Try Public first
+		addr, ok = res.md.ipAddrs[PublicIP]
+		if !ok {
+			// Try Private second
+			addr, ok = res.md.ipAddrs[PrivateIP]
+		}
+	default:
+		addr, ok = res.md.ipAddrs[ipType]
+	}
 	if !ok {
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", ipType),
