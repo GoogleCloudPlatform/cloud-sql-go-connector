@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.0.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.5.2...v1.0.0) (2022-10-18)
+
+
+### Features
+
+* add WithAutoIP option ([#346](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/346)) ([bd20b6b](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/bd20b6bfe746cfea778b9e1a9702de28047e5950))
+* Downscope OAuth2 token included in ephemeral certificate ([#332](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/332)) ([d13dd6f](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/d13dd6f3e7db0179511539315dec1c2dc96f0e3e))
+
+
+### Bug Fixes
+
+* throw error when Auto IAM AuthN is unsupported ([#310](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/310)) ([652e196](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/652e196b427ce9673676e214c6ad3905b21a68b0))
+
+
+### Miscellaneous Chores
+
+* set next version to v1.0.0 ([#349](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/349)) ([a76d2db](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/a76d2db0b31447dc96707679973ff87b3c755bf5))
+
 ## [0.5.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v0.5.1...v0.5.2) (2022-09-07)
 
 
