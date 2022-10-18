@@ -6,9 +6,6 @@
 
 <h1 align="center">Cloud SQL Go Connector</h1>
 
-*Warning*: This project is in Public Preview, and may contain breaking changes
-before it becomes Generally Available.
-
 [![CI][ci-badge]][ci-build]
 [![Go Reference][pkg-badge]][pkg-docs]
 
@@ -327,7 +324,7 @@ considered unsupported.
 ## Supported Go Versions
 
 We test and support at minimum, the latest three Go versions. Changes in supported Go versions will be
-considered a minor change, and will be listed in the realease notes. 
+considered a minor change, and will be listed in the realease notes.
 
 ### Release cadence
 This project aims for a release on at least a monthly basis. If no new features
