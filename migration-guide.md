@@ -51,7 +51,7 @@ import (
 )
 
 func connectMySQL() *sql.DB {
-    // Register a driver using whatever name you like.
+	// Register a driver using whatever name you like.
 	cleanup, err := mysql.RegisterDriver(
 		"cloudsql-mysql",
 		// any desired options go here, for example:
@@ -107,7 +107,7 @@ import (
 )
 
 func connectPostgres() *sql.DB {
-    // Register a driver using whatever name you like.
+	// Register a driver using whatever name you like.
 	cleanup, err := pgxv4.RegisterDriver(
 		"cloudsql-postgres",
 		// any desired options go here, for example:
@@ -151,7 +151,7 @@ import (
 )
 
 func connectSQLServer() *sql.DB {
-    // Register a driver using whatever name you like.
+	// Register a driver using whatever name you like.
 	cleanup, err := mssql.RegisterDriver(
 		"cloudsql-sqlserver",
 		// any desired options go here, for example:
