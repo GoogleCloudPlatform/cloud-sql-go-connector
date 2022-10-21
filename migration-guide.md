@@ -18,8 +18,6 @@ invocation.
 ### Cloud SQL Proxy
 
 ``` golang
-// v1 usage
-
 import (
 	"database/sql"
 	"log"
@@ -44,8 +42,6 @@ func connectMySQL() *sql.DB {
 ### Cloud SQL Go Connector
 
 ``` golang
-// v2 usage
-
 import (
 	"database/sql"
 	"log"
