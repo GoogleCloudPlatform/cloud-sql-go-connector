@@ -235,7 +235,7 @@ func Connect() {
 
 ### SQL Server
 
-To use `database/sql`, use `sqlserver.RegisterDriver` with any necessary Dialer
+To use `database/sql`, use `mssql.RegisterDriver` with any necessary Dialer
 configuration.
 
 ``` go
@@ -245,11 +245,11 @@ import (
     "database/sql"
 
     "cloud.google.com/go/cloudsqlconn"
-    "cloud.google.com/go/cloudsqlconn/sqlserver"
+    "cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
 )
 
 func Connect() {
-    cleanup, err := sqlserver.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
+    cleanup, err := mssql.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
     if err != nil {
         // ... handle error
     }
