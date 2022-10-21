@@ -20,7 +20,6 @@ invocation.
 ``` golang
 import (
 	"database/sql"
-	"log"
 
 	"github.com/GoogleCloudPlatform/cloudsql-proxy/proxy/dialers/mysql"
 )
@@ -33,7 +32,6 @@ func connectMySQL() *sql.DB {
 	db, err := mysql.DialCfg(cfg)
 	if err != nil {
 		// handle error as necessary
-		log.Fatal(err)
 	}
 	return db
 }
@@ -44,7 +42,6 @@ func connectMySQL() *sql.DB {
 ``` golang
 import (
 	"database/sql"
-	"log"
 
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/mysql/mysql"
@@ -59,7 +56,6 @@ func connectMySQL() *sql.DB {
 	)
 	if err != nil {
 		// handle error as necessary
-		log.Fatal(err)
 	}
 	// call cleanup to close the underylying driver when you're done with the
 	// db.
@@ -71,7 +67,6 @@ func connectMySQL() *sql.DB {
 	)
 	if err != nil {
 		// handle error as necessary
-		log.Fatal(err)
 	}
 	return db
 }
@@ -82,6 +77,11 @@ func connectMySQL() *sql.DB {
 ### Cloud SQL Proxy
 
 ``` golang
+import (
+	"database/sql"
+
+	_ "github.com/GoogleCloudPlatform/cloudsql-proxy/proxy/dialers/postgres"
+)
 func connectPostgres() *sql.DB {
 	db, err := sql.Open(
 		"cloudsqlpostgres",
@@ -89,7 +89,6 @@ func connectPostgres() *sql.DB {
 	)
 	if err != nil {
 		// handle error as necessary
-		log.Fatal(err)
 	}
 	return db
 }
@@ -100,7 +99,6 @@ func connectPostgres() *sql.DB {
 ``` golang
 import (
 	"database/sql"
-	"log"
 
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
@@ -116,7 +114,6 @@ func connectPostgres() *sql.DB {
 	)
 	if err != nil {
 		// handle error as necessary
-		log.Fatal(err)
 	}
 	// call cleanup to close the underylying driver when you're done with the
 	// db.
@@ -127,7 +124,6 @@ func connectPostgres() *sql.DB {
 	)
 	if err != nil {
 		// handle error as necessary
-		log.Fatal(err)
 	}
 	return db
 }
@@ -144,7 +140,6 @@ The Cloud SQL Proxy does not support SQL Server as a driver.
 ``` golang
 import (
 	"database/sql"
-	"log"
 
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
@@ -159,7 +154,6 @@ func connectSQLServer() *sql.DB {
 	)
 	if err != nil {
 		// handle error as necessary
-		log.Fatal(err)
 	}
 	// call cleanup to close the underylying driver when you're done with the
 	// db.
@@ -171,7 +165,6 @@ func connectSQLServer() *sql.DB {
 	)
 	if err != nil {
 		// handle error as necessary
-		log.Fatal(err)
 	}
 	return db
 }
