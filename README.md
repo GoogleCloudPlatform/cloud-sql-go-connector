@@ -16,6 +16,7 @@
 
 The _Cloud SQL Go Connector_ is a Cloud SQL connector designed for use with the
 Go language. Using a Cloud SQL connector provides the following benefits:
+
 * **IAM Authorization:** uses IAM permissions to control who/what can connect to
   your Cloud SQL instances
 * **Improved Security:** uses robust, updated TLS 1.3 encryption and
@@ -27,6 +28,9 @@ Go language. Using a Cloud SQL connector provides the following benefits:
   [Cloud SQL’s automatic IAM DB AuthN][iam-db-authn] feature.
 
 [iam-db-authn]: https://cloud.google.com/sql/docs/postgres/authentication
+
+For users migrating from the Cloud SQL Proxy drivers, see the [migration
+guide](./migration-guide.md).
 
 ## Installation
 
@@ -235,7 +239,7 @@ func Connect() {
 
 ### SQL Server
 
-To use `database/sql`, use `sqlserver.RegisterDriver` with any necessary Dialer
+To use `database/sql`, use `mssql.RegisterDriver` with any necessary Dialer
 configuration.
 
 ``` go
@@ -245,11 +249,11 @@ import (
     "database/sql"
 
     "cloud.google.com/go/cloudsqlconn"
-    "cloud.google.com/go/cloudsqlconn/sqlserver"
+    "cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
 )
 
 func Connect() {
-    cleanup, err := sqlserver.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
+    cleanup, err := mssql.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
     if err != nil {
         // ... handle error
     }
