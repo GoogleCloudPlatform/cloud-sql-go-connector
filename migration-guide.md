@@ -7,7 +7,7 @@ Unlike V1, the Go Connectors drivers support:
 1. Configuring multiple drivers per engine type using distinct registered driver
    names
 1. Support for SQL Server
-1. (Postgres only) Configuring a connecting using pgx directly (see README for
+1. (Postgres only) Configuring a connection using pgx directly (see README for
    details).
 
 Below are examples of the Cloud SQL Proxy invocation vs the new Go connector
