@@ -259,3 +259,47 @@ func TestClose(t *testing.T) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
 }
+
+func TestRefreshDuration(t *testing.T) {
+	now := time.Now()
+	tcs := []struct {
+		desc   string
+		expiry time.Time
+		want   time.Duration
+	}{
+		{
+			desc:   "when expiration is greater than 1 hour",
+			expiry: now.Add(4 * time.Hour),
+			want:   2 * time.Hour,
+		},
+		{
+			desc:   "when expiration is equal to 1 hour",
+			expiry: now.Add(time.Hour),
+			want:   30 * time.Minute,
+		},
+		{
+			desc:   "when expiration is less than 1 hour, but greater than 5 minutes",
+			expiry: now.Add(6 * time.Minute),
+			want:   5 * time.Minute,
+		},
+		{
+			desc:   "when expiration is less than 5 minutes",
+			expiry: now.Add(4 * time.Minute),
+			want:   0,
+		},
+		{
+			desc:   "when expiration is now",
+			expiry: now,
+			want:   0,
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			got := refreshDuration(now, tc.expiry)
+			// round to the second to remove millisecond differences
+			if got.Round(time.Second) != tc.want {
+				t.Fatalf("time until refresh: want = %v, got = %v", tc.want, got)
+			}
+		})
+	}
+}

@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package cloudsql
 
 import (
@@ -26,11 +25,6 @@ import (
 	errtype "cloud.google.com/go/cloudsqlconn/errtype"
 	"golang.org/x/oauth2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
-)
-
-const (
-	// refreshBuffer is the amount of time before a result expires to start a new refresh attempt.
-	refreshBuffer = 5 * time.Minute
 )
 
 var (
@@ -274,6 +268,22 @@ func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 	return res, nil
 }
 
+// refreshDuration returns the duration to wait before starting the next
+// refresh. Usually that duration will be half of the time until certificate
+// expiration.
+func refreshDuration(now, certExpiry time.Time) time.Duration {
+	d := certExpiry.Sub(now)
+	if d < time.Hour {
+		// Something is wrong with the certificate, refresh now.
+		if d < 5*time.Minute {
+			return 0
+		}
+		// Otherwise, wait five minutes before starting the refresh cycle.
+		return 5 * time.Minute
+	}
+	return d / 2
+}
+
 // scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshOperation
 // can be used to either Cancel or Wait for the operations result.
 func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
@@ -306,8 +316,8 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			return
 		default:
 		}
-		nextRefresh := i.cur.expiry.Add(-refreshBuffer)
-		i.next = i.scheduleRefresh(time.Until(nextRefresh))
+		t := refreshDuration(time.Now(), i.cur.expiry)
+		i.next = i.scheduleRefresh(t)
 	})
 	return res
 }
