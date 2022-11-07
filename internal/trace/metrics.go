@@ -117,6 +117,11 @@ func InitMetrics() error {
 	return registerErr
 }
 
+// Stop tells OpenCensus to stop the default worker.
+func Stop() {
+	view.Stop()
+}
+
 // RecordDialLatency records a latency value for a call to dial.
 func RecordDialLatency(ctx context.Context, instance, dialerID string, latency int64) {
 	// tag.New creates a new context and errors only if the new tag already

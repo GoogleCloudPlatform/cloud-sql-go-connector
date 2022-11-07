@@ -322,6 +322,7 @@ func (d *Dialer) Close() error {
 	for _, i := range d.instances {
 		i.Close()
 	}
+	trace.Stop()
 	return nil
 }
 
