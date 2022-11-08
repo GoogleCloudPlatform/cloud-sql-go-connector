@@ -256,11 +256,6 @@ func TestIAMAuthNErrors(t *testing.T) {
 		opts    Option
 	}{
 		{
-			desc:    "when the database engine is MySQL",
-			version: "MYSQL",
-			opts:    WithIAMAuthN(),
-		},
-		{
 			desc:    "when the database engine is SQL Server",
 			version: "SQLSERVER",
 			opts:    WithIAMAuthN(),
