@@ -149,6 +149,67 @@ func TestConnectInfo(t *testing.T) {
 	}
 }
 
+func TestConnectInfoAutoIP(t *testing.T) {
+	tcs := []struct {
+		desc   string
+		ips    []mock.FakeCSQLInstanceOption
+		wantIP string
+	}{
+		{
+			desc: "when public IP is enabled",
+			ips: []mock.FakeCSQLInstanceOption{
+				mock.WithPublicIP("8.8.8.8"),
+				mock.WithPrivateIP("10.0.0.1"),
+			},
+			wantIP: "8.8.8.8",
+		},
+		{
+			desc: "when only private IP is enabled",
+			ips: []mock.FakeCSQLInstanceOption{
+				mock.WithPrivateIP("10.0.0.1"),
+			},
+			wantIP: "10.0.0.1",
+		},
+	}
+
+	for _, tc := range tcs {
+		var opts []mock.FakeCSQLInstanceOption
+		opts = append(opts, mock.WithNoIPAddrs())
+		opts = append(opts, tc.ips...)
+		inst := mock.NewFakeCSQLInstance("p", "r", "i", opts...)
+		client, cleanup, err := mock.NewSQLAdminService(
+			context.Background(),
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		)
+		if err != nil {
+			t.Fatalf("%s", err)
+		}
+		defer func() {
+			if cErr := cleanup(); cErr != nil {
+				t.Fatalf("%v", cErr)
+			}
+		}()
+
+		i, err := NewInstance("p:r:i", client, RSAKey, 30*time.Second, nil, "", RefreshCfg{})
+		if err != nil {
+			t.Fatalf("failed to create mock instance: %v", err)
+		}
+
+		got, _, err := i.ConnectInfo(context.Background(), AutoIP)
+		if err != nil {
+			t.Fatalf("failed to retrieve connect info: %v", err)
+		}
+
+		if got != tc.wantIP {
+			t.Fatalf(
+				"ConnectInfo returned unexpected IP address, want = %v, got = %v",
+				tc.wantIP, got,
+			)
+		}
+	}
+}
+
 func TestConnectInfoErrors(t *testing.T) {
 	ctx := context.Background()
 
@@ -196,5 +257,78 @@ func TestClose(t *testing.T) {
 	_, _, err = im.ConnectInfo(ctx, PublicIP)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
+	}
+}
+
+func TestRefreshDuration(t *testing.T) {
+	now := time.Now()
+	tcs := []struct {
+		desc   string
+		expiry time.Time
+		want   time.Duration
+	}{
+		{
+			desc:   "when expiration is greater than 1 hour",
+			expiry: now.Add(4 * time.Hour),
+			want:   2 * time.Hour,
+		},
+		{
+			desc:   "when expiration is equal to 1 hour",
+			expiry: now.Add(time.Hour),
+			want:   30 * time.Minute,
+		},
+		{
+			desc:   "when expiration is less than 1 hour, but greater than 5 minutes",
+			expiry: now.Add(6 * time.Minute),
+			want:   5 * time.Minute,
+		},
+		{
+			desc:   "when expiration is less than 5 minutes",
+			expiry: now.Add(4 * time.Minute),
+			want:   0,
+		},
+		{
+			desc:   "when expiration is now",
+			expiry: now,
+			want:   0,
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			got := refreshDuration(now, tc.expiry)
+			// round to the second to remove millisecond differences
+			if got.Round(time.Second) != tc.want {
+				t.Fatalf("time until refresh: want = %v, got = %v", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestContextCancelled(t *testing.T) {
+	ctx := context.Background()
+
+	client, cleanup, err := mock.NewSQLAdminService(ctx)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+	defer cleanup()
+
+	// Set up an instance and then close it immediately
+	im, err := NewInstance("my-proj:my-region:my-inst", client, RSAKey, 30, nil, "", RefreshCfg{})
+	if err != nil {
+		t.Fatalf("failed to initialize Instance: %v", err)
+	}
+	im.Close()
+
+	// grab the current value of next before scheduling another refresh
+	next := im.next
+
+	op := im.scheduleRefresh(time.Nanosecond)
+	<-op.ready
+
+	// if scheduleRefresh returns without scheduling another one,
+	// i.next should be untouched and remain the same pointer value
+	if im.next != next {
+		t.Fatalf("refresh did not return after a closed context. next pointer changed: want = %p, got = %p", next, im.next)
 	}
 }

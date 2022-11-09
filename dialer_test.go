@@ -29,7 +29,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
 
-func testSuccessfulDial(t *testing.T, d *Dialer, ctx context.Context, i string, opts ...DialOption) {
+func testSuccessfulDial(ctx context.Context, t *testing.T, d *Dialer, i string, opts ...DialOption) {
 	conn, err := d.Dial(ctx, i, opts...)
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
@@ -72,7 +72,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	}
 	d.sqladmin = svc
 
-	testSuccessfulDial(t, d, context.Background(), "my-project:my-region:my-instance", WithPublicIP())
+	testSuccessfulDial(context.Background(), t, d, "my-project:my-region:my-instance", WithPublicIP())
 }
 
 func TestDialerConnectionSupportsSyscalls(t *testing.T) {
@@ -249,6 +249,58 @@ func TestIAMAuthn(t *testing.T) {
 	}
 }
 
+func TestIAMAuthNErrors(t *testing.T) {
+	tcs := []struct {
+		desc    string
+		version string
+		opts    Option
+	}{
+		{
+			desc:    "when the database engine is MySQL",
+			version: "MYSQL",
+			opts:    WithIAMAuthN(),
+		},
+		{
+			desc:    "when the database engine is SQL Server",
+			version: "SQLSERVER",
+			opts:    WithIAMAuthN(),
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			inst := mock.NewFakeCSQLInstance("proj", "region", "inst",
+				mock.WithEngineVersion(tc.version),
+			)
+			svc, cleanup, err := mock.NewSQLAdminService(
+				context.Background(),
+				mock.InstanceGetSuccess(inst, 1),
+				mock.CreateEphemeralSuccess(inst, 1),
+			)
+			if err != nil {
+				t.Fatalf("mock.NewSQLAdminService(): %v", err)
+			}
+			defer cleanup()
+
+			stop := mock.StartServerProxy(t, inst)
+			defer stop()
+
+			d, err := NewDialer(context.Background(),
+				WithTokenSource(mock.EmptyTokenSource{}), tc.opts)
+			if err != nil {
+				t.Fatalf("NewDialer failed with error = %v", err)
+			}
+			d.sqladmin = svc
+
+			_, err = d.Dial(context.Background(), "proj:region:inst")
+			t.Log(err)
+			if err == nil {
+				t.Fatalf("version = %v, want error, got nil", tc.version)
+			}
+		})
+	}
+}
+
 func TestDialerWithCustomDialFunc(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	svc, cleanup, err := mock.NewSQLAdminService(
@@ -402,7 +454,7 @@ func TestWarmup(t *testing.T) {
 				t.Fatalf("Warmup failed: %v", err)
 			}
 			// Dial once with the "dial" options
-			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance", test.dialOpts...)
+			testSuccessfulDial(ctx, t, d, "my-project:my-region:my-instance", test.dialOpts...)
 		})
 	}
 }
@@ -467,10 +519,10 @@ func TestDialDialerOptsConflicts(t *testing.T) {
 			}()
 
 			// Dial once with the "default" options
-			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance")
+			testSuccessfulDial(ctx, t, d, "my-project:my-region:my-instance")
 
 			// Dial once with the "dial" options
-			testSuccessfulDial(t, d, ctx, "my-project:my-region:my-instance", test.dialOpts...)
+			testSuccessfulDial(ctx, t, d, "my-project:my-region:my-instance", test.dialOpts...)
 		})
 	}
 }

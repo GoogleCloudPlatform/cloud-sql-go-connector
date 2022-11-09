@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package cloudsql
 
 import (
@@ -26,11 +25,6 @@ import (
 	errtype "cloud.google.com/go/cloudsqlconn/errtype"
 	"golang.org/x/oauth2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
-)
-
-const (
-	// refreshBuffer is the amount of time before a result expires to start a new refresh attempt.
-	refreshBuffer = 5 * time.Minute
 )
 
 var (
@@ -199,7 +193,21 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 	if err != nil {
 		return "", nil, err
 	}
-	addr, ok := res.md.ipAddrs[ipType]
+	var (
+		addr string
+		ok   bool
+	)
+	switch ipType {
+	case AutoIP:
+		// Try Public first
+		addr, ok = res.md.ipAddrs[PublicIP]
+		if !ok {
+			// Try Private second
+			addr, ok = res.md.ipAddrs[PrivateIP]
+		}
+	default:
+		addr, ok = res.md.ipAddrs[ipType]
+	}
 	if !ok {
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", ipType),
@@ -221,6 +229,8 @@ func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
 	return res.md.version, nil
 }
 
+// UpdateRefresh cancels all existing refresh attempts and schedules new
+// attempts with the provided config.
 func (i *Instance) UpdateRefresh(cfg RefreshCfg) {
 	i.resultGuard.Lock()
 	defer i.resultGuard.Unlock()
@@ -258,6 +268,22 @@ func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 	return res, nil
 }
 
+// refreshDuration returns the duration to wait before starting the next
+// refresh. Usually that duration will be half of the time until certificate
+// expiration.
+func refreshDuration(now, certExpiry time.Time) time.Duration {
+	d := certExpiry.Sub(now)
+	if d < time.Hour {
+		// Something is wrong with the certificate, refresh now.
+		if d < 5*time.Minute {
+			return 0
+		}
+		// Otherwise, wait five minutes before starting the refresh cycle.
+		return 5 * time.Minute
+	}
+	return d / 2
+}
+
 // scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshOperation
 // can be used to either Cancel or Wait for the operations result.
 func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
@@ -267,9 +293,17 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key, i.RefreshCfg.UseIAMAuthN)
 		close(res.ready)
 
+		select {
+		case <-i.ctx.Done():
+			// instance has been closed, don't schedule anything
+			return
+		default:
+		}
+
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh
 		i.resultGuard.Lock()
 		defer i.resultGuard.Unlock()
+
 		// if failed, scheduled the next refresh immediately
 		if res.err != nil {
 			i.next = i.scheduleRefresh(0)
@@ -282,16 +316,11 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			}
 			return
 		}
+
 		// Update the current results, and schedule the next refresh in the future
 		i.cur = res
-		select {
-		case <-i.ctx.Done():
-			// instance has been closed, don't schedule anything
-			return
-		default:
-		}
-		nextRefresh := i.cur.expiry.Add(-refreshBuffer)
-		i.next = i.scheduleRefresh(time.Until(nextRefresh))
+		t := refreshDuration(time.Now(), i.cur.expiry)
+		i.next = i.scheduleRefresh(t)
 	})
 	return res
 }

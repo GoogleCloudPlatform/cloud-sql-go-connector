@@ -23,8 +23,8 @@ import (
 	"net"
 
 	"cloud.google.com/go/cloudsqlconn"
-	mssqldb "github.com/denisenkom/go-mssqldb"
-	"github.com/denisenkom/go-mssqldb/msdsn"
+	mssqldb "github.com/microsoft/go-mssqldb"
+	"github.com/microsoft/go-mssqldb/msdsn"
 )
 
 // RegisterDriver registers a SQL Server driver that uses the
@@ -50,7 +50,7 @@ type csqlDialer struct {
 }
 
 // DialContext adheres to the mssql.Dialer interface.
-func (c *csqlDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+func (c *csqlDialer) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
 	return c.d.Dial(ctx, c.connName)
 }
 
@@ -72,7 +72,7 @@ type sqlserverDriver struct {
 // "sqlserver://user:password@localhost?database=mydb&cloudsql=my-proj:us-central1:my-inst"
 //
 // For details, see
-// https://github.com/denisenkom/go-mssqldb#the-connection-string-can-be-specified-in-one-of-three-formats
+// https://github.com/microsoft/go-mssqldb#the-connection-string-can-be-specified-in-one-of-three-formats
 func (s *sqlserverDriver) Open(name string) (driver.Conn, error) {
 	_, res, err := msdsn.Parse(name)
 	if err != nil {

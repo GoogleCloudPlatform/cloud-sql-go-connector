@@ -6,9 +6,6 @@
 
 <h1 align="center">Cloud SQL Go Connector</h1>
 
-*Warning*: This project is in Public Preview, and may contain breaking changes
-before it becomes Generally Available.
-
 [![CI][ci-badge]][ci-build]
 [![Go Reference][pkg-badge]][pkg-docs]
 
@@ -19,6 +16,7 @@ before it becomes Generally Available.
 
 The _Cloud SQL Go Connector_ is a Cloud SQL connector designed for use with the
 Go language. Using a Cloud SQL connector provides the following benefits:
+
 * **IAM Authorization:** uses IAM permissions to control who/what can connect to
   your Cloud SQL instances
 * **Improved Security:** uses robust, updated TLS 1.3 encryption and
@@ -30,6 +28,9 @@ Go language. Using a Cloud SQL connector provides the following benefits:
   [Cloud SQL’s automatic IAM DB AuthN][iam-db-authn] feature.
 
 [iam-db-authn]: https://cloud.google.com/sql/docs/postgres/authentication
+
+For users migrating from the Cloud SQL Proxy drivers, see the [migration
+guide](./migration-guide.md).
 
 ## Installation
 
@@ -126,7 +127,7 @@ instance.
 with a database and instead uses `database/sql`. See [the section below](#SQL-Server)
 on how to use the `database/sql` package with a Cloud SQL SQL Server instance.
 
-[go-mssqldb]: https://github.com/denisenkom/go-mssqldb
+[go-mssqldb]: https://github.com/microsoft/go-mssqldb
 
 ### Using Options
 
@@ -238,7 +239,7 @@ func Connect() {
 
 ### SQL Server
 
-To use `database/sql`, use `sqlserver.RegisterDriver` with any necessary Dialer
+To use `database/sql`, use `mssql.RegisterDriver` with any necessary Dialer
 configuration.
 
 ``` go
@@ -248,11 +249,11 @@ import (
     "database/sql"
 
     "cloud.google.com/go/cloudsqlconn"
-    "cloud.google.com/go/cloudsqlconn/sqlserver"
+    "cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
 )
 
 func Connect() {
-    cleanup, err := sqlserver.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
+    cleanup, err := mssql.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
     if err != nil {
         // ... handle error
     }
@@ -327,7 +328,7 @@ considered unsupported.
 ## Supported Go Versions
 
 We test and support at minimum, the latest three Go versions. Changes in supported Go versions will be
-considered a minor change, and will be listed in the realease notes. 
+considered a minor change, and will be listed in the realease notes.
 
 ### Release cadence
 This project aims for a release on at least a monthly basis. If no new features

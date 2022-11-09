@@ -134,9 +134,9 @@ func WithClientCertSigner(s ClientSignFunc) FakeCSQLInstanceOption {
 	}
 }
 
-// WithMissingIPAddrs configures a Fake Cloud SQL instance to have no IP
+// WithNoIPAddrs configures a Fake Cloud SQL instance to have no IP
 // addresses.
-func WithMissingIPAddrs() FakeCSQLInstanceOption {
+func WithNoIPAddrs() FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
 		f.ipAddrs = map[string]string{}
 	}
