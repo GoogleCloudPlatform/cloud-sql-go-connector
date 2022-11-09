@@ -293,9 +293,17 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key, i.RefreshCfg.UseIAMAuthN)
 		close(res.ready)
 
+		select {
+		case <-i.ctx.Done():
+			// instance has been closed, don't schedule anything
+			return
+		default:
+		}
+
 		// Once the refresh is complete, update "current" with working result and schedule a new refresh
 		i.resultGuard.Lock()
 		defer i.resultGuard.Unlock()
+
 		// if failed, scheduled the next refresh immediately
 		if res.err != nil {
 			i.next = i.scheduleRefresh(0)
@@ -308,14 +316,9 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			}
 			return
 		}
+
 		// Update the current results, and schedule the next refresh in the future
 		i.cur = res
-		select {
-		case <-i.ctx.Done():
-			// instance has been closed, don't schedule anything
-			return
-		default:
-		}
 		t := refreshDuration(time.Now(), i.cur.expiry)
 		i.next = i.scheduleRefresh(t)
 	})
