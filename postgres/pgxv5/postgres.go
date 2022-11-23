@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build go1.18
+
 // Package pgxv5 provides a Cloud SQL Postgres driver that uses pgx v5 and works
 // with the database/sql package.
 package pgxv5
