@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pgxv4_test
+package pgxv5_test
 
 import (
 	"database/sql"
@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
-	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
+	"cloud.google.com/go/cloudsqlconn/postgres/pgxv5"
 )
 
 var (
@@ -56,11 +56,11 @@ func requirePostgresVars(t *testing.T) {
 	}
 }
 
-// Example shows how to use a Cloud SQL Postgres dialer.
+// Example shows how to register and use a Cloud SQL Postgres dialer.
 func ExampleRegisterDriver() {
 	// Note that sslmode=disable is required it does not mean that the connection
 	// is unencrypted. All connections via the proxy are completely encrypted.
-	pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())
+	pgxv5.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())
 	db, err := sql.Open(
 		"cloudsql-postgres",
 		"host=project:region:instance user=postgres dbname=postgres password=password sslmode=disable",
@@ -95,16 +95,16 @@ func TestPostgresHook(t *testing.T) {
 		opts         []cloudsqlconn.Option
 	}{
 		{
-			driverName:   "cloud-sql-postgres-v4",
+			driverName:   "cloud-sql-postgres-v5",
 			user:         postgresUser,
 			password:     postgresPass,
-			registerFunc: pgxv4.RegisterDriver,
+			registerFunc: pgxv5.RegisterDriver,
 		},
 		{
-			driverName:   "cloud-sql-postgres-iam-v4",
+			driverName:   "cloud-sql-postgres-iam-v5",
 			user:         postgresUserIAM,
 			password:     postgresPass,
-			registerFunc: pgxv4.RegisterDriver,
+			registerFunc: pgxv5.RegisterDriver,
 			opts:         []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN()},
 		},
 	}

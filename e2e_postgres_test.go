@@ -19,7 +19,6 @@ package cloudsqlconn_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net"
 	"os"
@@ -28,17 +27,22 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
-	"github.com/jackc/pgx/v4"
-
-	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
+	"github.com/jackc/pgx/v5"
 )
 
 var (
-	postgresConnName = os.Getenv("POSTGRES_CONNECTION_NAME") // "Cloud SQL Postgres instance connection name, in the form of 'project:region:instance'.
-	postgresUser     = os.Getenv("POSTGRES_USER")            // Name of database user.
-	postgresPass     = os.Getenv("POSTGRES_PASS")            // Password for the database user; be careful when entering a password on the command line (it may go into your terminal's history).
-	postgresDB       = os.Getenv("POSTGRES_DB")              // Name of the database to connect to.
-	postgresUserIAM  = os.Getenv("POSTGRES_USER_IAM")        // Name of database IAM user.
+	// "Cloud SQL Postgres instance connection name, in the form of
+	// 'project:region:instance'.
+	postgresConnName = os.Getenv("POSTGRES_CONNECTION_NAME")
+	// Name of database user.
+	postgresUser = os.Getenv("POSTGRES_USER")
+	// Password for the database user; be careful when entering a password on
+	// the command line (it may go into your terminal's history).
+	postgresPass = os.Getenv("POSTGRES_PASS")
+	// Name of the database to connect to.
+	postgresDB = os.Getenv("POSTGRES_DB")
+	// Name of database IAM user.
+	postgresUserIAM = os.Getenv("POSTGRES_USER_IAM")
 )
 
 func requirePostgresVars(t *testing.T) {
@@ -147,40 +151,4 @@ func TestEngineVersion(t *testing.T) {
 	if !strings.Contains(gotEV, "POSTGRES") {
 		t.Errorf("InstanceEngineVersion(%s) failed: want 'POSTGRES', got %v", gotEV, err)
 	}
-}
-
-func TestPostgresHook(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping Postgres integration tests")
-	}
-	testConn := func(db *sql.DB) {
-		var now time.Time
-		if err := db.QueryRow("SELECT NOW()").Scan(&now); err != nil {
-			t.Fatalf("QueryRow failed: %v", err)
-		}
-		t.Log(now)
-	}
-	pgxv4.RegisterDriver("cloudsql-postgres")
-	db, err := sql.Open(
-		"cloudsql-postgres",
-		fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
-			postgresConnName, postgresUser, postgresPass, postgresDB),
-	)
-	if err != nil {
-		t.Fatalf("sql.Open want err = nil, got = %v", err)
-	}
-	defer db.Close()
-	testConn(db)
-
-	pgxv4.RegisterDriver("cloudsql-postgres-iam", cloudsqlconn.WithIAMAuthN())
-	db2, err := sql.Open(
-		"cloudsql-postgres-iam",
-		fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
-			postgresConnName, postgresUserIAM, postgresDB),
-	)
-	if err != nil {
-		t.Fatalf("sql.Open want err = nil, got = %v", err)
-	}
-	defer db2.Close()
-	testConn(db2)
 }

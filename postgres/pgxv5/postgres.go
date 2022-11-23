@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package pgxv4 provides a Cloud SQL Postgres driver that uses pgx v4 and works
+// Package pgxv5 provides a Cloud SQL Postgres driver that uses pgx v5 and works
 // with the database/sql package.
-package pgxv4
+package pgxv5
 
 import (
 	"context"
@@ -24,14 +24,14 @@ import (
 	"sync"
 
 	"cloud.google.com/go/cloudsqlconn"
-	"github.com/jackc/pgx/v4"
-	"github.com/jackc/pgx/v4/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // RegisterDriver registers a Postgres driver that uses the cloudsqlconn.Dialer
 // configured with the provided options. The choice of name is entirely up to
 // the caller and may be used to distinguish between multiple registrations of
-// differently configured Dialers. The driver uses pgx/v4 internally.
+// differently configured Dialers. The driver uses pgx/v5 internally.
 // RegisterDriver returns a cleanup function that should be called one the
 // database connection is no longer needed.
 func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, error) {
