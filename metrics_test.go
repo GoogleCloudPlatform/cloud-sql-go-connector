@@ -54,6 +54,7 @@ func (e *spyMetricsExporter) Data() []metric {
 // wantLastValueMetric ensures the provided metrics include a metric with the
 // wanted name and at least data point.
 func wantLastValueMetric(t *testing.T, wantName string, ms []metric) {
+	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
 	for _, m := range ms {
 		gotNames[m.name] = m.data
@@ -68,6 +69,7 @@ func wantLastValueMetric(t *testing.T, wantName string, ms []metric) {
 // wantDistributionMetric ensures the provided metrics include a metric with the
 // wanted name and at least one data point.
 func wantDistributionMetric(t *testing.T, wantName string, ms []metric) {
+	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
 	for _, m := range ms {
 		gotNames[m.name] = m.data
@@ -82,6 +84,7 @@ func wantDistributionMetric(t *testing.T, wantName string, ms []metric) {
 // wantCountMetric ensures the provided metrics include a metric with the wanted
 // name and at least one data point.
 func wantCountMetric(t *testing.T, wantName string, ms []metric) {
+	t.Helper()
 	gotNames := make(map[string]view.AggregationData)
 	for _, m := range ms {
 		gotNames[m.name] = m.data
@@ -140,11 +143,11 @@ func TestDialerWithMetrics(t *testing.T) {
 	time.Sleep(10 * time.Millisecond) // allow exporter a chance to run
 
 	// success metrics
-	wantLastValueMetric(t, "/cloudsqlconn/open_connections", spy.Data())
-	wantDistributionMetric(t, "/cloudsqlconn/dial_latency", spy.Data())
-	wantCountMetric(t, "/cloudsqlconn/refresh_success_count", spy.Data())
+	wantLastValueMetric(t, "cloudsqlconn/open_connections", spy.Data())
+	wantDistributionMetric(t, "cloudsqlconn/dial_latency", spy.Data())
+	wantCountMetric(t, "cloudsqlconn/refresh_success_count", spy.Data())
 
 	// failure metrics from dialing bogus instance
-	wantCountMetric(t, "/cloudsqlconn/dial_failure_count", spy.Data())
-	wantCountMetric(t, "/cloudsqlconn/refresh_failure_count", spy.Data())
+	wantCountMetric(t, "cloudsqlconn/dial_failure_count", spy.Data())
+	wantCountMetric(t, "cloudsqlconn/refresh_failure_count", spy.Data())
 }

@@ -33,33 +33,33 @@ var (
 	keyErrorCode, _ = tag.NewKey("cloudsql_error_code")
 
 	mLatencyMS = stats.Int64(
-		"/cloudsqlconn/latency",
+		"cloudsqlconn/latency",
 		"The latency in milliseconds per Dial",
 		stats.UnitMilliseconds,
 	)
 	mConnections = stats.Int64(
-		"/cloudsqlconn/connection",
+		"cloudsqlconn/connection",
 		"A connect or disconnect event to Cloud SQL",
 		stats.UnitDimensionless,
 	)
 	mDialError = stats.Int64(
-		"/cloudsqlconn/dial_failure",
+		"cloudsqlconn/dial_failure",
 		"A failure to dial a Cloud SQL instance",
 		stats.UnitDimensionless,
 	)
 	mSuccessfulRefresh = stats.Int64(
-		"/cloudsqlconn/refresh_success",
+		"cloudsqlconn/refresh_success",
 		"A successful certificate refresh operation",
 		stats.UnitDimensionless,
 	)
 	mFailedRefresh = stats.Int64(
-		"/cloudsqlconn/refresh_failure",
+		"cloudsqlconn/refresh_failure",
 		"A failed certificate refresh operation",
 		stats.UnitDimensionless,
 	)
 
 	latencyView = &view.View{
-		Name:        "/cloudsqlconn/dial_latency",
+		Name:        "cloudsqlconn/dial_latency",
 		Measure:     mLatencyMS,
 		Description: "The distribution of dialer latencies (ms)",
 		// Latency in buckets, e.g., >=0ms, >=100ms, etc.
@@ -67,28 +67,28 @@ var (
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 	connectionsView = &view.View{
-		Name:        "/cloudsqlconn/open_connections",
+		Name:        "cloudsqlconn/open_connections",
 		Measure:     mConnections,
 		Description: "The current number of open Cloud SQL connections",
 		Aggregation: view.LastValue(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 	dialFailureView = &view.View{
-		Name:        "/cloudsqlconn/dial_failure_count",
+		Name:        "cloudsqlconn/dial_failure_count",
 		Measure:     mDialError,
 		Description: "The number of failed dial attempts",
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 	refreshCountView = &view.View{
-		Name:        "/cloudsqlconn/refresh_success_count",
+		Name:        "cloudsqlconn/refresh_success_count",
 		Measure:     mSuccessfulRefresh,
 		Description: "The number of successful certificate refresh operations",
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 	failedRefreshCountView = &view.View{
-		Name:        "/cloudsqlconn/refresh_failure_count",
+		Name:        "cloudsqlconn/refresh_failure_count",
 		Measure:     mFailedRefresh,
 		Description: "The number of failed certificate refresh operations",
 		Aggregation: view.Count(),
