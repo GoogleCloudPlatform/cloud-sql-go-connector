@@ -83,31 +83,41 @@ To use the dialer with [pgx](https://github.com/jackc/pgx), use
 a [Config.DialFunc][dial-func] like so:
 
 ``` go
-// Configure the driver to connect to the database
-dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", pgUser, pgPass, pgDB)
-config, err := pgxpool.ParseConfig(dsn)
-if err != nil {
-    log.Fatalf("failed to parse pgx config: %v", err)
-}
+import (
+	"context"
+	"net"
 
-// Create a new dialer with any options
-d, err := cloudsqlconn.NewDialer(ctx)
-if err != nil {
-    log.Fatalf("failed to initialize dialer: %v", err)
-}
-defer d.Close()
+	"cloud.google.com/go/cloudsqlconn"
+	"github.com/jackc/pgx/v4/pgxpool"
+)
 
-// Tell the driver to use the Cloud SQL Go Connector to create connections
-config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string) (net.Conn, error) {
-    return d.Dial(ctx, "project:region:instance")
-}
+func connect() {
+	// Configure the driver to connect to the database
+	dsn := "user=myuser password=mypass dbname=mydb sslmode=disable"
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		/* handle error */
+	}
 
-// Interact with the dirver directly as you normally would
-conn, err := pgxpool.ConnectConfig(context.Background(), config)
-if err != nil {
-    log.Fatalf("failed to connect: %v", connErr)
+	// Create a new dialer with any options
+	d, err := cloudsqlconn.NewDialer(context.Background())
+	if err != nil {
+		/* handle error */
+	}
+	defer d.Close()
+
+	// Tell the driver to use the Cloud SQL Go Connector to create connections
+	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string) (net.Conn, error) {
+		return d.Dial(ctx, "project:region:instance")
+	}
+
+	// Interact with the dirver directly as you normally would
+	conn, err := pgxpool.ConnectConfig(context.Background(), config)
+	if err != nil {
+		/* handle error */
+	}
+    // ... etc
 }
-defer conn.Close()
 ```
 
 [dial-func]: https://pkg.go.dev/github.com/jackc/pgconn#Config
@@ -152,6 +162,7 @@ For a full list of customizable behavior, see Option.
 
 If you want to customize things about how the connection is created, use
 `Option`:
+
 ```go
 conn, err := myDialer.Dial(
     ctx,
@@ -162,6 +173,7 @@ conn, err := myDialer.Dial(
 
 You can also use the `WithDefaultDialOptions` Option to specify
 DialOptions to be used by default:
+
 ```go
 myDialer, err := cloudsqlconn.NewDialer(
     ctx,
@@ -183,8 +195,6 @@ configuration. Note: the connection string must use the keyword/value format
 with host set to the instance connection name.
 
 ``` go
-package foo
-
 import (
     "database/sql"
 
@@ -192,7 +202,7 @@ import (
     "cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
 )
 
-func Connect() {
+func connect() {
     cleanup, err := pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())
     if err != nil {
         // ... handle error
@@ -213,8 +223,6 @@ To use `database/sql`, use `mysql.RegisterDriver` with any necessary Dialer
 configuration.
 
 ```go
-package foo
-
 import (
     "database/sql"
 
@@ -222,7 +230,7 @@ import (
     "cloud.google.com/go/cloudsqlconn/mysql/mysql"
 )
 
-func Connect() {
+func connect() {
     cleanup, err := mysql.RegisterDriver("cloudsql-mysql", cloudsqlconn.WithCredentialsFile("key.json"))
     if err != nil {
         // ... handle error
@@ -243,8 +251,6 @@ To use `database/sql`, use `mssql.RegisterDriver` with any necessary Dialer
 configuration.
 
 ``` go
-package foo
-
 import (
     "database/sql"
 
@@ -252,7 +258,7 @@ import (
     "cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
 )
 
-func Connect() {
+func connect() {
     cleanup, err := mssql.RegisterDriver("cloudsql-sqlserver", cloudsqlconn.WithCredentialsFile("key.json"))
     if err != nil {
         // ... handle error
@@ -267,19 +273,37 @@ func Connect() {
 }
 ```
 
-
 ### Enabling Metrics and Tracing
 
 This library includes support for metrics and tracing using [OpenCensus][].
 To enable metrics or tracing, you need to configure an [exporter][].
 OpenCensus supports many backends for exporters.
 
+Supported metrics include:
+
+- `cloudsqlconn/dial_latency`: The distribution of dialer latencies (ms)
+- `cloudsqlconn/open_connections`: The current number of open Cloud SQL
+  connections
+- `cloudsqlconn/dial_failure_count`: The number of failed dial attempts
+- `cloudsqlconn/refresh_success_count`: The number of successful certificate
+  refresh operations
+- `cloudsqlconn/refresh_failure_count`: The number of failed refresh
+  operations.
+
+Supported traces include:
+
+- `cloud.google.com/go/cloudsqlconn.Dial`: The dial operation including
+  refreshing an ephemeral certificate and connecting the instance
+- `cloud.google.com/go/cloudsqlconn/internal.InstanceInfo`: The call to retrieve
+  instance metadata (e.g., database engine type, IP address, etc)
+- `cloud.google.com/go/cloudsqlconn/internal.Connect`: The connection attempt
+  using the ephemeral certificate
+- SQL Admin API client operations
+
 For example, to use [Cloud Monitoring][] and [Cloud Trace][], you would
 configure an exporter like so:
 
 ```golang
-package main
-
 import (
     "contrib.go.opencensus.io/exporter/stackdriver"
     "go.opencensus.io/trace"
