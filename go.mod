@@ -3,7 +3,7 @@ module cloud.google.com/go/cloudsqlconn
 go 1.16
 
 require (
-	github.com/go-sql-driver/mysql v1.6.0
+	github.com/go-sql-driver/mysql v1.7.0
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/google/uuid v1.3.0
 	github.com/jackc/pgx/v4 v4.17.2
