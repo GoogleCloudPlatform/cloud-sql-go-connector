@@ -74,7 +74,7 @@ type sqlserverDriver struct {
 // For details, see
 // https://github.com/microsoft/go-mssqldb#the-connection-string-can-be-specified-in-one-of-three-formats
 func (s *sqlserverDriver) Open(name string) (driver.Conn, error) {
-	_, res, err := msdsn.Parse(name)
+	res, err := msdsn.Parse(name)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func (s *sqlserverDriver) Open(name string) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	connName := res["cloudsql"]
+	connName := res.Parameters["cloudsql"]
 	c.Dialer = &csqlDialer{
 		d:        s.d,
 		connName: connName,
