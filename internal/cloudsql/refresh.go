@@ -391,6 +391,8 @@ func supportsAutoIAMAuthN(version string) error {
 	switch {
 	case strings.HasPrefix(version, "POSTGRES"):
 		return nil
+	case strings.HasPrefix(version, "MYSQL"):
+		return nil
 	default:
 		return fmt.Errorf("%s does not support Auto IAM DB Authentication", version)
 	}

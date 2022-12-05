@@ -21,14 +21,24 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/mysql/mysql"
 )
 
 var (
-	mysqlConnName = os.Getenv("MYSQL_CONNECTION_NAME") // "Cloud SQL MySQL instance connection name, in the form of 'project:region:instance'.
-	mysqlUser     = os.Getenv("MYSQL_USER")            // Name of database user.
-	mysqlPass     = os.Getenv("MYSQL_PASS")            // Password for the database user; be careful when entering a password on the command line (it may go into your terminal's history).
-	mysqlDb       = os.Getenv("MYSQL_DB")              // Name of the database to connect to.
+	// "Cloud SQL MySQL instance connection name, in the form of 'project:region:instance'.
+	mysqlConnName = os.Getenv("MYSQL_CONNECTION_NAME")
+	// "Cloud SQL MySQL instance connection name, in the form of 'project:region:instance'.
+	mysqlIAMConnName = os.Getenv("MYSQL_IAM_CONNECTION_NAME")
+	// Name of database user.
+	mysqlUser = os.Getenv("MYSQL_USER")
+	// Name of database IAM user.
+	mysqlIAMUser = os.Getenv("MYSQL_USER_IAM")
+	// Password for the database user; be careful when entering a password on
+	// the command line (it may go into your terminal's history).
+	mysqlPass = os.Getenv("MYSQL_PASS")
+	// Name of the database to connect to.
+	mysqlDB = os.Getenv("MYSQL_DB")
 )
 
 func requireMySQLVars(t *testing.T) {
@@ -39,7 +49,7 @@ func requireMySQLVars(t *testing.T) {
 		t.Fatal("'MYSQL_USER' env var not set")
 	case mysqlPass:
 		t.Fatal("'MYSQL_PASS' env var not set")
-	case mysqlDb:
+	case mysqlDB:
 		t.Fatal("'MYSQL_DB' env var not set")
 	}
 }
@@ -55,7 +65,11 @@ func TestMySQLDriver(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	cleanup, err := mysql.RegisterDriver("cloudsql-mysql")
+	cleanup, err := mysql.RegisterDriver(
+		"cloudsql-mysql",
+		cloudsqlconn.WithAdminAPIEndpoint(os.Getenv("ADMIN_API_ENDPOINT")),
+		cloudsqlconn.WithQuotaProject(os.Getenv("QUOTA_PROJECT")),
+	)
 	if err != nil {
 		t.Fatalf("failed to register driver: %v", err)
 	}
@@ -63,7 +77,35 @@ func TestMySQLDriver(t *testing.T) {
 	db, err := sql.Open(
 		"mysql",
 		fmt.Sprintf("%s:%s@cloudsql-mysql(%s)/%s?parseTime=true",
-			mysqlUser, mysqlPass, mysqlConnName, mysqlDb),
+			mysqlUser, mysqlPass, mysqlConnName, mysqlDB),
+	)
+	if err != nil {
+		t.Fatalf("sql.Open want err = nil, got = %v", err)
+	}
+	defer db.Close()
+	testConn(db)
+}
+
+func TestMySQLDriverIAMAuthN(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping MySQL integration tests")
+	}
+	testConn := func(db *sql.DB) {
+		var now time.Time
+		if err := db.QueryRow("SELECT NOW()").Scan(&now); err != nil {
+			t.Fatalf("QueryRow failed: %v", err)
+		}
+		t.Log(now)
+	}
+	cleanup, err := mysql.RegisterDriver("cloudsql-mysql-iam", cloudsqlconn.WithIAMAuthN())
+	if err != nil {
+		t.Fatalf("failed to register driver: %v", err)
+	}
+	defer cleanup()
+	db, err := sql.Open(
+		"mysql",
+		fmt.Sprintf("%s:empty@cloudsql-mysql-iam(%s)/%s?parseTime=true",
+			mysqlIAMUser, mysqlIAMConnName, mysqlDB),
 	)
 	if err != nil {
 		t.Fatalf("sql.Open want err = nil, got = %v", err)
