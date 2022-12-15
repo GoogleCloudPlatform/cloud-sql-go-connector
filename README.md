@@ -48,145 +48,7 @@ your Cloud SQL instance.
 The instance connection name for your Cloud SQL instance is always in the
 format "project:region:instance".
 
-### APIs and Services
-
-This package requires the following to successfully make Cloud SQL Connections:
-
-- IAM principal (user, service account, etc.) with the
-[Cloud SQL Client][client-role] role or equivalent. This IAM principal will
- be used for [credentials](#credentials).
-- The [Cloud SQL Admin API][admin-api] to be enabled within your Google Cloud
-Project. By default, the API will be called in the project associated with
-the IAM principal.
-
-[admin-api]: https://console.cloud.google.com/apis/api/sqladmin.googleapis.com
-[client-role]: https://cloud.google.com/sql/docs/mysql/roles-and-permissions
-
-### Credentials
-
-This repo uses the [Application Default Credentials (ADC)][adc] strategy for
-resolving credentials. Please see [these instructions for how to set your ADC][set-adc]
-(Google Cloud Application vs Local Development, IAM user vs service account credentials),
-or consult the [golang.org/x/oauth2/google][google-auth] documentation.
-
-To explicitly set a specific source for the Credentials, see [Using
-Options](#using-options) below.
-
-[adc]: https://cloud.google.com/docs/authentication#adc
-[set-adc]: https://cloud.google.com/docs/authentication/provide-credentials-adc
-[google-auth]: https://pkg.go.dev/golang.org/x/oauth2/google#hdr-Credentials
-
-### Postgres
-
-To use the dialer with [pgx](https://github.com/jackc/pgx), use
-[pgxpool](https://pkg.go.dev/github.com/jackc/pgx/v4/pgxpool) by configuring
-a [Config.DialFunc][dial-func] like so:
-
-``` go
-import (
-	"context"
-	"net"
-
-	"cloud.google.com/go/cloudsqlconn"
-	"github.com/jackc/pgx/v4/pgxpool"
-)
-
-func connect() {
-	// Configure the driver to connect to the database
-	dsn := "user=myuser password=mypass dbname=mydb sslmode=disable"
-	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		/* handle error */
-	}
-
-	// Create a new dialer with any options
-	d, err := cloudsqlconn.NewDialer(context.Background())
-	if err != nil {
-		/* handle error */
-	}
-	defer d.Close()
-
-	// Tell the driver to use the Cloud SQL Go Connector to create connections
-	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string) (net.Conn, error) {
-		return d.Dial(ctx, "project:region:instance")
-	}
-
-	// Interact with the dirver directly as you normally would
-	conn, err := pgxpool.ConnectConfig(context.Background(), config)
-	if err != nil {
-		/* handle error */
-	}
-    // ... etc
-}
-```
-
-[dial-func]: https://pkg.go.dev/github.com/jackc/pgconn#Config
-
-### MySQL
-
-The [Go MySQL driver][mysql] does not provide a stand-alone interface for
-interacting with a database and instead uses `database/sql`. See [the section
-below](#MySQL) on how to use the `database/sql` package with a Cloud SQL MySQL
-instance.
-
-[mysql]: https://github.com/go-sql-driver/mysql
-
-### SQL Server
-
-[Go-mssql][go-mssqldb] does not provide a stand-alone interface for interacting
-with a database and instead uses `database/sql`. See [the section below](#SQL-Server)
-on how to use the `database/sql` package with a Cloud SQL SQL Server instance.
-
-[go-mssqldb]: https://github.com/microsoft/go-mssqldb
-
-### Using Options
-
-If you need to customize something about the `Dialer`, you can initialize
-directly with `NewDialer`:
-
-```go
-myDialer, err := cloudsqlconn.NewDialer(
-    ctx,
-    cloudsqlconn.WithCredentialsFile("key.json"),
-)
-if err != nil {
-    log.Fatalf("unable to initialize dialer: %s", err)
-}
-
-conn, err := myDialer.Dial(ctx, "project:region:instance")
-```
-
-For a full list of customizable behavior, see Option.
-
-### Using DialOptions
-
-If you want to customize things about how the connection is created, use
-`Option`:
-
-```go
-conn, err := myDialer.Dial(
-    ctx,
-    "project:region:instance",
-    cloudsqlconn.WithPrivateIP(),
-)
-```
-
-You can also use the `WithDefaultDialOptions` Option to specify
-DialOptions to be used by default:
-
-```go
-myDialer, err := cloudsqlconn.NewDialer(
-    ctx,
-    cloudsqlconn.WithDefaultDialOptions(
-        cloudsqlconn.WithPrivateIP(),
-    ),
-)
-```
-
 ### Using the dialer with database/sql
-
-Using the dialer directly will expose more configuration options. However, it is
-possible to use the dialer with the `database/sql` package.
 
 #### Postgres
 
@@ -272,6 +134,124 @@ func connect() {
     // ... etc
 }
 ```
+
+### APIs and Services
+
+This package requires the following to successfully make Cloud SQL Connections:
+
+- IAM principal (user, service account, etc.) with the
+[Cloud SQL Client][client-role] role or equivalent. This IAM principal will
+ be used for [credentials](#credentials).
+- The [Cloud SQL Admin API][admin-api] to be enabled within your Google Cloud
+Project. By default, the API will be called in the project associated with
+the IAM principal.
+
+[admin-api]: https://console.cloud.google.com/apis/api/sqladmin.googleapis.com
+[client-role]: https://cloud.google.com/sql/docs/mysql/roles-and-permissions
+
+### Credentials
+
+This repo uses the [Application Default Credentials (ADC)][adc] strategy for
+resolving credentials. Please see [these instructions for how to set your ADC][set-adc]
+(Google Cloud Application vs Local Development, IAM user vs service account credentials),
+or consult the [golang.org/x/oauth2/google][google-auth] documentation.
+
+To explicitly set a specific source for the Credentials, see [Using
+Options](#using-options) below.
+
+[adc]: https://cloud.google.com/docs/authentication#adc
+[set-adc]: https://cloud.google.com/docs/authentication/provide-credentials-adc
+[google-auth]: https://pkg.go.dev/golang.org/x/oauth2/google#hdr-Credentials
+
+### Using Options
+
+If you need to customize something about the `Dialer`, you can initialize
+directly with `NewDialer`:
+
+```go
+myDialer, err := cloudsqlconn.NewDialer(
+    ctx,
+    cloudsqlconn.WithCredentialsFile("key.json"),
+)
+if err != nil {
+    log.Fatalf("unable to initialize dialer: %s", err)
+}
+
+conn, err := myDialer.Dial(ctx, "project:region:instance")
+```
+
+For a full list of customizable behavior, see Option.
+
+### Using DialOptions
+
+If you want to customize things about how the connection is created, use
+`Option`:
+
+```go
+conn, err := myDialer.Dial(
+    ctx,
+    "project:region:instance",
+    cloudsqlconn.WithPrivateIP(),
+)
+```
+
+You can also use the `WithDefaultDialOptions` Option to specify
+DialOptions to be used by default:
+
+```go
+myDialer, err := cloudsqlconn.NewDialer(
+    ctx,
+    cloudsqlconn.WithDefaultDialOptions(
+        cloudsqlconn.WithPrivateIP(),
+    ),
+)
+```
+
+### Using the dialer with pgx
+
+To use the dialer with [pgx](https://github.com/jackc/pgx), use
+[pgxpool](https://pkg.go.dev/github.com/jackc/pgx/v4/pgxpool) by configuring
+a [Config.DialFunc][dial-func] like so:
+
+``` go
+import (
+	"context"
+	"net"
+
+	"cloud.google.com/go/cloudsqlconn"
+	"github.com/jackc/pgx/v4/pgxpool"
+)
+
+func connect() {
+	// Configure the driver to connect to the database
+	dsn := "user=myuser password=mypass dbname=mydb sslmode=disable"
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		/* handle error */
+	}
+
+	// Create a new dialer with any options
+	d, err := cloudsqlconn.NewDialer(context.Background())
+	if err != nil {
+		/* handle error */
+	}
+	defer d.Close()
+
+	// Tell the driver to use the Cloud SQL Go Connector to create connections
+	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string) (net.Conn, error) {
+		return d.Dial(ctx, "project:region:instance")
+	}
+
+	// Interact with the dirver directly as you normally would
+	conn, err := pgxpool.ConnectConfig(context.Background(), config)
+	if err != nil {
+		/* handle error */
+	}
+    // ... etc
+}
+```
+
+[dial-func]: https://pkg.go.dev/github.com/jackc/pgconn#Config
 
 ### Enabling Metrics and Tracing
 
