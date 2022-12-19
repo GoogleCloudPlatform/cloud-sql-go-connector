@@ -94,38 +94,38 @@ a [Config.DialFunc][dial-func] like so:
 
 ``` go
 import (
-	"context"
-	"net"
+    "context"
+    "net"
 
-	"cloud.google.com/go/cloudsqlconn"
-	"github.com/jackc/pgx/v4/pgxpool"
+    "cloud.google.com/go/cloudsqlconn"
+    "github.com/jackc/pgx/v4/pgxpool"
 )
 
 func connect() {
-	// Configure the driver to connect to the database
-	dsn := "user=myuser password=mypass dbname=mydb sslmode=disable"
-	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		/* handle error */
-	}
+    // Configure the driver to connect to the database
+    dsn := "user=myuser password=mypass dbname=mydb sslmode=disable"
+    config, err := pgxpool.ParseConfig(dsn)
+    if err != nil {
+        /* handle error */
+    }
 
-	// Create a new dialer with any options
-	d, err := cloudsqlconn.NewDialer(context.Background())
-	if err != nil {
-		/* handle error */
-	}
-	defer d.Close()
+    // Create a new dialer with any options
+    d, err := cloudsqlconn.NewDialer(context.Background())
+    if err != nil {
+        /* handle error */
+    }
+    defer d.Close()
 
-	// Tell the driver to use the Cloud SQL Go Connector to create connections
-	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string) (net.Conn, error) {
-		return d.Dial(ctx, "project:region:instance")
-	}
+    // Tell the driver to use the Cloud SQL Go Connector to create connections
+    config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string) (net.Conn, error) {
+        return d.Dial(ctx, "project:region:instance")
+    }
 
-	// Interact with the dirver directly as you normally would
-	conn, err := pgxpool.ConnectConfig(context.Background(), config)
-	if err != nil {
-		/* handle error */
-	}
+    // Interact with the dirver directly as you normally would
+    conn, err := pgxpool.ConnectConfig(context.Background(), config)
+    if err != nil {
+        /* handle error */
+    }
     // ... etc
 }
 ```
@@ -158,7 +158,7 @@ func connect() {
     db, err := sql.Open(
         "cloudsql-postgres",
         "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable",
-	)
+    )
     // ... etc
 }
 ```
@@ -188,7 +188,7 @@ func connect() {
     db, err := sql.Open(
         "cloudsql-mysql",
         "myuser:mypass@cloudsql-mysql(project:region:instance)/mydb",
-	)
+    )
     // ... etc
 }
 ```
