@@ -1,11 +1,11 @@
 // Copyright 2022 Google LLC
-
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-
+//
 //     https://www.apache.org/licenses/LICENSE-2.0
-
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,13 +16,13 @@ package cloudsqlconn_test
 
 import (
 	"database/sql"
-	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/mysql/mysql"
+	gomysql "github.com/go-sql-driver/mysql"
 )
 
 var (
@@ -58,58 +58,53 @@ func TestMySQLDriver(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping MySQL integration tests")
 	}
-	testConn := func(db *sql.DB) {
-		var now time.Time
-		if err := db.QueryRow("SELECT NOW()").Scan(&now); err != nil {
-			t.Fatalf("QueryRow failed: %v", err)
-		}
-		t.Log(now)
-	}
-	cleanup, err := mysql.RegisterDriver(
-		"cloudsql-mysql",
-		cloudsqlconn.WithAdminAPIEndpoint(os.Getenv("ADMIN_API_ENDPOINT")),
-		cloudsqlconn.WithQuotaProject(os.Getenv("QUOTA_PROJECT")),
-	)
-	if err != nil {
-		t.Fatalf("failed to register driver: %v", err)
-	}
-	defer cleanup()
-	db, err := sql.Open(
-		"mysql",
-		fmt.Sprintf("%s:%s@cloudsql-mysql(%s)/%s?parseTime=true",
-			mysqlUser, mysqlPass, mysqlConnName, mysqlDB),
-	)
-	if err != nil {
-		t.Fatalf("sql.Open want err = nil, got = %v", err)
-	}
-	defer db.Close()
-	testConn(db)
-}
 
-func TestMySQLDriverIAMAuthN(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping MySQL integration tests")
+	tcs := []struct {
+		desc       string
+		driverName string
+		opts       []cloudsqlconn.Option
+	}{
+		{
+			desc:       "default options",
+			driverName: "cloudsql-mysql",
+			opts:       nil,
+		},
+		{
+			desc:       "auto IAM authn",
+			driverName: "cloudsql-mysql-iam",
+			opts:       []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN()},
+		},
 	}
-	testConn := func(db *sql.DB) {
-		var now time.Time
-		if err := db.QueryRow("SELECT NOW()").Scan(&now); err != nil {
-			t.Fatalf("QueryRow failed: %v", err)
-		}
-		t.Log(now)
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			testConn := func(db *sql.DB) {
+				var now time.Time
+				if err := db.QueryRow("SELECT NOW()").Scan(&now); err != nil {
+					t.Fatalf("QueryRow failed: %v", err)
+				}
+				t.Log(now)
+			}
+			cleanup, err := mysql.RegisterDriver(tc.driverName)
+			if err != nil {
+				t.Fatalf("failed to register driver: %v", err)
+			}
+			defer cleanup()
+			cfg := gomysql.NewConfig()
+			cfg.CheckConnLiveness = true
+			cfg.User = mysqlUser
+			cfg.Passwd = mysqlPass
+			cfg.DBName = mysqlDB
+			cfg.Net = tc.driverName
+			cfg.Addr = mysqlConnName
+			cfg.Params = map[string]string{"parseTime": "true"}
+
+			db, err := sql.Open("mysql", cfg.FormatDSN())
+			if err != nil {
+				t.Fatalf("sql.Open want err = nil, got = %v", err)
+			}
+			defer db.Close()
+			testConn(db)
+		})
 	}
-	cleanup, err := mysql.RegisterDriver("cloudsql-mysql-iam", cloudsqlconn.WithIAMAuthN())
-	if err != nil {
-		t.Fatalf("failed to register driver: %v", err)
-	}
-	defer cleanup()
-	db, err := sql.Open(
-		"mysql",
-		fmt.Sprintf("%s:empty@cloudsql-mysql-iam(%s)/%s?parseTime=true",
-			mysqlIAMUser, mysqlIAMConnName, mysqlDB),
-	)
-	if err != nil {
-		t.Fatalf("sql.Open want err = nil, got = %v", err)
-	}
-	defer db.Close()
-	testConn(db)
 }
