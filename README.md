@@ -48,7 +48,7 @@ your Cloud SQL instance.
 The instance connection name for your Cloud SQL instance is always in the
 format `project:region:instance`.
 
-## APIs and Services
+### APIs and Services
 
 This package requires the following to successfully make Cloud SQL Connections:
 
@@ -62,7 +62,7 @@ the IAM principal.
 [admin-api]: https://console.cloud.google.com/apis/api/sqladmin.googleapis.com
 [client-role]: https://cloud.google.com/sql/docs/mysql/roles-and-permissions
 
-## Credentials
+### Credentials
 
 This project uses the [Application Default Credentials (ADC)][adc] strategy for
 resolving credentials. Please see [these instructions for how to set your ADC][set-adc]
