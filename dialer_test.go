@@ -21,7 +21,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -73,48 +72,6 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	d.sqladmin = svc
 
 	testSuccessfulDial(context.Background(), t, d, "my-project:my-region:my-instance", WithPublicIP())
-}
-
-func TestDialerConnectionSupportsSyscalls(t *testing.T) {
-	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
-	svc, cleanup, err := mock.NewSQLAdminService(
-		context.Background(),
-		mock.InstanceGetSuccess(inst, 1),
-		mock.CreateEphemeralSuccess(inst, 1),
-	)
-	if err != nil {
-		t.Fatalf("failed to init SQLAdminService: %v", err)
-	}
-	stop := mock.StartServerProxy(t, inst)
-	defer func() {
-		stop()
-		if err := cleanup(); err != nil {
-			t.Fatalf("%v", err)
-		}
-	}()
-
-	d, err := NewDialer(context.Background(),
-		WithDefaultDialOptions(WithPublicIP()),
-		WithTokenSource(mock.EmptyTokenSource{}),
-	)
-	if err != nil {
-		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
-	}
-	d.sqladmin = svc
-
-	conn, err := d.Dial(context.Background(), "my-project:my-region:my-instance")
-	if err != nil {
-		t.Fatalf("expected Dial to succeed, but got error: %v", err)
-	}
-	defer conn.Close()
-	sconn, ok := conn.(syscall.Conn)
-	if !ok {
-		t.Fatalf("expected conn to be a syscall.Conn, but it was not")
-	}
-	_, err = sconn.SyscallConn()
-	if err != nil {
-		t.Fatalf("expected syscall.RawConn, got error: %v", err)
-	}
 }
 
 func TestDialWithAdminAPIErrors(t *testing.T) {

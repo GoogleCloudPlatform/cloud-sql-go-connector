@@ -20,7 +20,9 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"net"
+	"syscall"
 
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/go-sql-driver/mysql"
@@ -36,12 +38,34 @@ func RegisterDriver(name string, opts ...cloudsqlconn.Option) (func() error, err
 		return func() error { return nil }, err
 	}
 	mysql.RegisterDialContext(name, mysql.DialContextFunc(func(ctx context.Context, addr string) (net.Conn, error) {
-		return d.Dial(ctx, addr)
+		conn, err := d.Dial(ctx, addr)
+		if err != nil {
+			return nil, err
+		}
+		return LivenessCheckConn{Conn: conn}, nil
 	}))
 	sql.Register(name, &mysqlDriver{
 		d: &mysql.MySQLDriver{},
 	})
 	return func() error { return d.Close() }, nil
+}
+
+// LivenessCheckConn wraps the underlying connection with support for a
+// liveness check.
+//
+// See https://github.com/go-sql-driver/mysql/pull/934 for details.
+type LivenessCheckConn struct {
+	net.Conn
+}
+
+// SyscallConn supports a connection check in the MySQL driver by delegating to
+// the underlying non-TLS net.Conn.
+func (c *LivenessCheckConn) SyscallConn() (syscall.RawConn, error) {
+	sconn, ok := c.Conn.(syscall.Conn)
+	if !ok {
+		return nil, errors.New("connection is not a syscall.Conn")
+	}
+	return sconn.SyscallConn()
 }
 
 type mysqlDriver struct {
