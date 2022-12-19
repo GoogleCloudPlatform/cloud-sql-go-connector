@@ -114,7 +114,6 @@ func connect() {
     if err != nil {
         /* handle error */
     }
-    defer d.Close()
 
     // Tell the driver to use the Cloud SQL Go Connector to create connections
     config.ConnConfig.DialFunc = func(ctx context.Context, _ string, instance string) (net.Conn, error) {
@@ -126,6 +125,9 @@ func connect() {
     if err != nil {
         /* handle error */
     }
+
+    // call cleanup when you're done with the database connection
+    cleanup := func() error { return d.Close() }
     // ... etc
 }
 ```
@@ -153,6 +155,7 @@ func connect() {
     if err != nil {
         // ... handle error
     }
+    // call cleanup when you're done with the database connection
     defer cleanup()
 
     db, err := sql.Open(
@@ -183,6 +186,7 @@ func connect() {
     if err != nil {
         // ... handle error
     }
+    // call cleanup when you're done with the database connection
     defer cleanup()
 
     db, err := sql.Open(
@@ -213,6 +217,7 @@ func connect() {
     if err != nil {
         // ... handle error
     }
+    // call cleanup when you're done with the database connection
     defer cleanup()
 
     db, err := sql.Open(
@@ -229,7 +234,7 @@ If you need to customize something about the `Dialer`, you can initialize
 directly with `NewDialer`:
 
 ```go
-myDialer, err := cloudsqlconn.NewDialer(
+d, err := cloudsqlconn.NewDialer(
     ctx,
     cloudsqlconn.WithCredentialsFile("key.json"),
 )
@@ -237,7 +242,7 @@ if err != nil {
     log.Fatalf("unable to initialize dialer: %s", err)
 }
 
-conn, err := myDialer.Dial(ctx, "project:region:instance")
+conn, err := d.Dial(ctx, "project:region:instance")
 ```
 
 For a full list of customizable behavior, see Option.
@@ -248,7 +253,7 @@ If you want to customize things about how the connection is created, use
 `Option`:
 
 ```go
-conn, err := myDialer.Dial(
+conn, err := d.Dial(
     ctx,
     "project:region:instance",
     cloudsqlconn.WithPrivateIP(),
@@ -259,7 +264,7 @@ You can also use the `WithDefaultDialOptions` Option to specify
 DialOptions to be used by default:
 
 ```go
-myDialer, err := cloudsqlconn.NewDialer(
+d, err := cloudsqlconn.NewDialer(
     ctx,
     cloudsqlconn.WithDefaultDialOptions(
         cloudsqlconn.WithPrivateIP(),

@@ -155,8 +155,7 @@ func connectSQLServer() *sql.DB {
 	if err != nil {
 		// handle error as necessary
 	}
-	// call cleanup to close the underylying driver when you're done with the
-	// db.
+	// call cleanup when you're done with the database connection
 	defer cleanup()
 
 	db, err := sql.Open(
