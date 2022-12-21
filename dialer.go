@@ -94,8 +94,7 @@ type Dialer struct {
 	// network. By default it is golang.org/x/net/proxy#Dial.
 	dialFunc func(cxt context.Context, network, addr string) (net.Conn, error)
 
-	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn. If IAM DB
-	// Authn is not enabled, iamTokenSource will be nil.
+	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn.
 	iamTokenSource oauth2.TokenSource
 }
 
