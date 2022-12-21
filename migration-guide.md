@@ -63,7 +63,7 @@ func connectMySQL() *sql.DB {
 
 	db, err := sql.Open(
 		"cloudsql-mysql", // matches the name registered above
-		"myuser:mypass@cloudsql-mysql(my-project:us-central1:my-instance)/mydb",
+		"myuser:mypass@cloudsql-mysql(project:region:instance)/mydb",
 	)
 	if err != nil {
 		// handle error as necessary
@@ -155,13 +155,12 @@ func connectSQLServer() *sql.DB {
 	if err != nil {
 		// handle error as necessary
 	}
-	// call cleanup to close the underylying driver when you're done with the
-	// db.
+	// call cleanup when you're done with the database connection
 	defer cleanup()
 
 	db, err := sql.Open(
 		"cloudsql-sqlserver", // matches the name registered above
-		"sqlserver://user:password@localhost?database=mydb&cloudsql=my-proj:us-central1:my-inst",
+		"sqlserver://user:password@localhost?database=mydb&cloudsql=project:region:instance",
 	)
 	if err != nil {
 		// handle error as necessary
