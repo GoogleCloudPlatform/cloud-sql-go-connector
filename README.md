@@ -134,7 +134,7 @@ func connect() {
 
 [dial-func]: https://pkg.go.dev/github.com/jackc/pgconn#Config
 
-#### Using the dialer with `database/sql`
+##### Using the dialer with `database/sql`
 
 To use `database/sql`, call `pgxv4.RegisterDriver` with any necessary Dialer
 configuration. Note: the connection string must use the keyword/value format
@@ -197,7 +197,7 @@ func connect() {
 }
 ```
 
-### SQL Server
+#### SQL Server
 
 To use `database/sql`, use `mssql.RegisterDriver` with any necessary Dialer
 configuration. The returned `cleanup` func
