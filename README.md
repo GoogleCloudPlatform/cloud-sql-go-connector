@@ -120,7 +120,7 @@ func connect() {
         return d.Dial(ctx, "project:region:instance")
     }
 
-    // Interact with the dirver directly as you normally would
+    // Interact with the driver directly as you normally would
     conn, err := pgxpool.ConnectConfig(context.Background(), config)
     if err != nil {
         /* handle error */
@@ -352,7 +352,7 @@ considered unsupported.
 
 We test and support at minimum, the latest three Go versions. Changes in 
 supported Go versions will be considered a minor change, and will be listed in
-the realease notes.
+the release notes.
 
 ### Release cadence
 This project aims for a release on at least a monthly basis. If no new features
