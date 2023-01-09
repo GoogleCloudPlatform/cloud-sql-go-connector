@@ -21,8 +21,6 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
-	"sync"
-	"time"
 
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 )
