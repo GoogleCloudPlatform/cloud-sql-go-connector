@@ -22,6 +22,7 @@ import (
 	"crypto/tls"
 	"net"
 
+	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 )
 
