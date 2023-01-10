@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.1.0...v1.1.1) (2023-01-10)
+
+
+### Bug Fixes
+
+* move MySQL liveness check into driver code ([#417](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/417)) ([0de68fb](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/0de68fbc32d87e4cabab301be8a11f9eba50e13d))
+* use handshake context when possible ([#427](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/427)) ([37c4e70](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/37c4e70aa7082c49b84aaedb2066ddb67e1d920f))
+
 ## [1.1.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.0.1...v1.1.0) (2022-12-06)
 
 
