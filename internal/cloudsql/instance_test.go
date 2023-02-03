@@ -278,13 +278,13 @@ func TestRefreshDuration(t *testing.T) {
 			want:   30 * time.Minute,
 		},
 		{
-			desc:   "when expiration is less than 1 hour, but greater than 5 minutes",
-			expiry: now.Add(6 * time.Minute),
-			want:   5 * time.Minute,
+			desc:   "when expiration is less than 1 hour, but greater than 4 minutes",
+			expiry: now.Add(5 * time.Minute),
+			want:   4 * time.Minute,
 		},
 		{
-			desc:   "when expiration is less than 5 minutes",
-			expiry: now.Add(4 * time.Minute),
+			desc:   "when expiration is less than 4 minutes",
+			expiry: now.Add(3 * time.Minute),
 			want:   0,
 		},
 		{

@@ -115,8 +115,8 @@ type RefreshCfg struct {
 }
 
 // Instance manages the information used to connect to the Cloud SQL instance by periodically calling
-// the Cloud SQL Admin API. It automatically refreshes the required information approximately 5 minutes
-// before the previous certificate expires (every 55 minutes).
+// the Cloud SQL Admin API. It automatically refreshes the required information approximately 4 minutes
+// before the previous certificate expires (every ~56 minutes).
 type Instance struct {
 	// OpenConns is the number of open connections to the instance.
 	OpenConns uint64
@@ -275,11 +275,11 @@ func refreshDuration(now, certExpiry time.Time) time.Duration {
 	d := certExpiry.Sub(now)
 	if d < time.Hour {
 		// Something is wrong with the certificate, refresh now.
-		if d < 5*time.Minute {
+		if d < 4*time.Minute {
 			return 0
 		}
-		// Otherwise, wait five minutes before starting the refresh cycle.
-		return 5 * time.Minute
+		// Otherwise, wait four minutes before starting the refresh cycle.
+		return 4 * time.Minute
 	}
 	return d / 2
 }
