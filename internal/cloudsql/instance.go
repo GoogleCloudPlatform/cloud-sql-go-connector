@@ -27,6 +27,10 @@ import (
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
+// the refresh buffer is the amount of time before a refresh's result expires
+// that a new refresh operation begins.
+const refreshBuffer = 4 * time.Minute
+
 var (
 	// Instance connection name is the format <PROJECT>:<REGION>:<INSTANCE>
 	// Additionally, we have to support legacy "domain-scoped" projects (e.g. "google.com:PROJECT")
@@ -115,8 +119,8 @@ type RefreshCfg struct {
 }
 
 // Instance manages the information used to connect to the Cloud SQL instance by periodically calling
-// the Cloud SQL Admin API. It automatically refreshes the required information approximately 5 minutes
-// before the previous certificate expires (every 55 minutes).
+// the Cloud SQL Admin API. It automatically refreshes the required information approximately 4 minutes
+// before the previous certificate expires (every ~56 minutes).
 type Instance struct {
 	// OpenConns is the number of open connections to the instance.
 	OpenConns uint64
@@ -275,11 +279,11 @@ func refreshDuration(now, certExpiry time.Time) time.Duration {
 	d := certExpiry.Sub(now)
 	if d < time.Hour {
 		// Something is wrong with the certificate, refresh now.
-		if d < 5*time.Minute {
+		if d < refreshBuffer {
 			return 0
 		}
-		// Otherwise, wait five minutes before starting the refresh cycle.
-		return 5 * time.Minute
+		// Otherwise wait until 4 minutes before expiration for next refresh cycle.
+		return d - refreshBuffer
 	}
 	return d / 2
 }
