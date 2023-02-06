@@ -27,6 +27,10 @@ import (
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
+// the refresh buffer is the amount of time before a refresh's result expires
+// that a new refresh operation begins.
+const refreshBuffer = 4 * time.Minute
+
 var (
 	// Instance connection name is the format <PROJECT>:<REGION>:<INSTANCE>
 	// Additionally, we have to support legacy "domain-scoped" projects (e.g. "google.com:PROJECT")
@@ -275,11 +279,11 @@ func refreshDuration(now, certExpiry time.Time) time.Duration {
 	d := certExpiry.Sub(now)
 	if d < time.Hour {
 		// Something is wrong with the certificate, refresh now.
-		if d < 4*time.Minute {
+		if d < refreshBuffer {
 			return 0
 		}
-		// Otherwise, wait four minutes before starting the refresh cycle.
-		return 4 * time.Minute
+		// Otherwise wait until 4 minutes before expiration for next refresh cycle.
+		return d - refreshBuffer
 	}
 	return d / 2
 }
