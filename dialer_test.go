@@ -1,11 +1,11 @@
 // Copyright 2021 Google LLC
-
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-
+//
 //     https://www.apache.org/licenses/LICENSE-2.0
-
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -26,6 +26,7 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
+	"golang.org/x/oauth2"
 )
 
 func testSuccessfulDial(ctx context.Context, t *testing.T, d *Dialer, i string, opts ...DialOption) {
@@ -238,7 +239,10 @@ func TestIAMAuthNErrors(t *testing.T) {
 			defer stop()
 
 			d, err := NewDialer(context.Background(),
-				WithTokenSource(mock.EmptyTokenSource{}), tc.opts)
+				WithIAMAuthNTokenSources(
+					mock.EmptyTokenSource{},
+					mock.EmptyTokenSource{},
+				), tc.opts)
 			if err != nil {
 				t.Fatalf("NewDialer failed with error = %v", err)
 			}
@@ -459,7 +463,11 @@ func TestDialDialerOptsConflicts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to init SQLAdminService: %v", err)
 			}
-			d, err := NewDialer(context.Background(), WithTokenSource(mock.EmptyTokenSource{}), WithOptions(test.dialerOpts...))
+			d, err := NewDialer(
+				context.Background(),
+				WithIAMAuthNTokenSources(mock.EmptyTokenSource{}, mock.EmptyTokenSource{}),
+				WithOptions(test.dialerOpts...),
+			)
 			if err != nil {
 				t.Fatalf("failed to init Dialer: %v", err)
 			}
@@ -475,6 +483,35 @@ func TestDialDialerOptsConflicts(t *testing.T) {
 
 			// Dial once with the "dial" options
 			testSuccessfulDial(ctx, t, d, "my-project:my-region:my-instance", test.dialOpts...)
+		})
+	}
+}
+
+func TestTokenSourceWithIAMAuthN(t *testing.T) {
+	ts := oauth2.StaticTokenSource(&oauth2.Token{})
+	tcs := []struct {
+		desc    string
+		opts    []Option
+		wantErr bool
+	}{
+		{
+			desc:    "when token source is set with IAM AuthN",
+			opts:    []Option{WithTokenSource(ts), WithIAMAuthN()},
+			wantErr: true,
+		},
+		{
+			desc:    "when IAM AuthN token source is set without IAM AuthN",
+			opts:    []Option{WithIAMAuthNTokenSources(ts, ts)},
+			wantErr: true,
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			_, err := NewDialer(context.Background(), tc.opts...)
+			gotErr := err != nil
+			if tc.wantErr != gotErr {
+				t.Fatalf("err: want = %v, got = %v", tc.wantErr, gotErr)
+			}
 		})
 	}
 }
