@@ -1,16 +1,17 @@
 // Copyright 2020 Google LLC
-
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-
-//     https://www.apache.org/licenses/LICENSE-2.0
-
+//
+//	https://www.apache.org/licenses/LICENSE-2.0
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package cloudsql
 
 import (
@@ -22,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	errtype "cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/errtype"
 	"golang.org/x/oauth2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -33,12 +34,13 @@ const refreshBuffer = 4 * time.Minute
 
 var (
 	// Instance connection name is the format <PROJECT>:<REGION>:<INSTANCE>
-	// Additionally, we have to support legacy "domain-scoped" projects (e.g. "google.com:PROJECT")
+	// Additionally, we have to support legacy "domain-scoped" projects
+	// (e.g. "google.com:PROJECT")
 	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+)")
 )
 
-// connName represents the "instance connection name", in the format "project:region:name". Use the
-// "parseConnName" method to initialize this struct.
+// connName represents the "instance connection name", in the format
+// "project:region:name".
 type connName struct {
 	project string
 	region  string
@@ -69,38 +71,30 @@ func parseConnName(cn string) (connName, error) {
 	return c, nil
 }
 
-// refreshOperation is a pending result of a refresh operation of data used to connect securely. It should
-// only be initialized by the Instance struct as part of a refresh cycle.
+// refreshOperation is a pending result of a refresh operation of data used to
+// connect securely. It should only be initialized by the Instance struct as
+// part of a refresh cycle.
 type refreshOperation struct {
-	md     metadata
-	tlsCfg *tls.Config
-	expiry time.Time
-	err    error
-
-	// timer that triggers refresh, can be used to cancel.
-	timer *time.Timer
 	// indicates the struct is ready to read from
 	ready chan struct{}
+	// timer that triggers refresh, can be used to cancel.
+	timer  *time.Timer
+	err    error
+	expiry time.Time
+	tlsCfg *tls.Config
+	md     metadata
 }
 
-// Cancel prevents the instanceInfo from starting, if it hasn't already started. Returns true if timer
-// was stopped successfully, or false if it has already started.
-func (r *refreshOperation) Cancel() bool {
+// cancel prevents the instanceInfo from starting, if it hasn't already
+// started. Returns true if timer was stopped successfully, or false if it has
+// already started.
+func (r *refreshOperation) cancel() bool {
 	return r.timer.Stop()
 }
 
-// Wait blocks until the refreshOperation attempt is completed.
-func (r *refreshOperation) Wait(ctx context.Context) error {
-	select {
-	case <-r.ready:
-		return r.err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// IsValid returns true if this result is complete, successful, and is still valid.
-func (r *refreshOperation) IsValid() bool {
+// isValid returns true if this result is complete, successful, and is still
+// valid.
+func (r *refreshOperation) isValid() bool {
 	// verify the result has finished running
 	select {
 	default:
@@ -118,9 +112,10 @@ type RefreshCfg struct {
 	UseIAMAuthN bool
 }
 
-// Instance manages the information used to connect to the Cloud SQL instance by periodically calling
-// the Cloud SQL Admin API. It automatically refreshes the required information approximately 4 minutes
-// before the previous certificate expires (every ~56 minutes).
+// Instance manages the information used to connect to the Cloud SQL instance
+// by periodically calling the Cloud SQL Admin API. It automatically refreshes
+// the required information approximately 4 minutes before the previous
+// certificate expires (every ~56 minutes).
 type Instance struct {
 	// OpenConns is the number of open connections to the instance.
 	OpenConns uint64
@@ -131,15 +126,16 @@ type Instance struct {
 	resultGuard sync.RWMutex
 	r           refresher
 	RefreshCfg  RefreshCfg
-	// cur represents the current refreshOperation that will be used to create connections. If a valid complete
-	// refreshOperation isn't available it's possible for cur to be equal to next.
+	// cur represents the current refreshOperation that will be used to
+	// create connections. If a valid complete refreshOperation isn't
+	// available it's possible for cur to be equal to next.
 	cur *refreshOperation
-	// next represents a future or ongoing refreshOperation. Once complete, it will replace cur and schedule a
-	// replacement to occur.
+	// next represents a future or ongoing refreshOperation. Once complete,
+	// it will replace cur and schedule a replacement to occur.
 	next *refreshOperation
 
-	// ctx is the default ctx for refresh operations. Canceling it prevents new refresh
-	// operations from being triggered.
+	// ctx is the default ctx for refresh operations. Canceling it prevents
+	// new refresh operations from being triggered.
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -174,8 +170,8 @@ func NewInstance(
 		ctx:        ctx,
 		cancel:     cancel,
 	}
-	// For the initial refresh operation, set cur = next so that connection requests block
-	// until the first refresh is complete.
+	// For the initial refresh operation, set cur = next so that connection
+	// requests block until the first refresh is complete.
 	i.resultGuard.Lock()
 	i.cur = i.scheduleRefresh(0)
 	i.next = i.cur
@@ -183,8 +179,8 @@ func NewInstance(
 	return i, nil
 }
 
-// Close closes the instance; it stops the refresh cycle and prevents it from making
-// additional calls to the Cloud SQL Admin API.
+// Close closes the instance; it stops the refresh cycle and prevents it from
+// making additional calls to the Cloud SQL Admin API.
 func (i *Instance) Close() {
 	i.cancel()
 }
@@ -222,8 +218,8 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 	return addr, res.tlsCfg, nil
 }
 
-// InstanceEngineVersion returns the engine type and version for the instance. The value
-// coresponds to one of the following types for the instance:
+// InstanceEngineVersion returns the engine type and version for the instance.
+// The value coresponds to one of the following types for the instance:
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
 func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
 	res, err := i.result(ctx)
@@ -239,8 +235,8 @@ func (i *Instance) UpdateRefresh(cfg RefreshCfg) {
 	i.resultGuard.Lock()
 	defer i.resultGuard.Unlock()
 	// Cancel any pending refreshes
-	i.cur.Cancel()
-	i.next.Cancel()
+	i.cur.cancel()
+	i.next.cancel()
 	// update the refreshcfg as needed
 	i.RefreshCfg = cfg
 	// reschedule a new refresh immiediately
@@ -248,24 +244,33 @@ func (i *Instance) UpdateRefresh(cfg RefreshCfg) {
 	i.next = i.cur
 }
 
-// ForceRefresh triggers an immediate refresh operation to be scheduled and used for future connection attempts.
+// ForceRefresh triggers an immediate refresh operation to be scheduled and
+// used for future connection attempts.
 func (i *Instance) ForceRefresh() {
 	i.resultGuard.Lock()
 	defer i.resultGuard.Unlock()
-	// If the next refresh hasn't started yet, we can cancel it and start an immediate one
-	if i.next.Cancel() {
+	// If the next refresh hasn't started yet, we can cancel it and start
+	// an immediate one
+	if i.next.cancel() {
 		i.next = i.scheduleRefresh(0)
 	}
 	// block all sequential connection attempts on the next refresh result
 	i.cur = i.next
 }
 
-// result returns the most recent refresh result (waiting for it to complete if necessary)
+// result returns the most recent refresh result (waiting for it to complete if
+// necessary)
 func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 	i.resultGuard.RLock()
 	res := i.cur
 	i.resultGuard.RUnlock()
-	err := res.Wait(ctx)
+	var err error
+	select {
+	case <-res.ready:
+		err = res.err
+	case <-ctx.Done():
+		err = ctx.Err()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -282,14 +287,16 @@ func refreshDuration(now, certExpiry time.Time) time.Duration {
 		if d < refreshBuffer {
 			return 0
 		}
-		// Otherwise wait until 4 minutes before expiration for next refresh cycle.
+		// Otherwise wait until 4 minutes before expiration for next
+		// refresh cycle.
 		return d - refreshBuffer
 	}
 	return d / 2
 }
 
-// scheduleRefresh schedules a refresh operation to be triggered after a given duration. The returned refreshOperation
-// can be used to either Cancel or Wait for the operations result.
+// scheduleRefresh schedules a refresh operation to be triggered after a given
+// duration. The returned refreshOperation can be used to either Cancel or Wait
+// for the operations result.
 func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 	res := &refreshOperation{}
 	res.ready = make(chan struct{})
@@ -304,24 +311,28 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		default:
 		}
 
-		// Once the refresh is complete, update "current" with working result and schedule a new refresh
+		// Once the refresh is complete, update "current" with working
+		// result and schedule a new refresh
 		i.resultGuard.Lock()
 		defer i.resultGuard.Unlock()
 
 		// if failed, scheduled the next refresh immediately
 		if res.err != nil {
 			i.next = i.scheduleRefresh(0)
-			// If the latest result is bad, avoid replacing the used result while it's
-			// still valid and potentially able to provide successful connections.
-			// TODO: This means that errors while the current result is still valid are
-			// surpressed. We should try to surface errors in a more meaningful way.
-			if !i.cur.IsValid() {
+			// If the latest result is bad, avoid replacing the
+			// used result while it's still valid and potentially
+			// able to provide successful connections. TODO: This
+			// means that errors while the current result is still
+			// valid are surpressed. We should try to surface
+			// errors in a more meaningful way.
+			if !i.cur.isValid() {
 				i.cur = res
 			}
 			return
 		}
 
-		// Update the current results, and schedule the next refresh in the future
+		// Update the current results, and schedule the next refresh in
+		// the future
 		i.cur = res
 		t := refreshDuration(time.Now(), i.cur.expiry)
 		i.next = i.scheduleRefresh(t)
