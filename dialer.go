@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	_ "embed"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -97,6 +98,11 @@ type Dialer struct {
 	iamTokenSource oauth2.TokenSource
 }
 
+var (
+	errUseTokenSource    = errors.New("use WithTokenSource when IAM AuthN is not enabled")
+	errUseIAMTokenSource = errors.New("use WithIAMAuthNTokenSources instead of WithTokenSource be used when IAM AuthN is enabled")
+)
+
 // NewDialer creates a new Dialer.
 //
 // Initial calls to NewDialer make take longer than normal because generation of an
@@ -113,6 +119,12 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		if cfg.err != nil {
 			return nil, cfg.err
 		}
+	}
+	if cfg.useIAMAuthN && cfg.setTokenSource && cfg.iamLoginTokenSource == nil {
+		return nil, errUseIAMTokenSource
+	}
+	if cfg.setIAMAuthNTokenSource && !cfg.useIAMAuthN {
+		return nil, errUseTokenSource
 	}
 	// Add this to the end to make sure it's not overridden
 	cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))

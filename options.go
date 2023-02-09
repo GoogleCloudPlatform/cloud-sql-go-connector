@@ -1,11 +1,11 @@
 // Copyright 2020 Google LLC
-
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-
+//
 //     https://www.apache.org/licenses/LICENSE-2.0
-
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -34,14 +34,16 @@ import (
 type Option func(d *dialerConfig)
 
 type dialerConfig struct {
-	rsaKey              *rsa.PrivateKey
-	sqladminOpts        []apiopt.ClientOption
-	dialOpts            []DialOption
-	dialFunc            func(ctx context.Context, network, addr string) (net.Conn, error)
-	refreshTimeout      time.Duration
-	useIAMAuthN         bool
-	iamLoginTokenSource oauth2.TokenSource
-	useragents          []string
+	rsaKey                 *rsa.PrivateKey
+	sqladminOpts           []apiopt.ClientOption
+	dialOpts               []DialOption
+	dialFunc               func(ctx context.Context, network, addr string) (net.Conn, error)
+	refreshTimeout         time.Duration
+	useIAMAuthN            bool
+	setTokenSource         bool
+	setIAMAuthNTokenSource bool
+	iamLoginTokenSource    oauth2.TokenSource
+	useragents             []string
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -114,7 +116,7 @@ func WithDefaultDialOptions(opts ...DialOption) Option {
 // WithTokenSource should not be used with WithIAMAuthNTokenSources.
 func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
-		d.iamLoginTokenSource = s
+		d.setTokenSource = true
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
 	}
 }
@@ -135,6 +137,7 @@ func WithTokenSource(s oauth2.TokenSource) Option {
 // not be used with WithTokenSource.
 func WithIAMAuthNTokenSources(apiTS, iamLoginTS oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
+		d.setIAMAuthNTokenSource = true
 		d.iamLoginTokenSource = iamLoginTS
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(apiTS))
 	}
