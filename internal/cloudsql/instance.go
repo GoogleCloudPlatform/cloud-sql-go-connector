@@ -38,7 +38,7 @@ const (
 	// enforced by the rate limiter.
 	refreshInterval = 30 * time.Second
 
-	// refreshTimeout is the maximum amount of time to wait for a refresh
+	// RefreshTimeout is the maximum amount of time to wait for a refresh
 	// cycle to complete. This value should be greater than the
 	// refreshInterval.
 	RefreshTimeout = 60 * time.Second
