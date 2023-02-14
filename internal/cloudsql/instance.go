@@ -138,7 +138,8 @@ type Instance struct {
 	connName
 	key *rsa.PrivateKey
 
-	// t sets the maximum duration a refresh cycle can run for.
+	// refreshTimeout sets the maximum duration a refresh cycle can run
+	// for.
 	refreshTimeout time.Duration
 	// l controls the rate at which refresh cycles are run.
 	l *rate.Limiter
