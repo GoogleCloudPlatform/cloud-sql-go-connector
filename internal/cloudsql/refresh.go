@@ -27,7 +27,6 @@ import (
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"golang.org/x/oauth2"
-	"golang.org/x/time/rate"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
@@ -263,34 +262,23 @@ func genVerifyPeerCertificateFunc(cn connName, pool *x509.CertPool) func(rawCert
 
 // newRefresher creates a Refresher.
 func newRefresher(
-	timeout time.Duration,
-	interval time.Duration,
-	burst int,
 	svc *sqladmin.Service,
 	ts oauth2.TokenSource,
 	dialerID string,
 ) refresher {
 	return refresher{
-		timeout:       timeout,
-		dialerID:      dialerID,
-		clientLimiter: rate.NewLimiter(rate.Every(interval), burst),
-		client:        svc,
-		ts:            ts,
+		dialerID: dialerID,
+		client:   svc,
+		ts:       ts,
 	}
 }
 
 // refresher manages the SQL Admin API access to instance metadata and to
 // ephemeral certificates.
 type refresher struct {
-	// timeout is the maximum amount of time a refresh operation should be allowed to take.
-	timeout time.Duration
-
 	// dialerID is the unique ID of the associated dialer.
 	dialerID string
-
-	clientLimiter *rate.Limiter
-	client        *sqladmin.Service
-
+	client   *sqladmin.Service
 	// ts is the TokenSource used for IAM DB AuthN.
 	ts oauth2.TokenSource
 }
@@ -305,22 +293,6 @@ func (r refresher) performRefresh(ctx context.Context, cn connName, k *rsa.Priva
 		go trace.RecordRefreshResult(context.Background(), cn.String(), r.dialerID, err)
 		refreshEnd(err)
 	}()
-
-	ctx, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
-	if ctx.Err() == context.Canceled {
-		return metadata{}, nil, time.Time{}, ctx.Err()
-	}
-
-	// avoid refreshing too often to try not to tax the SQL Admin API quotas
-	err = r.clientLimiter.Wait(ctx)
-	if err != nil {
-		return metadata{}, nil, time.Time{}, errtype.NewDialError(
-			"refresh was throttled until context expired",
-			cn.String(),
-			nil,
-		)
-	}
 
 	// start async fetching the instance's metadata
 	type mdRes struct {

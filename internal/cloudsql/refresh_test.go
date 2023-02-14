@@ -30,6 +30,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
+const testDialerID = "some-dialer-id"
+
 func TestRefresh(t *testing.T) {
 	wantPublicIP := "127.0.0.1"
 	wantPrivateIP := "10.0.0.1"
@@ -59,7 +61,7 @@ func TestRefresh(t *testing.T) {
 		}
 	}()
 
-	r := newRefresher(time.Hour, 30*time.Second, 2, client, nil, "")
+	r := newRefresher(client, nil, testDialerID)
 	md, tlsCfg, gotExpiry, err := r.performRefresh(context.Background(), cn, RSAKey, false)
 	if err != nil {
 		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
@@ -100,7 +102,7 @@ func TestRefreshFailsFast(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
+	r := newRefresher(client, nil, testDialerID)
 	_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 	if err != nil {
 		t.Fatalf("expected no error, got = %v", err)
@@ -112,15 +114,6 @@ func TestRefreshFailsFast(t *testing.T) {
 	_, _, _, err = r.performRefresh(ctx, cn, RSAKey, false)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled error, got = %v", err)
-	}
-
-	// force the rate limiter to throttle with a timed out context
-	ctx, _ = context.WithTimeout(context.Background(), time.Millisecond)
-	_, _, _, err = r.performRefresh(ctx, cn, RSAKey, false)
-
-	var wantErr *errtype.DialError
-	if !errors.As(err, &wantErr) {
-		t.Fatalf("when refresh is throttled, want = %T, got = %v", wantErr, err)
 	}
 }
 
@@ -191,7 +184,7 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ts := &fakeTokenSource{responses: tc.resps}
-			r := newRefresher(time.Hour, 30*time.Second, 1, client, ts, "")
+			r := newRefresher(client, ts, testDialerID)
 			_, _, gotExpiry, err := r.performRefresh(context.Background(), cn, RSAKey, true)
 			if err != nil {
 				t.Fatalf("want no error, got = %v", err)
@@ -237,7 +230,7 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ts := &fakeTokenSource{responses: tc.resps}
-			r := newRefresher(time.Hour, 30*time.Second, 1, client, ts, "")
+			r := newRefresher(client, ts, testDialerID)
 			_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, true)
 			if err == nil {
 				t.Fatalf("expected get failed error, got = %v", err)
@@ -290,7 +283,7 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 			}
 			defer cleanup()
 
-			r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
+			r := newRefresher(client, nil, testDialerID)
 			_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 			if !errors.As(err, &tc.wantErr) {
 				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
@@ -362,7 +355,7 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 			}
 			defer cleanup()
 
-			r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
+			r := newRefresher(client, nil, testDialerID)
 			_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 			if !errors.As(err, &tc.wantErr) {
 				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
@@ -427,7 +420,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		}
 		defer cleanup()
 
-		r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
+		r := newRefresher(client, nil, testDialerID)
 		_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 
 		if !errors.As(err, &tc.wantErr) {
@@ -454,7 +447,7 @@ func TestRefreshBuildsTLSConfig(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := newRefresher(time.Hour, 30*time.Second, 1, client, nil, "")
+	r := newRefresher(client, nil, testDialerID)
 	_, tlsCfg, _, err := r.performRefresh(context.Background(), cn, RSAKey, false)
 	if err != nil {
 		t.Fatalf("expected no error, got = %v", err)
