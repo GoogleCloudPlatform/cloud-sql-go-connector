@@ -34,10 +34,10 @@ const (
 	// expires that a new refresh operation begins.
 	refreshBuffer = 4 * time.Minute
 
-	// refreshInterval is the amount of time between refresh attempts
+	// refreshInterval is the amount of time between refresh attempts.
 	refreshInterval = 30 * time.Second
 
-	// refreshBurst is the initial burst allowed by the rate limite.
+	// refreshBurst is the initial burst allowed by the rate limiter.
 	refreshBurst = 2
 )
 
