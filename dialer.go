@@ -110,7 +110,7 @@ var (
 // RSA keypair is generated will be faster.
 func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg := &dialerConfig{
-		refreshTimeout: 30 * time.Second,
+		refreshTimeout: cloudsql.RefreshTimeout,
 		dialFunc:       proxy.Dial,
 		useragents:     []string{userAgent},
 	}

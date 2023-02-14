@@ -34,8 +34,14 @@ const (
 	// expires that a new refresh operation begins.
 	refreshBuffer = 4 * time.Minute
 
-	// refreshInterval is the amount of time between refresh attempts.
+	// refreshInterval is the amount of time between refresh attempts as
+	// enforced by the rate limiter.
 	refreshInterval = 30 * time.Second
+
+	// refreshTimeout is the maximum amount of time to wait for a refresh
+	// cycle to complete. This value should be greater than the
+	// refreshInterval.
+	RefreshTimeout = 60 * time.Second
 
 	// refreshBurst is the initial burst allowed by the rate limiter.
 	refreshBurst = 2
@@ -133,7 +139,7 @@ type Instance struct {
 	key *rsa.PrivateKey
 
 	// t sets the maximum duration a refresh cycle can run for.
-	d time.Duration
+	refreshTimeout time.Duration
 	// l controls the rate at which refresh cycles are run.
 	l *rate.Limiter
 	r refresher
@@ -178,10 +184,10 @@ func NewInstance(
 			ts,
 			dialerID,
 		),
-		d:          refreshTimeout,
-		RefreshCfg: r,
-		ctx:        ctx,
-		cancel:     cancel,
+		refreshTimeout: refreshTimeout,
+		RefreshCfg:     r,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 	// For the initial refresh operation, set cur = next so that connection
 	// requests block until the first refresh is complete.
@@ -314,7 +320,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 	r := &refreshOperation{}
 	r.ready = make(chan struct{})
 	r.timer = time.AfterFunc(d, func() {
-		ctx, cancel := context.WithTimeout(i.ctx, i.d)
+		ctx, cancel := context.WithTimeout(i.ctx, i.refreshTimeout)
 		defer cancel()
 
 		// avoid refreshing too often to try not to tax the SQL Admin
