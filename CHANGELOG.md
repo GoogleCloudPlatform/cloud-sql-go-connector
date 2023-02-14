@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.1.1...v1.2.0) (2023-02-14)
+
+
+### Features
+
+* add support for Go 1.20 ([#445](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/445)) ([4df53ef](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/4df53ef4e742d6cd4c80bb79ed90d7ecd2110868))
+
+
+### Bug Fixes
+
+* error when dialer is misconfigured with token source ([#453](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/453)) ([7b45a7e](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/7b45a7e27c164dbf1f7903ed7792e4d81dd467b7))
+* improve reliability of certificate refresh ([#448](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/448)) ([47bd3f3](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/47bd3f385ad0cc7bbd057f3273ed03d2587e9ac8))
+* prevent repeated context expired errors ([#458](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/458)) ([7ffeafe](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/7ffeafea9729d08ad04c403c07b70d4f184664a0))
+
 ## [1.1.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.1.0...v1.1.1) (2023-01-10)
 
 
