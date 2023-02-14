@@ -25,12 +25,27 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"golang.org/x/oauth2"
+	"golang.org/x/time/rate"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
-// the refresh buffer is the amount of time before a refresh's result expires
-// that a new refresh operation begins.
-const refreshBuffer = 4 * time.Minute
+const (
+	// the refresh buffer is the amount of time before a refresh's result
+	// expires that a new refresh operation begins.
+	refreshBuffer = 4 * time.Minute
+
+	// refreshInterval is the amount of time between refresh attempts as
+	// enforced by the rate limiter.
+	refreshInterval = 30 * time.Second
+
+	// RefreshTimeout is the maximum amount of time to wait for a refresh
+	// cycle to complete. This value should be greater than the
+	// refreshInterval.
+	RefreshTimeout = 60 * time.Second
+
+	// refreshBurst is the initial burst allowed by the rate limiter.
+	refreshBurst = 2
+)
 
 var (
 	// Instance connection name is the format <PROJECT>:<REGION>:<INSTANCE>
@@ -123,8 +138,14 @@ type Instance struct {
 	connName
 	key *rsa.PrivateKey
 
+	// refreshTimeout sets the maximum duration a refresh cycle can run
+	// for.
+	refreshTimeout time.Duration
+	// l controls the rate at which refresh cycles are run.
+	l *rate.Limiter
+	r refresher
+
 	resultGuard sync.RWMutex
-	r           refresher
 	RefreshCfg  RefreshCfg
 	// cur represents the current refreshOperation that will be used to
 	// create connections. If a valid complete refreshOperation isn't
@@ -158,17 +179,16 @@ func NewInstance(
 	i := &Instance{
 		connName: cn,
 		key:      key,
+		l:        rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
 		r: newRefresher(
-			refreshTimeout,
-			30*time.Second,
-			2,
 			client,
 			ts,
 			dialerID,
 		),
-		RefreshCfg: r,
-		ctx:        ctx,
-		cancel:     cancel,
+		refreshTimeout: refreshTimeout,
+		RefreshCfg:     r,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 	// For the initial refresh operation, set cur = next so that connection
 	// requests block until the first refresh is complete.
@@ -296,13 +316,29 @@ func refreshDuration(now, certExpiry time.Time) time.Duration {
 
 // scheduleRefresh schedules a refresh operation to be triggered after a given
 // duration. The returned refreshOperation can be used to either Cancel or Wait
-// for the operations result.
+// for the operation's result.
 func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
-	res := &refreshOperation{}
-	res.ready = make(chan struct{})
-	res.timer = time.AfterFunc(d, func() {
-		res.md, res.tlsCfg, res.expiry, res.err = i.r.performRefresh(i.ctx, i.connName, i.key, i.RefreshCfg.UseIAMAuthN)
-		close(res.ready)
+	r := &refreshOperation{}
+	r.ready = make(chan struct{})
+	r.timer = time.AfterFunc(d, func() {
+		ctx, cancel := context.WithTimeout(i.ctx, i.refreshTimeout)
+		defer cancel()
+
+		// avoid refreshing too often to try not to tax the SQL Admin
+		// API quotas
+		err := i.l.Wait(ctx)
+		if err != nil {
+			r.err = errtype.NewDialError(
+				"context was canceled or expired before refresh completed",
+				i.connName.String(),
+				nil,
+			)
+		} else {
+			r.md, r.tlsCfg, r.expiry, r.err = i.r.performRefresh(
+				ctx, i.connName, i.key, i.RefreshCfg.UseIAMAuthN)
+		}
+
+		close(r.ready)
 
 		select {
 		case <-i.ctx.Done():
@@ -317,7 +353,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		defer i.resultGuard.Unlock()
 
 		// if failed, scheduled the next refresh immediately
-		if res.err != nil {
+		if r.err != nil {
 			i.next = i.scheduleRefresh(0)
 			// If the latest result is bad, avoid replacing the
 			// used result while it's still valid and potentially
@@ -326,18 +362,18 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			// valid are surpressed. We should try to surface
 			// errors in a more meaningful way.
 			if !i.cur.isValid() {
-				i.cur = res
+				i.cur = r
 			}
 			return
 		}
 
 		// Update the current results, and schedule the next refresh in
 		// the future
-		i.cur = res
+		i.cur = r
 		t := refreshDuration(time.Now(), i.cur.expiry)
 		i.next = i.scheduleRefresh(t)
 	})
-	return res
+	return r
 }
 
 // String returns the instance's connection name.

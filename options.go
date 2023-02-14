@@ -150,7 +150,8 @@ func WithRSAKey(k *rsa.PrivateKey) Option {
 	}
 }
 
-// WithRefreshTimeout returns an Option that sets a timeout on refresh operations. Defaults to 30s.
+// WithRefreshTimeout returns an Option that sets a timeout on refresh
+// operations. Defaults to 60s.
 func WithRefreshTimeout(t time.Duration) Option {
 	return func(d *dialerConfig) {
 		d.refreshTimeout = t
