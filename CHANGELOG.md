@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.2.0...v1.2.1) (2023-02-15)
+
+
+### Bug Fixes
+
+* don't initialize default creds when using a token ([#460](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/460)) ([fc5c435](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/fc5c435b92ddfe6be5bbe77264486c0b712ba4d1))
+
 ## [1.2.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.1.1...v1.2.0) (2023-02-14)
 
 
