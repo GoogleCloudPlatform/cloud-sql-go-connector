@@ -40,10 +40,11 @@ type dialerConfig struct {
 	dialFunc               func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout         time.Duration
 	useIAMAuthN            bool
-	setTokenSource         bool
-	setIAMAuthNTokenSource bool
 	iamLoginTokenSource    oauth2.TokenSource
 	useragents             []string
+	setCredentials         bool
+	setTokenSource         bool
+	setIAMAuthNTokenSource bool
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -90,6 +91,7 @@ func WithCredentialsJSON(b []byte) Option {
 			return
 		}
 		d.iamLoginTokenSource = scoped.TokenSource
+		d.setCredentials = true
 	}
 }
 
@@ -117,6 +119,7 @@ func WithDefaultDialOptions(opts ...DialOption) Option {
 func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
 		d.setTokenSource = true
+		d.setCredentials = true
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
 	}
 }
@@ -138,6 +141,7 @@ func WithTokenSource(s oauth2.TokenSource) Option {
 func WithIAMAuthNTokenSources(apiTS, iamLoginTS oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
 		d.setIAMAuthNTokenSource = true
+		d.setCredentials = true
 		d.iamLoginTokenSource = iamLoginTS
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(apiTS))
 	}

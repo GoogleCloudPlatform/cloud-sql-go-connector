@@ -120,7 +120,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return nil, cfg.err
 		}
 	}
-	if cfg.useIAMAuthN && cfg.setTokenSource && cfg.iamLoginTokenSource == nil {
+	if cfg.useIAMAuthN && cfg.setTokenSource && !cfg.setIAMAuthNTokenSource {
 		return nil, errUseIAMTokenSource
 	}
 	if cfg.setIAMAuthNTokenSource && !cfg.useIAMAuthN {
@@ -132,7 +132,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// If callers have not provided a token source, either explicitly with
 	// WithTokenSource or implicitly with WithCredentialsJSON etc, then use the
 	// default token source.
-	if cfg.iamLoginTokenSource == nil {
+	if !cfg.setCredentials {
 		ts, err := google.DefaultTokenSource(ctx, sqladmin.SqlserviceAdminScope)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create token source: %v", err)
