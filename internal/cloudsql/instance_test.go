@@ -315,21 +315,23 @@ func TestContextCancelled(t *testing.T) {
 	defer cleanup()
 
 	// Set up an instance and then close it immediately
-	im, err := NewInstance("my-proj:my-region:my-inst", client, RSAKey, 30, nil, "", RefreshCfg{})
+	i, err := NewInstance("my-proj:my-region:my-inst", client, RSAKey, 30, nil, "", RefreshCfg{})
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
-	im.Close()
+	i.Close()
 
 	// grab the current value of next before scheduling another refresh
-	next := im.next
+	i.resultGuard.Lock()
+	next := i.next
+	i.resultGuard.Unlock()
 
-	op := im.scheduleRefresh(time.Nanosecond)
+	op := i.scheduleRefresh(time.Nanosecond)
 	<-op.ready
 
 	// if scheduleRefresh returns without scheduling another one,
 	// i.next should be untouched and remain the same pointer value
-	if im.next != next {
-		t.Fatalf("refresh did not return after a closed context. next pointer changed: want = %p, got = %p", next, im.next)
+	if i.next != next {
+		t.Fatalf("refresh did not return after a closed context. next pointer changed: want = %p, got = %p", next, i.next)
 	}
 }
