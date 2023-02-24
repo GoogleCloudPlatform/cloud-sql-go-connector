@@ -152,7 +152,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
         goarch: ["", "386"]
-        go-version: ["1.16", "1.17", "1.18", "1.19", "1.20"]
+        go-version: ["1.17", "1.18", "1.19", "1.20"]
         exclude:
           - os: macos-latest
             goarch: "386"
