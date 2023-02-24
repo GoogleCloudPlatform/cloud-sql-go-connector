@@ -350,11 +350,13 @@ considered unsupported.
 
 ## Supported Go Versions
 
-We test and support at minimum, the latest three Go versions. Changes in 
-supported Go versions will be considered a minor change, and will be listed in
-the release notes.
+We follow the [Go Version Support Policy][go-policy] used by Google Cloud
+Libraries for Go.
+
+[go-policy]: https://github.com/googleapis/google-cloud-go#supported-versions
 
 ### Release cadence
+
 This project aims for a release on at least a monthly basis. If no new features
 or fixes have been added, a new PATCH version with the latest dependencies is
 released.
