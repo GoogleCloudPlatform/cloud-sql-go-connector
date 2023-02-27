@@ -115,7 +115,7 @@ func (r *refreshOperation) isValid() bool {
 	default:
 		return false
 	case <-r.ready:
-		if r.err != nil || time.Now().After(r.expiry) {
+		if r.err != nil || time.Now().After(r.expiry.Round(0)) {
 			return false
 		}
 		return true
@@ -301,7 +301,7 @@ func (i *Instance) result(ctx context.Context) (*refreshOperation, error) {
 // refresh. Usually that duration will be half of the time until certificate
 // expiration.
 func refreshDuration(now, certExpiry time.Time) time.Duration {
-	d := certExpiry.Sub(now)
+	d := certExpiry.Sub(now.Round(0))
 	if d < time.Hour {
 		// Something is wrong with the certificate, refresh now.
 		if d < refreshBuffer {
