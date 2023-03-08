@@ -86,6 +86,12 @@ using [pgx][] directly. See [pgx's advice on which to choose][pgx-advice].
 [pgx]: https://github.com/jackc/pgx
 [pgx-advice]: https://github.com/jackc/pgx#choosing-between-the-pgx-and-databasesql-interfaces
 
+##### Example implementation
+
+If you are looking for a example, we’ve released a Codelab for
+[How to connect a Go application on Cloud Run to a Cloud SQL for PostgreSQL database](https://codelabs.developers.google.com/codelabs/cloud-sql-go-connector).
+The Codelab example is less than 100 lines of code and includes all of the recommended practices.
+
 ##### Using the dialer with pgx
 
 To use the dialer with [pgx][], we recommend using connection pooling with
