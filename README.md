@@ -13,6 +13,7 @@
 [ci-build]: https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/actions/workflows/tests.yaml?query=event%3Apush+branch%3Amain
 [pkg-badge]: https://pkg.go.dev/badge/cloud.google.com/go/cloudsqlconn.svg
 [pkg-docs]: https://pkg.go.dev/cloud.google.com/go/cloudsqlconn
+[codelab]: https://codelabs.developers.google.com/codelabs/cloud-sql-go-connector
 
 The _Cloud SQL Go Connector_ is a Cloud SQL connector designed for use with the
 Go language. Using a Cloud SQL connector provides the following benefits:
@@ -31,6 +32,8 @@ Go language. Using a Cloud SQL connector provides the following benefits:
 
 For users migrating from the Cloud SQL Proxy drivers, see the [migration
 guide](./migration-guide.md).
+
+For a quick example, try out the Go Connector in a [Codelab][codelab].
 
 ## Installation
 
@@ -85,12 +88,6 @@ using [pgx][] directly. See [pgx's advice on which to choose][pgx-advice].
 
 [pgx]: https://github.com/jackc/pgx
 [pgx-advice]: https://github.com/jackc/pgx#choosing-between-the-pgx-and-databasesql-interfaces
-
-##### Example implementation
-
-If you are looking for a example, we’ve released a Codelab for
-[How to connect a Go application on Cloud Run to a Cloud SQL for PostgreSQL database](https://codelabs.developers.google.com/codelabs/cloud-sql-go-connector).
-The Codelab example is less than 100 lines of code and includes all of the recommended practices.
 
 ##### Using the dialer with pgx
 
