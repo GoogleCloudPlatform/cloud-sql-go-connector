@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.2.1...v1.2.2) (2023-03-09)
+
+
+### Bug Fixes
+
+* strip monotonic clock readings for refresh calculations ([#471](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/471)) ([94048af](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/94048afd001fd960f316e961501b871ab648296e))
+
 ## [1.2.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.2.0...v1.2.1) (2023-02-15)
 
 
