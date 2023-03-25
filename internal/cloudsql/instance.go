@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	// the refresh buffer is the amount of time before a refresh's result
+	// the refresh buffer is the amount of time before a refresh cycle's result
 	// expires that a new refresh operation begins.
 	refreshBuffer = 4 * time.Minute
 
@@ -122,7 +122,7 @@ func (r *refreshOperation) isValid() bool {
 	}
 }
 
-// RefreshCfg is a of attributes that trigger new refresh operations.
+// RefreshCfg is a collection of attributes that trigger new refresh operations.
 type RefreshCfg struct {
 	UseIAMAuthN bool
 }
@@ -239,7 +239,7 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 }
 
 // InstanceEngineVersion returns the engine type and version for the instance.
-// The value coresponds to one of the following types for the instance:
+// The value corresponds to one of the following types for the instance:
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
 func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
 	res, err := i.result(ctx)
@@ -257,9 +257,9 @@ func (i *Instance) UpdateRefresh(cfg RefreshCfg) {
 	// Cancel any pending refreshes
 	i.cur.cancel()
 	i.next.cancel()
-	// update the refreshcfg as needed
+	// update the refresh config as needed
 	i.RefreshCfg = cfg
-	// reschedule a new refresh immiediately
+	// reschedule a new refresh immediately
 	i.cur = i.scheduleRefresh(0)
 	i.next = i.cur
 }
@@ -359,7 +359,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			// used result while it's still valid and potentially
 			// able to provide successful connections. TODO: This
 			// means that errors while the current result is still
-			// valid are surpressed. We should try to surface
+			// valid are surprised. We should try to surface
 			// errors in a more meaningful way.
 			if !i.cur.isValid() {
 				i.cur = r

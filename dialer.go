@@ -91,7 +91,7 @@ type Dialer struct {
 	dialerID string
 
 	// dialFunc is the function used to connect to the address on the named
-	// network. By default it is golang.org/x/net/proxy#Dial.
+	// network. By default, it is golang.org/x/net/proxy#Dial.
 	dialFunc func(cxt context.Context, network, addr string) (net.Conn, error)
 
 	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn.
@@ -130,7 +130,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
 
 	// If callers have not provided a token source, either explicitly with
-	// WithTokenSource or implicitly with WithCredentialsJSON etc, then use the
+	// WithTokenSource or implicitly with WithCredentialsJSON etc., then use the
 	// default token source.
 	if !cfg.setCredentials {
 		ts, err := google.DefaultTokenSource(ctx, sqladmin.SqlserviceAdminScope)
@@ -253,7 +253,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 }
 
 // EngineVersion returns the engine type and version for the instance. The value will
-// corespond to one of the following types for the instance:
+// correspond to one of the following types for the instance:
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
 func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, error) {
 	i, err := d.instance(instance, nil)
@@ -267,7 +267,7 @@ func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, er
 	return e, nil
 }
 
-// Warmup starts the background refresh neccesary to connect to the instance. Use Warmup
+// Warmup starts the background refresh necessary to connect to the instance. Use Warmup
 // to start the refresh process early if you don't know when you'll need to call "Dial".
 func (d *Dialer) Warmup(_ context.Context, instance string, opts ...DialOption) error {
 	cfg := d.defaultDialCfg
@@ -294,7 +294,7 @@ type instrumentedConn struct {
 	closeFunc func()
 }
 
-// Close delegates to the underylying net.Conn interface and reports the close
+// Close delegates to the underlying net.Conn interface and reports the close
 // to the provided closeFunc only when Close returns no error.
 func (i *instrumentedConn) Close() error {
 	err := i.Conn.Close()
@@ -324,7 +324,7 @@ func (d *Dialer) instance(connName string, r *cloudsql.RefreshCfg) (*cloudsql.In
 	d.lock.RLock()
 	i, ok := d.instances[connName]
 	d.lock.RUnlock()
-	// If the instance hasn't been creted yet or if the refreshCfg has changed
+	// If the instance hasn't been created yet or if the refreshCfg has changed
 	if !ok || (r != nil && *r != i.RefreshCfg) {
 		d.lock.Lock()
 		// Recheck to ensure instance wasn't created or changed between locks
