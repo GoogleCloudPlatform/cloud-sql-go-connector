@@ -77,11 +77,7 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 
 func TestDialWithAdminAPIErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
-	svc, cleanup, err := mock.NewSQLAdminService(
-		context.Background(),
-		mock.InstanceGetSuccess(inst, 2),
-		mock.CreateEphemeralSuccess(inst, 2),
-	)
+	svc, cleanup, err := mock.NewSQLAdminService(context.Background())
 	if err != nil {
 		t.Fatalf("failed to init SQLAdminService: %v", err)
 	}
