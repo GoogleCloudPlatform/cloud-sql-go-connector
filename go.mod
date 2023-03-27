@@ -5,7 +5,8 @@ go 1.20
 require (
 	github.com/go-sql-driver/mysql v1.7.0
 	github.com/google/uuid v1.3.0
-	github.com/jackc/pgx/v4 v4.18.1
+	github.com/jackc/pgx/v4 v4.12.1-0.20210724153913-640aa07df17c
+	github.com/jackc/pgx/v5 v5.3.1
 	github.com/microsoft/go-mssqldb v0.20.0
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.8.0
