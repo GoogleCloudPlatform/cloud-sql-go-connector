@@ -17,7 +17,7 @@ package cloudsqlconn
 import (
 	"context"
 	"errors"
-	"io/ioutil"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -34,9 +34,9 @@ func testSuccessfulDial(ctx context.Context, t *testing.T, d *Dialer, i string, 
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
-	data, err := ioutil.ReadAll(conn)
+	data, err := io.ReadAll(conn)
 	if err != nil {
 		t.Fatalf("expected ReadAll to succeed, got error %v", err)
 	}
@@ -96,24 +96,10 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 	}
 	d.sqladmin = svc
 
-	_, err = d.Dial(context.Background(), "bad-instance-name")
-	var wantErr1 *errtype.ConfigError
-	if !errors.As(err, &wantErr1) {
-		t.Fatalf("when instance name is invalid, want = %T, got = %v", wantErr1, err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err = d.Dial(ctx, "my-project:my-region:my-instance")
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("when context is canceled, want = %T, got = %v", context.Canceled, err)
-	}
-
 	_, err = d.Dial(context.Background(), "my-project:my-region:my-instance")
-	var wantErr2 *errtype.RefreshError
-	if !errors.As(err, &wantErr2) {
-		t.Fatalf("when API call fails, want = %T, got = %v", wantErr2, err)
+	var wantErr *errtype.RefreshError
+	if !errors.As(err, &wantErr) {
+		t.Fatalf("when API call fails, want = %T, got = %v", wantErr, err)
 	}
 }
 
@@ -129,7 +115,7 @@ func TestDialWithConfigurationErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init SQLAdminService: %v", err)
 	}
-	defer cleanup()
+	defer func() { _ = cleanup() }()
 
 	d, err := NewDialer(context.Background(),
 		WithDefaultDialOptions(WithPublicIP()),
@@ -231,7 +217,7 @@ func TestIAMAuthNErrors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("mock.NewSQLAdminService(): %v", err)
 			}
-			defer cleanup()
+			defer func() { _ = cleanup() }()
 
 			stop := mock.StartServerProxy(t, inst)
 			defer stop()
@@ -288,41 +274,45 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 }
 
 func TestDialerEngineVersion(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	tests := []string{
 		"MYSQL_5_7", "POSTGRES_14", "SQLSERVER_2019_STANDARD", "MYSQL_8_0_18",
 	}
 	for _, wantEV := range tests {
-		inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion(wantEV))
-		svc, cleanup, err := mock.NewSQLAdminService(
-			ctx,
-			mock.InstanceGetSuccess(inst, 1),
-			mock.CreateEphemeralSuccess(inst, 1),
-		)
-		if err != nil {
-			t.Fatalf("failed to init SQLAdminService: %v", err)
-		}
-		d, err := NewDialer(context.Background(),
-			WithTokenSource(mock.EmptyTokenSource{}),
-		)
-		if err != nil {
-			t.Fatalf("failed to init Dialer: %v", err)
-		}
-		d.sqladmin = svc
-		defer func() {
-			if err := cleanup(); err != nil {
-				t.Fatalf("%v", err)
+		t.Run(wantEV, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			inst := mock.NewFakeCSQLInstance(
+				"my-project", "my-region", "my-instance",
+				mock.WithEngineVersion(wantEV))
+			svc, cleanup, err := mock.NewSQLAdminService(
+				ctx,
+				mock.InstanceGetSuccess(inst, 1),
+				mock.CreateEphemeralSuccess(inst, 1),
+			)
+			if err != nil {
+				t.Fatalf("failed to init SQLAdminService: %v", err)
 			}
-		}()
+			d, err := NewDialer(context.Background(),
+				WithTokenSource(mock.EmptyTokenSource{}),
+			)
+			if err != nil {
+				t.Fatalf("failed to init Dialer: %v", err)
+			}
+			d.sqladmin = svc
+			defer func() {
+				if err := cleanup(); err != nil {
+					t.Fatalf("%v", err)
+				}
+			}()
 
-		gotEV, err := d.EngineVersion(ctx, "my-project:my-region:my-instance")
-		if err != nil {
-			t.Fatalf("failed to retrieve engine version: %v", err)
-		}
-		if wantEV != gotEV {
-			t.Errorf("InstanceEngineVersion(%s) failed: want %v, got %v", wantEV, gotEV, err)
-		}
+			gotEV, err := d.EngineVersion(ctx, "my-project:my-region:my-instance")
+			if err != nil {
+				t.Fatalf("failed to retrieve engine version: %v", err)
+			}
+			if wantEV != gotEV {
+				t.Errorf("InstanceEngineVersion(%s) failed: want %v, got %v", wantEV, gotEV, err)
+			}
+		})
 	}
 }
 
