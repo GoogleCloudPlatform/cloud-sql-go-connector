@@ -355,7 +355,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			// used result while it's still valid and potentially
 			// able to provide successful connections. TODO: This
 			// means that errors while the current result is still
-			// valid are surprised. We should try to surface
+			// valid are suppressed. We should try to surface
 			// errors in a more meaningful way.
 			if !i.cur.isValid() {
 				i.cur = r

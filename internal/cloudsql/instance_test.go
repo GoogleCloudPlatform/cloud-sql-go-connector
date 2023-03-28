@@ -1,11 +1,11 @@
 // Copyright 2020 Google LLC
-
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-
+//
 //     https://www.apache.org/licenses/LICENSE-2.0
-
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -325,9 +325,13 @@ func TestContextCancelled(t *testing.T) {
 	op := i.scheduleRefresh(time.Nanosecond)
 	<-op.ready
 
+	i.resultGuard.Lock()
+	otherNext := i.next
+	i.resultGuard.Unlock()
+
 	// if scheduleRefresh returns without scheduling another one,
 	// i.next should be untouched and remain the same pointer value
-	if i.next != next {
+	if otherNext != next {
 		t.Fatalf("refresh did not return after a closed context. next pointer changed: want = %p, got = %p", next, i.next)
 	}
 }
