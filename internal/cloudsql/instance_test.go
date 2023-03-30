@@ -1,11 +1,11 @@
 // Copyright 2020 Google LLC
-
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-
+//
 //     https://www.apache.org/licenses/LICENSE-2.0
-
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -36,31 +36,36 @@ func genRSAKey() *rsa.PrivateKey {
 	return key
 }
 
+func testInstanceConnName() ConnName {
+	cn, _ := ParseConnName("my-project:my-region:my-instance")
+	return cn
+}
+
 // RSAKey is used for test only.
 var RSAKey = genRSAKey()
 
 func TestParseConnName(t *testing.T) {
 	tests := []struct {
 		name string
-		want connName
+		want ConnName
 	}{
 		{
 			"project:region:instance",
-			connName{"project", "region", "instance"},
+			ConnName{"project", "region", "instance"},
 		},
 		{
 			"google.com:project:region:instance",
-			connName{"google.com:project", "region", "instance"},
+			ConnName{"google.com:project", "region", "instance"},
 		},
 		{
 			"project:instance", // missing region
-			connName{},
+			ConnName{},
 		},
 	}
 
 	for _, tc := range tests {
-		c, err := parseConnName(tc.name)
-		if err != nil && tc.want != (connName{}) {
+		c, err := ParseConnName(tc.name)
+		if err != nil && tc.want != (ConnName{}) {
 			t.Errorf("unexpected error: %e", err)
 		}
 		if c != tc.want {
@@ -90,7 +95,7 @@ func TestInstanceEngineVersion(t *testing.T) {
 				t.Fatalf("%v", err)
 			}
 		}()
-		i, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 30*time.Second, nil, "", RefreshCfg{})
+		i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", RefreshCfg{})
 		if err != nil {
 			t.Fatalf("failed to init instance: %v", err)
 		}
@@ -124,10 +129,7 @@ func TestConnectInfo(t *testing.T) {
 		}
 	}()
 
-	i, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 30*time.Second, nil, "", RefreshCfg{})
-	if err != nil {
-		t.Fatalf("failed to create mock instance: %v", err)
-	}
+	i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", RefreshCfg{})
 
 	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, PublicIP)
 	if err != nil {
@@ -177,7 +179,7 @@ func TestConnectInfoAutoIP(t *testing.T) {
 		var opts []mock.FakeCSQLInstanceOption
 		opts = append(opts, mock.WithNoIPAddrs())
 		opts = append(opts, tc.ips...)
-		inst := mock.NewFakeCSQLInstance("p", "r", "i", opts...)
+		inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", opts...)
 		client, cleanup, err := mock.NewSQLAdminService(
 			context.Background(),
 			mock.InstanceGetSuccess(inst, 1),
@@ -192,7 +194,7 @@ func TestConnectInfoAutoIP(t *testing.T) {
 			}
 		}()
 
-		i, err := NewInstance("p:r:i", client, RSAKey, 30*time.Second, nil, "", RefreshCfg{})
+		i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", RefreshCfg{})
 		if err != nil {
 			t.Fatalf("failed to create mock instance: %v", err)
 		}
@@ -221,19 +223,16 @@ func TestConnectInfoErrors(t *testing.T) {
 	defer cleanup()
 
 	// Use a timeout that should fail instantly
-	im, err := NewInstance("my-project:my-region:my-instance", client, RSAKey, 0, nil, "", RefreshCfg{})
-	if err != nil {
-		t.Fatalf("failed to initialize Instance: %v", err)
-	}
+	i := NewInstance(testInstanceConnName(), client, RSAKey, 0, nil, "", RefreshCfg{})
 
-	_, _, err = im.ConnectInfo(ctx, PublicIP)
+	_, _, err = i.ConnectInfo(ctx, PublicIP)
 	var wantErr *errtype.DialError
 	if !errors.As(err, &wantErr) {
 		t.Fatalf("when connect info fails, want = %T, got = %v", wantErr, err)
 	}
 
 	// when client asks for wrong IP address type
-	gotAddr, _, err := im.ConnectInfo(ctx, PrivateIP)
+	gotAddr, _, err := i.ConnectInfo(ctx, PrivateIP)
 	if err == nil {
 		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", gotAddr)
 	}
@@ -249,13 +248,10 @@ func TestClose(t *testing.T) {
 	defer cleanup()
 
 	// Set up an instance and then close it immediately
-	im, err := NewInstance("my-proj:my-region:my-inst", client, RSAKey, 30, nil, "", RefreshCfg{})
-	if err != nil {
-		t.Fatalf("failed to initialize Instance: %v", err)
-	}
-	im.Close()
+	i := NewInstance(testInstanceConnName(), client, RSAKey, 30, nil, "", RefreshCfg{})
+	i.Close()
 
-	_, _, err = im.ConnectInfo(ctx, PublicIP)
+	_, _, err = i.ConnectInfo(ctx, PublicIP)
 	if !strings.Contains(err.Error(), "context was canceled or expired") {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
@@ -315,7 +311,7 @@ func TestContextCancelled(t *testing.T) {
 	defer cleanup()
 
 	// Set up an instance and then close it immediately
-	i, err := NewInstance("my-proj:my-region:my-inst", client, RSAKey, 30, nil, "", RefreshCfg{})
+	i := NewInstance(testInstanceConnName(), client, RSAKey, 30, nil, "", RefreshCfg{})
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
@@ -329,9 +325,13 @@ func TestContextCancelled(t *testing.T) {
 	op := i.scheduleRefresh(time.Nanosecond)
 	<-op.ready
 
+	i.resultGuard.Lock()
+	otherNext := i.next
+	i.resultGuard.Unlock()
+
 	// if scheduleRefresh returns without scheduling another one,
 	// i.next should be untouched and remain the same pointer value
-	if i.next != next {
+	if otherNext != next {
 		t.Fatalf("refresh did not return after a closed context. next pointer changed: want = %p, got = %p", next, i.next)
 	}
 }

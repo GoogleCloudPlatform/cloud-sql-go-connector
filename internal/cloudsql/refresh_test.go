@@ -37,9 +37,9 @@ func TestRefresh(t *testing.T) {
 	wantPrivateIP := "10.0.0.1"
 	wantExpiry := time.Now().Add(time.Hour).UTC().Round(time.Second)
 	wantConnName := "my-project:my-region:my-instance"
-	cn, err := parseConnName(wantConnName)
+	cn, err := ParseConnName(wantConnName)
 	if err != nil {
-		t.Fatalf("parseConnName(%s)failed : %v", cn, err)
+		t.Fatalf("ParseConnName(%s)failed : %v", cn, err)
 	}
 	inst := mock.NewFakeCSQLInstance(
 		"my-project", "my-region", "my-instance",
@@ -90,7 +90,7 @@ func TestRefresh(t *testing.T) {
 }
 
 func TestRefreshFailsFast(t *testing.T) {
-	cn, _ := parseConnName("my-project:my-region:my-instance")
+	cn, _ := ParseConnName("my-project:my-region:my-instance")
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	client, cleanup, err := mock.NewSQLAdminService(
 		context.Background(),
@@ -168,7 +168,7 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 			wantExpiry: certExpiry,
 		},
 	}
-	cn, _ := parseConnName("my-project:my-region:my-instance")
+	cn, _ := ParseConnName("my-project:my-region:my-instance")
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance",
 		mock.WithCertExpiry(certExpiry))
 	client, cleanup, err := mock.NewSQLAdminService(
@@ -216,7 +216,7 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 			wantCount: 2,
 		},
 	}
-	cn, _ := parseConnName("my-project:my-region:my-instance")
+	cn, _ := ParseConnName("my-project:my-region:my-instance")
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	client, cleanup, err := mock.NewSQLAdminService(
 		context.Background(),
@@ -243,7 +243,7 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 }
 
 func TestRefreshMetadataConfigError(t *testing.T) {
-	cn, _ := parseConnName("my-project:my-region:my-instance")
+	cn, _ := ParseConnName("my-project:my-region:my-instance")
 
 	testCases := []struct {
 		req     *mock.Request
@@ -293,7 +293,7 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 }
 
 func TestRefreshMetadataRefreshError(t *testing.T) {
-	cn, _ := parseConnName("my-project:my-region:my-instance")
+	cn, _ := ParseConnName("my-project:my-region:my-instance")
 
 	testCases := []struct {
 		req     *mock.Request
@@ -365,7 +365,7 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 }
 
 func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
-	cn, _ := parseConnName("my-project:my-region:my-instance")
+	cn, _ := ParseConnName("my-project:my-region:my-instance")
 	inst := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
 
 	testCases := []struct {
@@ -431,7 +431,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 
 func TestRefreshBuildsTLSConfig(t *testing.T) {
 	wantServerName := "my-project:my-region:my-instance"
-	cn, _ := parseConnName(wantServerName)
+	cn, _ := ParseConnName(wantServerName)
 	inst := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
 	certBytes, err := mock.SelfSign(inst.Cert, inst.Key)
 	if err != nil {

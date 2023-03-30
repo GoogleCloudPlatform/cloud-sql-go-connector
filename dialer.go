@@ -76,7 +76,7 @@ type Dialer struct {
 	lock sync.RWMutex
 	// instances map connection names (e.g., my-project:us-central1:my-instance)
 	// to *cloudsql.Instance types.
-	instances      map[string]*cloudsql.Instance
+	instances      map[cloudsql.ConnName]*cloudsql.Instance
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
 
@@ -91,7 +91,7 @@ type Dialer struct {
 	dialerID string
 
 	// dialFunc is the function used to connect to the address on the named
-	// network. By default it is golang.org/x/net/proxy#Dial.
+	// network. By default, it is golang.org/x/net/proxy#Dial.
 	dialFunc func(cxt context.Context, network, addr string) (net.Conn, error)
 
 	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn.
@@ -130,7 +130,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
 
 	// If callers have not provided a token source, either explicitly with
-	// WithTokenSource or implicitly with WithCredentialsJSON etc, then use the
+	// WithTokenSource or implicitly with WithCredentialsJSON etc., then use the
 	// default token source.
 	if !cfg.setCredentials {
 		ts, err := google.DefaultTokenSource(ctx, sqladmin.SqlserviceAdminScope)
@@ -173,7 +173,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, err
 	}
 	d := &Dialer{
-		instances:      make(map[string]*cloudsql.Instance),
+		instances:      make(map[cloudsql.ConnName]*cloudsql.Instance),
 		key:            cfg.rsaKey,
 		refreshTimeout: cfg.refreshTimeout,
 		sqladmin:       client,
@@ -198,6 +198,11 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		go trace.RecordDialError(context.Background(), instance, d.dialerID, err)
 		endDial(err)
 	}()
+	cn, err := cloudsql.ParseConnName(instance)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := d.defaultDialCfg
 	for _, opt := range opts {
 		opt(&cfg)
@@ -205,11 +210,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	i, err := d.instance(instance, &cfg.refreshCfg)
-	if err != nil {
-		endInfo(err)
-		return nil, err
-	}
+	i := d.instance(cn, &cfg.refreshCfg)
 	addr, tlsCfg, err := i.ConnectInfo(ctx, cfg.ipType)
 	if err != nil {
 		endInfo(err)
@@ -253,13 +254,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 }
 
 // EngineVersion returns the engine type and version for the instance. The value will
-// corespond to one of the following types for the instance:
+// correspond to one of the following types for the instance:
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
 func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, error) {
-	i, err := d.instance(instance, nil)
+	cn, err := cloudsql.ParseConnName(instance)
 	if err != nil {
 		return "", err
 	}
+	i := d.instance(cn, nil)
 	e, err := i.InstanceEngineVersion(ctx)
 	if err != nil {
 		return "", err
@@ -267,15 +269,19 @@ func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, er
 	return e, nil
 }
 
-// Warmup starts the background refresh neccesary to connect to the instance. Use Warmup
+// Warmup starts the background refresh necessary to connect to the instance. Use Warmup
 // to start the refresh process early if you don't know when you'll need to call "Dial".
 func (d *Dialer) Warmup(_ context.Context, instance string, opts ...DialOption) error {
+	cn, err := cloudsql.ParseConnName(instance)
+	if err != nil {
+		return err
+	}
 	cfg := d.defaultDialCfg
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	_, err := d.instance(instance, &cfg.refreshCfg)
-	return err
+	_ = d.instance(cn, &cfg.refreshCfg)
+	return nil
 }
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
@@ -294,7 +300,7 @@ type instrumentedConn struct {
 	closeFunc func()
 }
 
-// Close delegates to the underylying net.Conn interface and reports the close
+// Close delegates to the underlying net.Conn interface and reports the close
 // to the provided closeFunc only when Close returns no error.
 func (i *instrumentedConn) Close() error {
 	err := i.Conn.Close()
@@ -319,33 +325,29 @@ func (d *Dialer) Close() error {
 
 // instance is a helper function for returning the appropriate instance object in a threadsafe way.
 // It will create a new instance object, modify the existing one, or leave it unchanged as needed.
-func (d *Dialer) instance(connName string, r *cloudsql.RefreshCfg) (*cloudsql.Instance, error) {
+func (d *Dialer) instance(cn cloudsql.ConnName, r *cloudsql.RefreshCfg) *cloudsql.Instance {
 	// Check instance cache
 	d.lock.RLock()
-	i, ok := d.instances[connName]
+	i, ok := d.instances[cn]
 	d.lock.RUnlock()
-	// If the instance hasn't been creted yet or if the refreshCfg has changed
+	// If the instance hasn't been created yet or if the refreshCfg has changed
 	if !ok || (r != nil && *r != i.RefreshCfg) {
 		d.lock.Lock()
 		// Recheck to ensure instance wasn't created or changed between locks
-		i, ok = d.instances[connName]
+		i, ok = d.instances[cn]
 		if !ok {
 			// Create a new instance
 			if r == nil {
 				r = &d.defaultDialCfg.refreshCfg
 			}
-			var err error
-			i, err = cloudsql.NewInstance(connName, d.sqladmin, d.key, d.refreshTimeout, d.iamTokenSource, d.dialerID, *r)
-			if err != nil {
-				d.lock.Unlock()
-				return nil, err
-			}
-			d.instances[connName] = i
+			i = cloudsql.NewInstance(cn, d.sqladmin, d.key,
+				d.refreshTimeout, d.iamTokenSource, d.dialerID, *r)
+			d.instances[cn] = i
 		} else if r != nil && *r != i.RefreshCfg {
 			// Update the instance with the new refresh cfg
 			i.UpdateRefresh(*r)
 		}
 		d.lock.Unlock()
 	}
-	return i, nil
+	return i
 }
