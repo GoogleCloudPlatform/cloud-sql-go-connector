@@ -62,30 +62,30 @@ func TestRefresh(t *testing.T) {
 	}()
 
 	r := newRefresher(client, nil, testDialerID)
-	md, tlsCfg, gotExpiry, err := r.performRefresh(context.Background(), cn, RSAKey, false)
+	rr, err := r.performRefresh(context.Background(), cn, RSAKey, false)
 	if err != nil {
 		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
 	}
 
-	gotIP, ok := md.ipAddrs[PublicIP]
+	gotIP, ok := rr.ipAddrs[PublicIP]
 	if !ok {
 		t.Fatalf("metadata IP addresses did not include public address")
 	}
 	if wantPublicIP != gotIP {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPublicIP, gotIP)
 	}
-	gotIP, ok = md.ipAddrs[PrivateIP]
+	gotIP, ok = rr.ipAddrs[PrivateIP]
 	if !ok {
 		t.Fatalf("metadata IP addresses did not include private address")
 	}
 	if wantPrivateIP != gotIP {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPrivateIP, gotIP)
 	}
-	if wantExpiry != gotExpiry {
-		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, gotExpiry)
+	if wantExpiry != rr.expiry {
+		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, rr.expiry)
 	}
-	if wantConnName != tlsCfg.ServerName {
-		t.Fatalf("server name mismatch, want = %v, got = %v", wantConnName, tlsCfg.ServerName)
+	if wantConnName != rr.conf.ServerName {
+		t.Fatalf("server name mismatch, want = %v, got = %v", wantConnName, rr.conf.ServerName)
 	}
 }
 
@@ -103,7 +103,7 @@ func TestRefreshFailsFast(t *testing.T) {
 	defer cleanup()
 
 	r := newRefresher(client, nil, testDialerID)
-	_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
+	_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 	if err != nil {
 		t.Fatalf("expected no error, got = %v", err)
 	}
@@ -111,7 +111,7 @@ func TestRefreshFailsFast(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	// context is canceled
-	_, _, _, err = r.performRefresh(ctx, cn, RSAKey, false)
+	_, err = r.performRefresh(ctx, cn, RSAKey, false)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled error, got = %v", err)
 	}
@@ -185,12 +185,12 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			ts := &fakeTokenSource{responses: tc.resps}
 			r := newRefresher(client, ts, testDialerID)
-			_, _, gotExpiry, err := r.performRefresh(context.Background(), cn, RSAKey, true)
+			rr, err := r.performRefresh(context.Background(), cn, RSAKey, true)
 			if err != nil {
 				t.Fatalf("want no error, got = %v", err)
 			}
-			if tc.wantExpiry != gotExpiry {
-				t.Fatalf("want = %v, got = %v", tc.wantExpiry, gotExpiry)
+			if tc.wantExpiry != rr.expiry {
+				t.Fatalf("want = %v, got = %v", tc.wantExpiry, rr.expiry)
 			}
 		})
 	}
@@ -231,7 +231,7 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			ts := &fakeTokenSource{responses: tc.resps}
 			r := newRefresher(client, ts, testDialerID)
-			_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, true)
+			_, err := r.performRefresh(context.Background(), cn, RSAKey, true)
 			if err == nil {
 				t.Fatalf("expected get failed error, got = %v", err)
 			}
@@ -284,7 +284,7 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 			defer cleanup()
 
 			r := newRefresher(client, nil, testDialerID)
-			_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
+			_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 			if !errors.As(err, &tc.wantErr) {
 				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 			}
@@ -356,7 +356,7 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 			defer cleanup()
 
 			r := newRefresher(client, nil, testDialerID)
-			_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
+			_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 			if !errors.As(err, &tc.wantErr) {
 				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 			}
@@ -421,7 +421,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		defer cleanup()
 
 		r := newRefresher(client, nil, testDialerID)
-		_, _, _, err = r.performRefresh(context.Background(), cn, RSAKey, false)
+		_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 
 		if !errors.As(err, &tc.wantErr) {
 			t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
@@ -448,39 +448,39 @@ func TestRefreshBuildsTLSConfig(t *testing.T) {
 	defer cleanup()
 
 	r := newRefresher(client, nil, testDialerID)
-	_, tlsCfg, _, err := r.performRefresh(context.Background(), cn, RSAKey, false)
+	rr, err := r.performRefresh(context.Background(), cn, RSAKey, false)
 	if err != nil {
 		t.Fatalf("expected no error, got = %v", err)
 	}
 
-	if wantServerName != tlsCfg.ServerName {
+	if wantServerName != rr.conf.ServerName {
 		t.Fatalf(
 			"TLS config has incorrect server name, want = %v, got = %v",
-			wantServerName, tlsCfg.ServerName,
+			wantServerName, rr.conf.ServerName,
 		)
 	}
 
 	wantCertLen := 1
-	if wantCertLen != len(tlsCfg.Certificates) {
+	if wantCertLen != len(rr.conf.Certificates) {
 		t.Fatalf(
 			"TLS config has unexpected number of certificates, want = %v, got = %v",
-			wantCertLen, len(tlsCfg.Certificates),
+			wantCertLen, len(rr.conf.Certificates),
 		)
 	}
 
 	wantInsecure := true
-	if wantInsecure != tlsCfg.InsecureSkipVerify {
+	if wantInsecure != rr.conf.InsecureSkipVerify {
 		t.Fatalf(
 			"TLS config should skip verification, want = %v, got = %v",
-			wantInsecure, tlsCfg.InsecureSkipVerify,
+			wantInsecure, rr.conf.InsecureSkipVerify,
 		)
 	}
 
-	if tlsCfg.RootCAs == nil {
+	if rr.conf.RootCAs == nil {
 		t.Fatal("TLS config should include RootCA, got nil")
 	}
 
-	verifyPeerCert := tlsCfg.VerifyPeerCertificate
+	verifyPeerCert := rr.conf.VerifyPeerCertificate
 	b, _ := pem.Decode(certBytes)
 	err = verifyPeerCert([][]byte{b.Bytes}, nil)
 	if err != nil {
