@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	// the refresh buffer is the amount of time before a refresh cycle's
+	// the refresh buffer is the amount of time before a refresh operation's
 	// certificate expires that a new refresh operation begins.
 	refreshBuffer = 4 * time.Minute
 
