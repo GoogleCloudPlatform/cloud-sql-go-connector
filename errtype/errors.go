@@ -36,7 +36,8 @@ func NewConfigError(msg, cn string) *ConfigError {
 
 // ConfigError represents an incorrect request by the user. Config errors
 // usually indicate a semantic error (e.g., the instance connection name is
-// malformated, the SQL instance does not support the requested IP type, etc.)
+// malformed, the SQL instance does not support the requested IP type, etc.)
+// ConfigError's should not be retried.
 type ConfigError struct{ *genericError }
 
 // NewRefreshError initializes a RefreshError.
@@ -51,7 +52,7 @@ func NewRefreshError(msg, cn string, err error) *RefreshError {
 // refresh operation. In general, this is an unexpected error caused by
 // an interaction with the API itself (e.g., missing certificates,
 // invalid certificate encoding, region mismatch with the requested
-// instance connection name, etc.).
+// instance connection name, etc.). RefreshError's usually can be retried.
 type RefreshError struct {
 	*genericError
 	// Err is the underlying error and may be nil.
@@ -77,7 +78,8 @@ func NewDialError(msg, cn string, err error) *DialError {
 
 // DialError represents a problem that occurred when trying to dial a SQL
 // instance (e.g., a failure to set the keep-alive property, a TLS handshake
-// failure, a missing certificate, etc.)
+// failure, a missing certificate, etc.). DialError's are often network-related
+// and can be retried.
 type DialError struct {
 	*genericError
 	// Err is the underlying error and may be nil.
