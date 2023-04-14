@@ -277,7 +277,7 @@ func newRefresher(
 	}
 }
 
-// refreshResult contains all the resulting data from the refresh cycle.
+// refreshResult contains all the resulting data from the refresh operation.
 type refreshResult struct {
 	ipAddrs      map[string]string
 	serverCaCert *x509.Certificate
