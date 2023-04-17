@@ -62,7 +62,7 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst ConnName)
 	// validate the instance is supported for authenticated connections
 	if db.Region != inst.region {
 		msg := fmt.Sprintf("provided region was mismatched - got %s, want %s", inst.region, db.Region)
-		return metadata{}, errtype.NewRefreshError(msg, inst.String(), nil)
+		return metadata{}, errtype.NewConfigError(msg, inst.String())
 	}
 	if db.BackendType != "SECOND_GEN" {
 		return metadata{}, errtype.NewConfigError(
