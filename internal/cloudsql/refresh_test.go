@@ -1,11 +1,11 @@
 // Copyright 2020 Google LLC
-
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-
+//
 //     https://www.apache.org/licenses/LICENSE-2.0
-
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -262,6 +262,13 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 		},
 		{
 			req: mock.InstanceGetSuccess(
+				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
+					mock.WithRegion("some-other-region")), 1),
+			wantErr: &errtype.ConfigError{},
+			desc:    "When the region does not match",
+		},
+		{
+			req: mock.InstanceGetSuccess(
 				mock.NewFakeCSQLInstance(
 					cn.project, cn.region, cn.name,
 					mock.WithRegion("my-region"),
@@ -305,13 +312,6 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name), 1),
 			wantErr: &errtype.RefreshError{},
 			desc:    "When the Metadata call fails",
-		},
-		{
-			req: mock.InstanceGetSuccess(
-				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
-					mock.WithRegion("some-other-region")), 1),
-			wantErr: &errtype.RefreshError{},
-			desc:    "When the region does not match",
 		},
 		{
 			req: mock.InstanceGetSuccess(
