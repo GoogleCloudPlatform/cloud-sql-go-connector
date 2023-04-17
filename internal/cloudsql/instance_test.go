@@ -318,16 +318,16 @@ func TestContextCancelled(t *testing.T) {
 	i.Close()
 
 	// grab the current value of next before scheduling another refresh
-	i.resultGuard.Lock()
+	i.refreshLock.Lock()
 	next := i.next
-	i.resultGuard.Unlock()
+	i.refreshLock.Unlock()
 
 	op := i.scheduleRefresh(time.Nanosecond)
 	<-op.ready
 
-	i.resultGuard.Lock()
+	i.refreshLock.Lock()
 	otherNext := i.next
-	i.resultGuard.Unlock()
+	i.refreshLock.Unlock()
 
 	// if scheduleRefresh returns without scheduling another one,
 	// i.next should be untouched and remain the same pointer value
