@@ -220,7 +220,7 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	client, cleanup, err := mock.NewSQLAdminService(
 		context.Background(),
-		mock.InstanceGetSuccess(inst, 1),
+		mock.InstanceGetSuccess(inst, 2),
 	)
 	if err != nil {
 		t.Fatalf("failed to create test SQL admin service: %s", err)
