@@ -20,11 +20,13 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"golang.org/x/oauth2"
 )
@@ -501,5 +503,67 @@ func TestTokenSourceWithIAMAuthN(t *testing.T) {
 				t.Fatalf("err: want = %v, got = %v", tc.wantErr, gotErr)
 			}
 		})
+	}
+}
+
+func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping slow unit test")
+	}
+	// When a dialer attempts to retrieve connection info for a
+	// non-existent instance, it should delete the instance from
+	// the cache and ensure no background refresh happens (which would be
+	// wasted cycles).
+	good := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
+	svc, cleanup, err := mock.NewSQLAdminService(context.Background())
+	if err != nil {
+		t.Fatalf("failed to init SQLAdminService: %v", err)
+	}
+	stop := mock.StartServerProxy(t, good)
+	defer func() {
+		stop()
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	d, err := NewDialer(context.Background(),
+		WithDefaultDialOptions(WithPublicIP()),
+		WithTokenSource(mock.EmptyTokenSource{}),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+	d.sqladmin = svc
+	defer func(d *Dialer) {
+		err := d.Close()
+		if err != nil {
+			t.Log(err)
+		}
+	}(d)
+
+	badInstanceConnectionName := "doesntexist:us-central1:doesntexist"
+	_, _ = d.Dial(context.Background(), badInstanceConnectionName)
+
+	// The internal cache is not revealed publicly, so check the internal cache
+	// to confirm the instance is no longer present.
+	badCN, _ := cloudsql.ParseConnName(badInstanceConnectionName)
+	d.lock.RLock()
+	_, ok := d.instances[badCN]
+	d.lock.RUnlock()
+	if ok {
+		t.Fatal("bad instance was not removed from the cache")
+	}
+
+	// Now force the scheduler to run any pending goroutines to ensure the
+	// background refresh is closed.
+	runtime.Gosched()
+
+	// Confirm the background refresh is not running by inspecting
+	// all the running goroutines.
+	buf := make([]byte, 1<<16)
+	runtime.Stack(buf, true)
+	if strings.Contains(string(buf), "scheduleRefresh") {
+		t.Fatal("performRefresh should not be running")
 	}
 }
