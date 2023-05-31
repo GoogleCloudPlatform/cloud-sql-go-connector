@@ -213,6 +213,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	i := d.instance(cn, &cfg.refreshCfg)
 	addr, tlsCfg, err := i.ConnectInfo(ctx, cfg.ipType)
 	if err != nil {
+		d.removeInstance(i)
 		endInfo(err)
 		return nil, err
 	}
@@ -350,4 +351,12 @@ func (d *Dialer) instance(cn cloudsql.ConnName, r *cloudsql.RefreshCfg) *cloudsq
 		d.lock.Unlock()
 	}
 	return i
+}
+
+func (d *Dialer) removeInstance(i *cloudsql.Instance) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	// Stop all background refreshes
+	i.Close()
+	delete(d.instances, i.ConnName)
 }
