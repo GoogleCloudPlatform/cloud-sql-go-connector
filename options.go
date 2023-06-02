@@ -188,7 +188,8 @@ func WithQuotaProject(p string) Option {
 
 // WithDialFunc configures the function used to connect to the address on the
 // named network. This option is generally unnecessary except for advanced
-// use-cases.
+// use-cases. The function is used for all invocations of Dial. To configure
+// a dial function per individual calls to dial, use WithOneOffDialFunc.
 func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn, error)) Option {
 	return func(d *dialerConfig) {
 		d.dialFunc = dial
@@ -212,10 +213,10 @@ func WithIAMAuthN() Option {
 type DialOption func(d *dialCfg)
 
 type dialCfg struct {
-	tcpKeepAlive time.Duration
+	dialFunc     func(ctx context.Context, network, addr string) (net.Conn, error)
 	ipType       string
-
-	refreshCfg cloudsql.RefreshCfg
+	tcpKeepAlive time.Duration
+	refreshCfg   cloudsql.RefreshCfg
 }
 
 // DialOptions turns a list of DialOption instances into an DialOption.
@@ -224,6 +225,15 @@ func DialOptions(opts ...DialOption) DialOption {
 		for _, opt := range opts {
 			opt(cfg)
 		}
+	}
+}
+
+// WithOneOffDialFunc configures the dial function on a one-off basis for an
+// individual call to Dial. To configure a dial function across all invocations
+// of Dial, use WithDialFunc.
+func WithOneOffDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn, error)) DialOption {
+	return func(c *dialCfg) {
+		c.dialFunc = dial
 	}
 }
 
