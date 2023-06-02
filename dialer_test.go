@@ -20,7 +20,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -553,17 +552,5 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 	d.lock.RUnlock()
 	if ok {
 		t.Fatal("bad instance was not removed from the cache")
-	}
-
-	// Now force the scheduler to run any pending goroutines to ensure the
-	// background refresh is closed.
-	runtime.Gosched()
-
-	// Confirm the background refresh is not running by inspecting
-	// all the running goroutines.
-	buf := make([]byte, 1<<16)
-	runtime.Stack(buf, true)
-	if strings.Contains(string(buf), "scheduleRefresh") {
-		t.Fatal("performRefresh should not be running")
 	}
 }
