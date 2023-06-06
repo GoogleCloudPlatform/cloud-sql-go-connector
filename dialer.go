@@ -223,7 +223,11 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
 	defer func() { connectEnd(err) }()
 	addr = net.JoinHostPort(addr, serverProxyPort)
-	conn, err = d.dialFunc(ctx, "tcp", addr)
+	f := d.dialFunc
+	if cfg.dialFunc != nil {
+		f = cfg.dialFunc
+	}
+	conn, err = f(ctx, "tcp", addr)
 	if err != nil {
 		// refresh the instance info in case it caused the connection failure
 		i.ForceRefresh()

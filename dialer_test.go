@@ -567,3 +567,36 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 		t.Fatal("performRefresh should not be running")
 	}
 }
+
+func TestDialerSupportsOneOffDialFunction(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeCSQLInstance("p", "r", "i")
+	svc, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	if err != nil {
+		t.Fatalf("failed to init SQLAdminService: %v", err)
+	}
+	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.sqladmin = svc
+	defer func() {
+		if err := d.Close(); err != nil {
+			t.Log(err)
+		}
+		_ = cleanup()
+	}()
+
+	sentinelErr := errors.New("dial func was called")
+	f := func(context.Context, string, string) (net.Conn, error) {
+		return nil, sentinelErr
+	}
+
+	if _, err := d.Dial(ctx, "p:r:i", WithOneOffDialFunc(f)); !errors.Is(err, sentinelErr) {
+		t.Fatal("one-off dial func was not called")
+	}
+}
