@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.2.4...v1.3.0) (2023-06-13)
+
+
+### Features
+
+* add support for WithOneOffDialFunc ([#558](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/558)) ([14592f3](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/14592f3d21e58fbd038cffdb6c4f67d7e3526302))
+
+
+### Bug Fixes
+
+* close background refresh for bad instances ([#550](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/550)) ([31f06fc](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/31f06fc078f097b6cef4f7c19228a724a00c3408))
+
 ## [1.2.4](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.2.3...v1.2.4) (2023-05-09)
 
 
