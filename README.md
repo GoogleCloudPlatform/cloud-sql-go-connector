@@ -358,7 +358,7 @@ considered unsupported.
 We follow the [Go Version Support Policy][go-policy] used by Google Cloud
 Libraries for Go.
 
-[go-policy]: https://github.com/googleapis/google-cloud-go#supported-versions
+[go-policy]: https://github.com/googleapis/google-cloud-go#go-versions-supported
 
 ### Release cadence
 
