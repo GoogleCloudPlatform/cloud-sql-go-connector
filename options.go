@@ -258,6 +258,13 @@ func WithPrivateIP() DialOption {
 	}
 }
 
+// WithPSC returns a DialOption that specifies a PSC endpoint will be used to connect.
+func WithPSC() DialOption {
+	return func(cfg *dialCfg) {
+		cfg.ipType = cloudsql.PSC
+	}
+}
+
 // WithAutoIP returns a DialOption that selects the public IP if available and
 // otherwise falls back to private IP. This option is present for backwards
 // compatibility only and is not recommended for use in production.

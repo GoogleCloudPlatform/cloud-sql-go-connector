@@ -35,6 +35,7 @@ const testDialerID = "some-dialer-id"
 func TestRefresh(t *testing.T) {
 	wantPublicIP := "127.0.0.1"
 	wantPrivateIP := "10.0.0.1"
+	wantPSC := "abcde.12345.us-central1.sql.goog"
 	wantExpiry := time.Now().Add(time.Hour).UTC().Round(time.Second)
 	wantConnName := "my-project:my-region:my-instance"
 	cn, err := ParseConnName(wantConnName)
@@ -45,6 +46,7 @@ func TestRefresh(t *testing.T) {
 		"my-project", "my-region", "my-instance",
 		mock.WithPublicIP(wantPublicIP),
 		mock.WithPrivateIP(wantPrivateIP),
+		mock.WithPSC(wantPSC),
 		mock.WithCertExpiry(wantExpiry),
 	)
 	client, cleanup, err := mock.NewSQLAdminService(
@@ -80,6 +82,13 @@ func TestRefresh(t *testing.T) {
 	}
 	if wantPrivateIP != gotIP {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPrivateIP, gotIP)
+	}
+	gotPSC, ok := rr.ipAddrs[PSC]
+	if !ok {
+		t.Fatalf("metadata IP addresses did not include PSC endpoint")
+	}
+	if wantPSC != gotPSC {
+		t.Fatalf("metadata IP mismatch, want = %v. got = %v", wantPSC, gotPSC)
 	}
 	if wantExpiry != rr.expiry {
 		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, rr.expiry)

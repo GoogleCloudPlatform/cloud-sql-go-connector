@@ -119,6 +119,7 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 	db := &sqladmin.ConnectSettings{
 		BackendType:     i.backendType,
 		DatabaseVersion: i.dbVersion,
+		DnsName:         i.DNSName,
 		IpAddresses:     ips,
 		Region:          i.region,
 		ServerCaCert:    &sqladmin.SslCert{Cert: string(certBytes)},
