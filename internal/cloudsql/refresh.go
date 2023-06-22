@@ -87,8 +87,8 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst ConnName)
 	// resolve DnsName into IP address for PSC
 	if db.DnsName != "" {
 		ipAddrs[PSC] = db.DnsName
-		fmt.Printf("Found DNS NAME!")
 	}
+
 	if len(ipAddrs) == 0 {
 		return metadata{}, errtype.NewConfigError(
 			"cannot connect to instance - it has no supported IP addresses",
