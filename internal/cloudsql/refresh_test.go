@@ -71,21 +71,21 @@ func TestRefresh(t *testing.T) {
 
 	gotIP, ok := rr.ipAddrs[PublicIP]
 	if !ok {
-		t.Fatalf("metadata IP addresses did not include public address")
+		t.Fatal("metadata IP addresses did not include public address")
 	}
 	if wantPublicIP != gotIP {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPublicIP, gotIP)
 	}
 	gotIP, ok = rr.ipAddrs[PrivateIP]
 	if !ok {
-		t.Fatalf("metadata IP addresses did not include private address")
+		t.Fatal("metadata IP addresses did not include private address")
 	}
 	if wantPrivateIP != gotIP {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPrivateIP, gotIP)
 	}
 	gotPSC, ok := rr.ipAddrs[PSC]
 	if !ok {
-		t.Fatalf("metadata IP addresses did not include PSC endpoint")
+		t.Fatal("metadata IP addresses did not include PSC endpoint")
 	}
 	if wantPSC != gotPSC {
 		t.Fatalf("metadata IP mismatch, want = %v. got = %v", wantPSC, gotPSC)
