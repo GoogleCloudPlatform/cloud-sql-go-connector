@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.3.0...v1.4.0) (2023-07-06)
+
+
+### Features
+
+* add support for PSC connections ([#565](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/565)) ([10a46b0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/10a46b0a36440d6b84498468346833729c21bbb4))
+
 ## [1.3.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.2.4...v1.3.0) (2023-06-13)
 
 
