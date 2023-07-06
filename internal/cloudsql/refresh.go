@@ -35,6 +35,8 @@ const (
 	PublicIP = "PUBLIC"
 	// PrivateIP is the value for private IP Cloud SQL instances.
 	PrivateIP = "PRIVATE"
+	// PSC is the value for private service connect Cloud SQL instances.
+	PSC = "PSC"
 	// AutoIP selects public IP if available and otherwise selects private
 	// IP.
 	AutoIP = "AutoIP"
@@ -81,6 +83,12 @@ func fetchMetadata(ctx context.Context, client *sqladmin.Service, inst ConnName)
 			ipAddrs[PrivateIP] = ip.IpAddress
 		}
 	}
+
+	// resolve DnsName into IP address for PSC
+	if db.DnsName != "" {
+		ipAddrs[PSC] = db.DnsName
+	}
+
 	if len(ipAddrs) == 0 {
 		return metadata{}, errtype.NewConfigError(
 			"cannot connect to instance - it has no supported IP addresses",

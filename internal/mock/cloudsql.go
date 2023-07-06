@@ -50,6 +50,7 @@ type FakeCSQLInstance struct {
 	// ipAddrs is a map of IP type (PUBLIC or PRIVATE) to IP address.
 	ipAddrs      map[string]string
 	backendType  string
+	DNSName      string
 	signer       SignFunc
 	clientSigner ClientSignFunc
 	Key          *rsa.PrivateKey
@@ -78,6 +79,13 @@ func WithPublicIP(addr string) FakeCSQLInstanceOption {
 func WithPrivateIP(addr string) FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
 		f.ipAddrs["PRIVATE"] = addr
+	}
+}
+
+// WithPSC sets the PSC DnsName to addr.
+func WithPSC(dns string) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.DNSName = dns
 	}
 }
 
@@ -155,6 +163,7 @@ func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceO
 		region:       region,
 		name:         name,
 		ipAddrs:      map[string]string{"PUBLIC": "0.0.0.0"},
+		DNSName:      "",
 		dbVersion:    "POSTGRES_12", // default of no particular importance
 		backendType:  "SECOND_GEN",
 		signer:       SelfSign,
