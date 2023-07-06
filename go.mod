@@ -9,7 +9,7 @@ require (
 	github.com/microsoft/go-mssqldb v1.1.0
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.12.0
-	golang.org/x/oauth2 v0.9.0
+	golang.org/x/oauth2 v0.10.0
 	golang.org/x/time v0.3.0
 	google.golang.org/api v0.130.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230629202037-9506855d4529
@@ -17,7 +17,7 @@ require (
 )
 
 require (
-	cloud.google.com/go/compute v1.19.3 // indirect
+	cloud.google.com/go/compute v1.20.1 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
