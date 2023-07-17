@@ -59,39 +59,38 @@ type pgDriver struct {
 //
 // "host=my-project:us-central1:my-db-instance user=myuser password=mypass"
 func (p *pgDriver) Open(name string) (driver.Conn, error) {
-	var (
-		dbURI string
-		ok    bool
-	)
-
-	p.mu.RLock()
-	dbURI, ok = p.dbURIs[name]
-	p.mu.RUnlock()
-
-	if ok {
-		return stdlib.GetDefaultDriver().Open(dbURI)
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	// Recheck to ensure dbURI wasn't created between locks
-	dbURI, ok = p.dbURIs[name]
-	if ok {
-		return stdlib.GetDefaultDriver().Open(dbURI)
-	}
-
-	config, err := pgx.ParseConfig(name)
+	dbURI, err := p.dbURI(name)
 	if err != nil {
 		return nil, err
 	}
-	instConnName := config.Config.Host // Extract instance connection name
-	config.Config.Host = "localhost"   // Replace it with a default value
-	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return p.d.Dial(ctx, instConnName)
+	return stdlib.GetDefaultDriver().Open(dbURI)
+
+}
+
+func (p *pgDriver) dbURI(name string) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	dbURI, ok := p.dbURIs[name]
+	if ok {
+		return dbURI, nil
 	}
 
-	dbURI = stdlib.RegisterConnConfig(config)
-	p.dbURIs[name] = dbURI
+	// Recheck to ensure dbURI wasn't created between locks
+	dbURI, ok = p.dbURIs[name]
+	if !ok {
+		config, err := pgx.ParseConfig(name)
+		if err != nil {
+			return "", err
+		}
+		instConnName := config.Config.Host // Extract instance connection name
+		config.Config.Host = "localhost"   // Replace it with a default value
+		config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return p.d.Dial(ctx, instConnName)
+		}
 
-	return stdlib.GetDefaultDriver().Open(dbURI)
+		dbURI = stdlib.RegisterConnConfig(config)
+		p.dbURIs[name] = dbURI
+	}
+
+	return dbURI, nil
 }
