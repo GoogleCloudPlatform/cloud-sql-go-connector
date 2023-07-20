@@ -18,7 +18,8 @@
 [codelab]: https://codelabs.developers.google.com/codelabs/cloud-sql-go-connector
 
 The _Cloud SQL Go Connector_ is a Cloud SQL connector designed for use with the
-Go language. Using a Cloud SQL connector provides the following benefits:
+Go language. Using a Cloud SQL connector provides a native alternative to the
+[Cloud SQL Auth Proxy][] while providing the following benefits:
 
 * **IAM Authorization:** uses IAM permissions to control who/what can connect to
   your Cloud SQL instances
@@ -31,6 +32,7 @@ Go language. Using a Cloud SQL connector provides the following benefits:
   [Cloud SQL’s automatic IAM DB AuthN][iam-db-authn] feature.
 
 [iam-db-authn]: https://cloud.google.com/sql/docs/postgres/authentication
+[Cloud SQL Auth Proxy]: https://cloud.google.com/sql/docs/postgres/sql-proxy
 
 For users migrating from the Cloud SQL Proxy drivers, see the [migration
 guide](./migration-guide.md).
