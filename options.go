@@ -275,8 +275,8 @@ func WithAutoIP() DialOption {
 }
 
 // WithDialIAMAuthN allows you to enable or disable IAM Authentication for this
-// instance as descibed in the documentation for WithIAMAuthN. This value will
-// overide the Dialer-level configuration set with WithIAMAuthN.
+// instance as described in the documentation for WithIAMAuthN. This value will
+// override the Dialer-level configuration set with WithIAMAuthN.
 //
 // WARNING: This DialOption can cause a new Refresh operation to be triggered.
 // Toggling this option on or off between Dials may cause increased API usage
