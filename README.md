@@ -277,6 +277,53 @@ d, err := cloudsqlconn.NewDialer(
 )
 ```
 
+### Automatic IAM Database Authentication
+
+Connections using [Automatic IAM database authentication][] are supported when
+using Postgres or MySQL drivers.
+
+Make sure to [configure your Cloud SQL Instance to allow IAM authentication][configure-iam-authn]
+and [add an IAM database user][add-iam-user].
+
+A `Dialer` can be configured to connect to a Cloud SQL instance using
+Automatic IAM database authentication with the `WithIAMAuthN` Option
+(recommended) or the `WithDialIAMAuthN` DialOption.
+
+```go
+d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithIAMAuthN())
+```
+
+When configuring the DSN for IAM authentication, the `password` field can be
+omitted and the `user` field should be formatted as follows:
+> Postgres: For an IAM user account, this is the user's email address.
+> For a service account, it is the service account's email without the
+> `.gserviceaccount.com` domain suffix.
+>
+> MySQL: For an IAM user account, this is the user's email address, without
+> the `@` or domain name. For example, for `test-user@gmail.com`, set the
+> `user` field to `test-user`. For a service account, this is the service
+> account's email address without the `@project-id.iam.gserviceaccount.com`
+> suffix.
+
+Example DSN's using `test-sa@test-project.iam.gserviceaccount.com`
+service account can be found below.
+
+**Postgres**:
+
+```go
+dsn := "user=test-sa@test-project.iam dbname=mydb sslmode=disable"
+```
+
+**MySQL**:
+
+```go
+dsn := "user=test-sa dbname=mydb sslmode=disable"
+```
+
+[Automatic IAM database authentication]: https://cloud.google.com/sql/docs/postgres/authentication#automatic
+[configure-iam-authn]: https://cloud.google.com/sql/docs/postgres/create-edit-iam-instances#configure-iam-db-instance
+[add-iam-user]: https://cloud.google.com/sql/docs/postgres/create-manage-iam-users#creating-a-database-user
+
 ### Enabling Metrics and Tracing
 
 This library includes support for metrics and tracing using [OpenCensus][].
