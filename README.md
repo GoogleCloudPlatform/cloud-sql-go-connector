@@ -18,7 +18,8 @@
 [codelab]: https://codelabs.developers.google.com/codelabs/cloud-sql-go-connector
 
 The _Cloud SQL Go Connector_ is a Cloud SQL connector designed for use with the
-Go language. Using a Cloud SQL connector provides the following benefits:
+Go language. Using a Cloud SQL connector provides a native alternative to the
+[Cloud SQL Auth Proxy][] while providing the following benefits:
 
 * **IAM Authorization:** uses IAM permissions to control who/what can connect to
   your Cloud SQL instances
@@ -31,6 +32,7 @@ Go language. Using a Cloud SQL connector provides the following benefits:
   [Cloud SQL’s automatic IAM DB AuthN][iam-db-authn] feature.
 
 [iam-db-authn]: https://cloud.google.com/sql/docs/postgres/authentication
+[Cloud SQL Auth Proxy]: https://cloud.google.com/sql/docs/postgres/sql-proxy
 
 For users migrating from the Cloud SQL Proxy drivers, see the [migration
 guide](./migration-guide.md).
@@ -276,6 +278,53 @@ d, err := cloudsqlconn.NewDialer(
     ),
 )
 ```
+
+### Automatic IAM Database Authentication
+
+Connections using [Automatic IAM database authentication][] are supported when
+using Postgres or MySQL drivers.
+
+Make sure to [configure your Cloud SQL Instance to allow IAM authentication][configure-iam-authn]
+and [add an IAM database user][add-iam-user].
+
+A `Dialer` can be configured to connect to a Cloud SQL instance using
+automatic IAM database authentication with the `WithIAMAuthN` Option
+(recommended) or the `WithDialIAMAuthN` DialOption.
+
+```go
+d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithIAMAuthN())
+```
+
+When configuring the DSN for IAM authentication, the `password` field can be
+omitted and the `user` field should be formatted as follows:
+> Postgres: For an IAM user account, this is the user's email address.
+> For a service account, it is the service account's email without the
+> `.gserviceaccount.com` domain suffix.
+>
+> MySQL: For an IAM user account, this is the user's email address, without
+> the `@` or domain name. For example, for `test-user@gmail.com`, set the
+> `user` field to `test-user`. For a service account, this is the service
+> account's email address without the `@project-id.iam.gserviceaccount.com`
+> suffix.
+
+Example DSNs using the `test-sa@test-project.iam.gserviceaccount.com`
+service account to connect can be found below.
+
+**Postgres**:
+
+```go
+dsn := "user=test-sa@test-project.iam dbname=mydb sslmode=disable"
+```
+
+**MySQL**:
+
+```go
+dsn := "user=test-sa dbname=mydb sslmode=disable"
+```
+
+[Automatic IAM database authentication]: https://cloud.google.com/sql/docs/postgres/authentication#automatic
+[configure-iam-authn]: https://cloud.google.com/sql/docs/postgres/create-edit-iam-instances#configure-iam-db-instance
+[add-iam-user]: https://cloud.google.com/sql/docs/postgres/create-manage-iam-users#creating-a-database-user
 
 ### Enabling Metrics and Tracing
 
