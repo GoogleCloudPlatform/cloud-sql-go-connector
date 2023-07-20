@@ -288,7 +288,7 @@ Make sure to [configure your Cloud SQL Instance to allow IAM authentication][con
 and [add an IAM database user][add-iam-user].
 
 A `Dialer` can be configured to connect to a Cloud SQL instance using
-Automatic IAM database authentication with the `WithIAMAuthN` Option
+automatic IAM database authentication with the `WithIAMAuthN` Option
 (recommended) or the `WithDialIAMAuthN` DialOption.
 
 ```go
@@ -307,8 +307,8 @@ omitted and the `user` field should be formatted as follows:
 > account's email address without the `@project-id.iam.gserviceaccount.com`
 > suffix.
 
-Example DSN's using `test-sa@test-project.iam.gserviceaccount.com`
-service account can be found below.
+Example DSNs using the `test-sa@test-project.iam.gserviceaccount.com`
+service account to connect can be found below.
 
 **Postgres**:
 
