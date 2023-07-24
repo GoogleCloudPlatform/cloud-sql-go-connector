@@ -77,20 +77,18 @@ func (p *pgDriver) dbURI(name string) (string, error) {
 		return dbURI, nil
 	}
 
-	if !ok {
-		config, err := pgx.ParseConfig(name)
-		if err != nil {
-			return "", err
-		}
-		instConnName := config.Config.Host // Extract instance connection name
-		config.Config.Host = "localhost"   // Replace it with a default value
-		config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return p.d.Dial(ctx, instConnName)
-		}
-
-		dbURI = stdlib.RegisterConnConfig(config)
-		p.dbURIs[name] = dbURI
+	config, err := pgx.ParseConfig(name)
+	if err != nil {
+		return "", err
 	}
+	instConnName := config.Config.Host // Extract instance connection name
+	config.Config.Host = "localhost"   // Replace it with a default value
+	config.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return p.d.Dial(ctx, instConnName)
+	}
+
+	dbURI = stdlib.RegisterConnConfig(config)
+	p.dbURIs[name] = dbURI
 
 	return dbURI, nil
 }
