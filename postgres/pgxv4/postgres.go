@@ -67,6 +67,8 @@ func (p *pgDriver) Open(name string) (driver.Conn, error) {
 
 }
 
+// dbURI registers a driver using the provided DSN. If the name has already
+// been registered, dbURI returns the existing registration.
 func (p *pgDriver) dbURI(name string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -75,8 +77,6 @@ func (p *pgDriver) dbURI(name string) (string, error) {
 		return dbURI, nil
 	}
 
-	// Recheck to ensure dbURI wasn't created between locks
-	dbURI, ok = p.dbURIs[name]
 	if !ok {
 		config, err := pgx.ParseConfig(name)
 		if err != nil {
