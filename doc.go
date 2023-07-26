@@ -85,7 +85,7 @@
 //	)
 //
 //	func connect() {
-//	    cleanup, err := pgxv4.RegisterDriver("cloudsql-postgres")
+//	    cleanup, err := pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())
 //	    if err != nil {
 //	    	// ... handle error
 //	    }
@@ -115,7 +115,7 @@
 //	)
 //
 //	func connect() {
-//	    cleanup, err := mysql.RegisterDriver("cloudsql-mysql")
+//	    cleanup, err := mysql.RegisterDriver("cloudsql-mysql", cloudsqlconn.WithIAMAuthN())
 //	    if err != nil {
 //	        // ... handle error
 //	    }
