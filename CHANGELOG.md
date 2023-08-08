@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.4.0...v1.4.1) (2023-08-07)
+
+
+### Bug Fixes
+
+* avoid holding lock over IO ([#576](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/576)) ([1e4560f](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/1e4560f7b41547882a2e9f7ef3ece94bb1bb48be))
+
 ## [1.4.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.3.0...v1.4.0) (2023-07-06)
 
 
