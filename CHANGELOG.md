@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.4.1...v1.4.2) (2023-08-15)
+
+
+### Bug Fixes
+
+* re-use existing connection info on force refresh ([#602](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/602)) ([d049851](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/d049851361fc48bb339232c6609a2f2932d2d684))
+
 ## [1.4.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.4.0...v1.4.1) (2023-08-07)
 
 
