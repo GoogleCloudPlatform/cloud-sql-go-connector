@@ -260,7 +260,7 @@ func (i *Instance) UpdateRefresh(cfg RefreshCfg) {
 
 // ForceRefresh triggers an immediate refresh operation to be scheduled and
 // used for future connection attempts. Until the refresh completes, the
-// existing connection info will be available for use.
+// existing connection info will be available for use if valid.
 func (i *Instance) ForceRefresh() {
 	i.refreshLock.Lock()
 	defer i.refreshLock.Unlock()
@@ -268,6 +268,11 @@ func (i *Instance) ForceRefresh() {
 	// immediate one
 	if i.next.cancel() {
 		i.next = i.scheduleRefresh(0)
+	}
+	// block all sequential connection attempts on the next refresh operation
+	// if current is invalid
+	if !i.cur.isValid() {
+		i.cur = i.next
 	}
 }
 
