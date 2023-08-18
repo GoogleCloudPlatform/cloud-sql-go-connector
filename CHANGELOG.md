@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.3](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.4.2...v1.4.3) (2023-08-18)
+
+
+### Bug Fixes
+
+* update ForceRefresh to block if invalid ([#605](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/605)) ([61c72e3](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/61c72e3e76d04863b6971aeb86726c3b1252e5ed))
+
 ## [1.4.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.4.1...v1.4.2) (2023-08-15)
 
 
