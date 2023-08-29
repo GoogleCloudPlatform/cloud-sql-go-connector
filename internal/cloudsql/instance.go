@@ -352,7 +352,13 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 
 		// if failed, scheduled the next refresh immediately
 		if r.err != nil {
-			i.next = i.scheduleRefresh(0)
+			// Exponential backoff
+			if d == time.Duration(0) {
+				d = refreshInterval
+			} else {
+				d = 2 * d
+			}
+			i.next = i.scheduleRefresh(d)
 			// If the latest refreshOperation is bad, avoid replacing the
 			// used refreshOperation while it's still valid and potentially
 			// able to provide successful connections. TODO: This
