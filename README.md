@@ -379,6 +379,51 @@ func main() {
     // ...
 }
 ```
+
+As OpenTelemetry has now reached feature parity with OpenCensus, the migration
+from OpenCensus to OpenTelemetry is strongly encouraged.
+[OpenTelemetry bridge](https://github.com/open-telemetry/opentelemetry-go/tree/main/bridge/opencensus)
+can be leveraged to migrate to OpenTelemetry without the need of replacing the
+OpenCensus APIs in this library. An example code is shown below for application
+to initialize the exporter using the OpenTelemetry bridge for traces.
+
+```golang
+import (
+	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
+	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/bridge/opencensus"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"google.golang.org/api/option"
+)
+
+func main() {
+	// Be careful about using trace.AlwaysSample in a production application
+	// with significant traffic: a new trace will be started and exported for
+	// every request. Replace it with less frequent sampler in your production.
+	trace.ApplyConfig(trace.Config{DefaultSampler: trace.AlwaysSample()})
+
+	exporter, err := texporter.New(
+		texporter.WithTraceClientOptions([]option.ClientOption{option.WithTelemetryDisabled()}),
+		texporter.WithProjectID("mycoolproject"),
+	)
+	if err != nil {
+		// Handle error
+	}
+
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	otel.SetTracerProvider(tp)
+	tracer := tp.Tracer("Cloud SQL Go Connector Trace")
+	trace.DefaultTracer = opencensus.NewTracer(tracer)
+
+	// Use cloudsqlconn as usual.
+	// ...
+}
+```
+
+A known OpenTelemetry issue has been reported [here](https://github.com/googleapis/google-cloud-go/issues/7100).
+It shouldn't impact the database operations.
+
 [OpenCensus]: https://opencensus.io/
 [exporter]: https://opencensus.io/exporters/
 [Cloud Monitoring]: https://cloud.google.com/monitoring
