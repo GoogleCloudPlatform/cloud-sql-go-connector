@@ -384,8 +384,8 @@ As OpenTelemetry has now reached feature parity with OpenCensus, the migration
 from OpenCensus to OpenTelemetry is strongly encouraged.
 [OpenTelemetry bridge](https://github.com/open-telemetry/opentelemetry-go/tree/main/bridge/opencensus)
 can be leveraged to migrate to OpenTelemetry without the need of replacing the
-OpenCensus APIs in this library. An example code is shown below for application
-to initialize the exporter using the OpenTelemetry bridge for traces.
+OpenCensus APIs in this library. Example code is shown below for migrating an 
+application using the OpenTelemetry bridge for traces.
 
 ```golang
 import (
