@@ -398,7 +398,7 @@ import (
 )
 
 func main() {
-	// Be careful about using trace.AlwaysSample in a production application
+	// Be careful about using trace. AlwaysSample in a production application
 	// with significant traffic: a new trace will be started and exported for
 	// every request. Replace it with less frequent sampler in your production.
 	trace.ApplyConfig(trace.Config{DefaultSampler: trace.AlwaysSample()})
