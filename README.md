@@ -422,7 +422,7 @@ func main() {
 ```
 
 A known OpenTelemetry issue has been reported [here](https://github.com/googleapis/google-cloud-go/issues/7100).
-It shouldn't impact the database operations.
+It shouldn't impact database operations.
 
 [OpenCensus]: https://opencensus.io/
 [exporter]: https://opencensus.io/exporters/
