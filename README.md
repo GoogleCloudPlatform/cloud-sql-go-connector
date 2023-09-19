@@ -446,7 +446,7 @@ supported for 1 year.
 **Unsupported** - Any major version that has been deprecated for >=1 year is
 considered unsupported.
 
-## Supported Go Versions
+### Supported Go Versions
 
 We follow the [Go Version Support Policy][go-policy] used by Google Cloud
 Libraries for Go.
