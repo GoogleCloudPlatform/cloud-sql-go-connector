@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build go1.17
-// +build go1.17
-
 package cloudsqlconn
 
 import (
@@ -30,11 +27,9 @@ import (
 // using conn as the underlying transport.
 //
 // The returned connection has already completed its TLS handshake.
-func connectTLS(ctx context.Context, conn net.Conn, c *tls.Config, i *cloudsql.Instance) (net.Conn, error) {
+func connectTLS(_ context.Context, conn net.Conn, c *tls.Config, i *cloudsql.Instance) (net.Conn, error) {
 	tlsConn := tls.Client(conn, c)
-	// HandshakeContext was introduced in Go 1.17, hence
-	// this file is conditionally compiled on only Go versions >= 1.17.
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
+	if err := tlsConn.Handshake(); err != nil {
 		// refresh the instance info in case it caused the handshake failure
 		i.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
