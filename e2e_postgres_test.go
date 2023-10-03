@@ -28,11 +28,12 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
+	"cloud.google.com/go/cloudsqlconn/postgres/pgxv5"
 )
 
 var (
@@ -151,7 +152,7 @@ func TestEngineVersion(t *testing.T) {
 	}
 }
 
-func TestPostgresHook(t *testing.T) {
+func TestPostgresV5Hook(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
 	}
@@ -162,6 +163,48 @@ func TestPostgresHook(t *testing.T) {
 		}
 		t.Log(now)
 	}
+	pgxv5.RegisterDriver("cloudsql-postgres")
+	db, err := sql.Open(
+		"cloudsql-postgres",
+		fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
+			postgresConnName, postgresUser, postgresPass, postgresDB),
+	)
+	if err != nil {
+		t.Fatalf("sql.Open want err = nil, got = %v", err)
+	}
+	defer db.Close()
+	testConn(db)
+
+	pgxv5.RegisterDriver("cloudsql-postgres-iam", cloudsqlconn.WithIAMAuthN())
+	db2, err := sql.Open(
+		"cloudsql-postgres-iam",
+		fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
+			postgresConnName, postgresUserIAM, postgresDB),
+	)
+	if err != nil {
+		t.Fatalf("sql.Open want err = nil, got = %v", err)
+	}
+	defer db2.Close()
+	testConn(db2)
+}
+
+func TestPostgresV4Hook(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
+	testConn := func(db *sql.DB) {
+		var now time.Time
+		if err := db.QueryRow("SELECT NOW()").Scan(&now); err != nil {
+			t.Fatalf("QueryRow failed: %v", err)
+		}
+		t.Log(now)
+	}
+
+	defer func() {
+		if err := recover(); err != nil {
+			t.Log("cloudsql-postgres register panic occurred:", err)
+		}
+	}()
 	pgxv4.RegisterDriver("cloudsql-postgres")
 	db, err := sql.Open(
 		"cloudsql-postgres",
@@ -174,6 +217,11 @@ func TestPostgresHook(t *testing.T) {
 	defer db.Close()
 	testConn(db)
 
+	defer func() {
+		if err := recover(); err != nil {
+			t.Log("cloudsql-postgres-iam register panic occurred:", err)
+		}
+	}()
 	pgxv4.RegisterDriver("cloudsql-postgres-iam", cloudsqlconn.WithIAMAuthN())
 	db2, err := sql.Open(
 		"cloudsql-postgres-iam",
