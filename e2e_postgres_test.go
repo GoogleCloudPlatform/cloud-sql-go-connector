@@ -154,18 +154,21 @@ func TestEngineVersion(t *testing.T) {
 
 func TestPostgresV5Hook(t *testing.T) {
 	tests := []struct {
-		driver string
-		source string
+		driver   string
+		source   string
+		IAMAuthN bool
 	}{
 		{
 			"cloudsql-postgres",
 			fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUser, postgresPass, postgresDB),
+			false,
 		},
 		{
 			"cloudsql-postgres-iam",
 			fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUserIAM, postgresDB),
+			true,
 		},
 	}
 
@@ -181,7 +184,11 @@ func TestPostgresV5Hook(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		pgxv5.RegisterDriver(tc.driver)
+		if tc.IAMAuthN {
+			pgxv5.RegisterDriver(tc.driver, cloudsqlconn.WithIAMAuthN())
+		} else {
+			pgxv5.RegisterDriver(tc.driver)
+		}
 		db, err := sql.Open(tc.driver, tc.source)
 
 		if err != nil {
@@ -194,18 +201,21 @@ func TestPostgresV5Hook(t *testing.T) {
 
 func TestPostgresV4Hook(t *testing.T) {
 	tests := []struct {
-		driver string
-		source string
+		driver   string
+		source   string
+		IAMAuthN bool
 	}{
 		{
 			"cloudsql-postgres",
 			fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUser, postgresPass, postgresDB),
+			false,
 		},
 		{
 			"cloudsql-postgres-iam",
 			fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUserIAM, postgresDB),
+			true,
 		},
 	}
 	if testing.Short() {
@@ -225,7 +235,11 @@ func TestPostgresV4Hook(t *testing.T) {
 				t.Log("cloudsql-postgres register panic occurred:", err)
 			}
 		}()
-		pgxv4.RegisterDriver(tc.driver)
+		if tc.IAMAuthN {
+			pgxv4.RegisterDriver(tc.driver, cloudsqlconn.WithIAMAuthN())
+		} else {
+			pgxv4.RegisterDriver(tc.driver)
+		}
 		db, err := sql.Open(tc.driver, tc.source)
 		if err != nil {
 			t.Fatalf("sql.Open want err = nil, got = %v", err)
