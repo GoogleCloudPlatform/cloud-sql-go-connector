@@ -153,6 +153,22 @@ func TestEngineVersion(t *testing.T) {
 }
 
 func TestPostgresV5Hook(t *testing.T) {
+	tests := []struct {
+		driver string
+		source string
+	}{
+		{
+			"cloudsql-postgres",
+			fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
+				postgresConnName, postgresUser, postgresPass, postgresDB),
+		},
+		{
+			"cloudsql-postgres-iam",
+			fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
+				postgresConnName, postgresUserIAM, postgresDB),
+		},
+	}
+
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
 	}
@@ -163,32 +179,35 @@ func TestPostgresV5Hook(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	pgxv5.RegisterDriver("cloudsql-postgres")
-	db, err := sql.Open(
-		"cloudsql-postgres",
-		fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
-			postgresConnName, postgresUser, postgresPass, postgresDB),
-	)
-	if err != nil {
-		t.Fatalf("sql.Open want err = nil, got = %v", err)
-	}
-	defer db.Close()
-	testConn(db)
 
-	pgxv5.RegisterDriver("cloudsql-postgres-iam", cloudsqlconn.WithIAMAuthN())
-	db2, err := sql.Open(
-		"cloudsql-postgres-iam",
-		fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
-			postgresConnName, postgresUserIAM, postgresDB),
-	)
-	if err != nil {
-		t.Fatalf("sql.Open want err = nil, got = %v", err)
+	for _, tc := range tests {
+		pgxv5.RegisterDriver(tc.driver)
+		db, err := sql.Open(tc.driver, tc.source)
+
+		if err != nil {
+			t.Fatalf("sql.Open want err = nil, got = %v", err)
+		}
+		defer db.Close()
+		testConn(db)
 	}
-	defer db2.Close()
-	testConn(db2)
 }
 
 func TestPostgresV4Hook(t *testing.T) {
+	tests := []struct {
+		driver string
+		source string
+	}{
+		{
+			"cloudsql-postgres",
+			fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
+				postgresConnName, postgresUser, postgresPass, postgresDB),
+		},
+		{
+			"cloudsql-postgres-iam",
+			fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
+				postgresConnName, postgresUserIAM, postgresDB),
+		},
+	}
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
 	}
@@ -200,39 +219,20 @@ func TestPostgresV4Hook(t *testing.T) {
 		t.Log(now)
 	}
 
-	defer func() {
-		if err := recover(); err != nil {
-			t.Log("cloudsql-postgres register panic occurred:", err)
+	for _, tc := range tests {
+		defer func() {
+			if err := recover(); err != nil {
+				t.Log("cloudsql-postgres register panic occurred:", err)
+			}
+		}()
+		pgxv4.RegisterDriver(tc.driver)
+		db, err := sql.Open(tc.driver, tc.source)
+		if err != nil {
+			t.Fatalf("sql.Open want err = nil, got = %v", err)
 		}
-	}()
-	pgxv4.RegisterDriver("cloudsql-postgres")
-	db, err := sql.Open(
-		"cloudsql-postgres",
-		fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
-			postgresConnName, postgresUser, postgresPass, postgresDB),
-	)
-	if err != nil {
-		t.Fatalf("sql.Open want err = nil, got = %v", err)
+		defer db.Close()
+		testConn(db)
 	}
-	defer db.Close()
-	testConn(db)
-
-	defer func() {
-		if err := recover(); err != nil {
-			t.Log("cloudsql-postgres-iam register panic occurred:", err)
-		}
-	}()
-	pgxv4.RegisterDriver("cloudsql-postgres-iam", cloudsqlconn.WithIAMAuthN())
-	db2, err := sql.Open(
-		"cloudsql-postgres-iam",
-		fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
-			postgresConnName, postgresUserIAM, postgresDB),
-	)
-	if err != nil {
-		t.Fatalf("sql.Open want err = nil, got = %v", err)
-	}
-	defer db2.Close()
-	testConn(db2)
 }
 
 // removeAuthEnvVar retrieves an OAuth2 token and a path to a service account key
