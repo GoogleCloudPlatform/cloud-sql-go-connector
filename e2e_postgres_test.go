@@ -159,16 +159,16 @@ func TestPostgresV5Hook(t *testing.T) {
 		IAMAuthN bool
 	}{
 		{
-			"cloudsql-postgres",
-			fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
+			driver: "cloudsql-postgres",
+			source: fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUser, postgresPass, postgresDB),
-			false,
+			IAMAuthN: false,
 		},
 		{
-			"cloudsql-postgres-iam",
-			fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
+			driver: "cloudsql-postgres-iam",
+			source: fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUserIAM, postgresDB),
-			true,
+			IAMAuthN: true,
 		},
 	}
 
@@ -206,16 +206,16 @@ func TestPostgresV4Hook(t *testing.T) {
 		IAMAuthN bool
 	}{
 		{
-			"cloudsql-postgres",
-			fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
+			driver: "cloudsql-postgres",
+			source: fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUser, postgresPass, postgresDB),
-			false,
+			IAMAuthN: false,
 		},
 		{
-			"cloudsql-postgres-iam",
-			fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
+			driver: "cloudsql-postgres-iam",
+			source: fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUserIAM, postgresDB),
-			true,
+			IAMAuthN: true,
 		},
 	}
 	if testing.Short() {
