@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -239,10 +240,15 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 			return nil, errtype.NewDialError("failed to set keep-alive period", i.String(), err)
 		}
 	}
-	tlsConn, err := connectTLS(ctx, conn, tlsCfg, i)
-	if err != nil {
-		return nil, err
+
+	tlsConn := tls.Client(conn, tlsCfg)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		// refresh the instance info in case it caused the handshake failure
+		i.ForceRefresh()
+		_ = tlsConn.Close() // best effort close attempt
+		return nil, errtype.NewDialError("handshake failed", i.String(), err)
 	}
+
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
 		n := atomic.AddUint64(&i.OpenConns, 1)
