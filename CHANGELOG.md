@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.4.5...v1.5.0) (2023-10-24)
+
+
+### Features
+
+* add pgx v5 support ([#639](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/639)) ([#642](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/642)) ([8d86d92](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/8d86d92147d06ca10d754439638d6fd1b2154182))
+
+
+### Bug Fixes
+
+* use different driver names for v4 and v5 testing ([#639](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/639)) ([#654](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/654)) ([fa73c41](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/fa73c4184a9887e6e9217e5b50db97aa3fdc0d28))
+* use HandshakeContext by default ([#656](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/656)) ([49aad1f](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/49aad1f30bf560e6cf1e2ff52da46f3ff2cd2312))
+
 ## [1.4.5](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.4.4...v1.4.5) (2023-10-11)
 
 
