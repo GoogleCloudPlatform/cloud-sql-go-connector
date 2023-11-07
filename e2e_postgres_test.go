@@ -59,7 +59,7 @@ func requirePostgresVars(t *testing.T) {
 	}
 }
 
-func TestPgxConnect(t *testing.T) {
+func TestPostgresPgxConnect(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
 	}
@@ -96,7 +96,7 @@ func TestPgxConnect(t *testing.T) {
 	t.Log(now)
 }
 
-func TestConnectWithIAMUser(t *testing.T) {
+func TestPostgresConnectWithIAMUser(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
 	}
@@ -133,7 +133,7 @@ func TestConnectWithIAMUser(t *testing.T) {
 	t.Log(now)
 }
 
-func TestEngineVersion(t *testing.T) {
+func TestPostgresEngineVersion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
 	}
