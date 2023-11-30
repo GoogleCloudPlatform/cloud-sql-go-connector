@@ -258,6 +258,12 @@ func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
 	return op.result.version, nil
 }
 
+// NeedsUpdateRefresh determines if the existing refresh needs to be updated
+// with a new IAM AuthN value, by either disabling or enabling it.
+func (i *Instance) NeedsUpdateRefresh(useIAMAuthN *bool) bool {
+	return useIAMAuthN != nil && *useIAMAuthN != i.useIAMAuthNDial
+}
+
 // UpdateRefresh cancels all existing refresh attempts and schedules new
 // attempts with the provided config.
 func (i *Instance) UpdateRefresh(useIAMAuthNDial bool) {
