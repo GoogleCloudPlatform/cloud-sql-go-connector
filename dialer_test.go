@@ -185,7 +185,7 @@ func TestIAMAuthn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewDialer failed with error = %v", err)
 			}
-			if gotIAMAuthN := d.defaultDialConfig.refreshConfig.UseIAMAuthN; gotIAMAuthN != tc.wantIAMAuthN {
+			if gotIAMAuthN := d.defaultDialConfig.useIAMAuthN; gotIAMAuthN != tc.wantIAMAuthN {
 				t.Fatalf("want = %v, got = %v", tc.wantIAMAuthN, gotIAMAuthN)
 			}
 		})
