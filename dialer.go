@@ -81,9 +81,9 @@ type Dialer struct {
 
 	sqladmin *sqladmin.Service
 
-	// defaultDialCfg holds the constructor level DialOptions, so that it can
-	// be copied and mutated by the Dial function.
-	defaultDialCfg dialCfg
+	// defaultDialConfig holds the constructor level DialOptions, so that it
+	// can be copied and mutated by the Dial function.
+	defaultDialConfig dialConfig
 
 	// dialerID uniquely identifies a Dialer. Used for monitoring purposes,
 	// *only* when a client has configured OpenCensus exporters.
@@ -157,10 +157,10 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)
 	}
 
-	dc := dialCfg{
+	dc := dialConfig{
 		ipType:       cloudsql.PublicIP,
 		tcpKeepAlive: defaultTCPKeepAlive,
-		refreshCfg: cloudsql.RefreshCfg{
+		refreshConfig: cloudsql.RefreshConfig{
 			UseIAMAuthN: cfg.useIAMAuthN,
 		},
 	}
@@ -172,14 +172,14 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, err
 	}
 	d := &Dialer{
-		instances:      make(map[cloudsql.ConnName]*cloudsql.Instance),
-		key:            cfg.rsaKey,
-		refreshTimeout: cfg.refreshTimeout,
-		sqladmin:       client,
-		defaultDialCfg: dc,
-		dialerID:       uuid.New().String(),
-		iamTokenSource: cfg.iamLoginTokenSource,
-		dialFunc:       cfg.dialFunc,
+		instances:         make(map[cloudsql.ConnName]*cloudsql.Instance),
+		key:               cfg.rsaKey,
+		refreshTimeout:    cfg.refreshTimeout,
+		sqladmin:          client,
+		defaultDialConfig: dc,
+		dialerID:          uuid.New().String(),
+		iamTokenSource:    cfg.iamLoginTokenSource,
+		dialFunc:          cfg.dialFunc,
 	}
 	return d, nil
 }
@@ -202,15 +202,15 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		return nil, err
 	}
 
-	cfg := d.defaultDialCfg
+	cfg := d.defaultDialConfig
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	i := d.instance(cn, &cfg.refreshCfg)
-	addr, tlsCfg, err := i.ConnectInfo(ctx, cfg.ipType)
+	i := d.instance(cn, &cfg.refreshConfig)
+	addr, tlsConfig, err := i.ConnectInfo(ctx, cfg.ipType)
 	if err != nil {
 		d.removeInstance(i)
 		endInfo(err)
@@ -241,7 +241,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		}
 	}
 
-	tlsConn := tls.Client(conn, tlsCfg)
+	tlsConn := tls.Client(conn, tlsConfig)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		// refresh the instance info in case it caused the handshake failure
 		i.ForceRefresh()
@@ -251,13 +251,13 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
-		n := atomic.AddUint64(&i.OpenConns, 1)
+		n := atomic.AddUint64(i.OpenConns(), 1)
 		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, i.String())
 		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
 
 	return newInstrumentedConn(tlsConn, func() {
-		n := atomic.AddUint64(&i.OpenConns, ^uint64(0))
+		n := atomic.AddUint64(i.OpenConns(), ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, i.String())
 	}), nil
 }
@@ -285,11 +285,11 @@ func (d *Dialer) Warmup(_ context.Context, instance string, opts ...DialOption) 
 	if err != nil {
 		return err
 	}
-	cfg := d.defaultDialCfg
+	cfg := d.defaultDialConfig
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	_ = d.instance(cn, &cfg.refreshCfg)
+	_ = d.instance(cn, &cfg.refreshConfig)
 	return nil
 }
 
@@ -334,26 +334,26 @@ func (d *Dialer) Close() error {
 
 // instance is a helper function for returning the appropriate instance object in a threadsafe way.
 // It will create a new instance object, modify the existing one, or leave it unchanged as needed.
-func (d *Dialer) instance(cn cloudsql.ConnName, r *cloudsql.RefreshCfg) *cloudsql.Instance {
+func (d *Dialer) instance(cn cloudsql.ConnName, r *cloudsql.RefreshConfig) *cloudsql.Instance {
 	// Check instance cache
 	d.lock.RLock()
 	i, ok := d.instances[cn]
 	d.lock.RUnlock()
-	// If the instance hasn't been created yet or if the refreshCfg has changed
-	if !ok || (r != nil && *r != i.RefreshCfg) {
+	// If the instance hasn't been created yet or if the refreshConfig has changed
+	if !ok || (r != nil && *r != i.RefreshConfig()) {
 		d.lock.Lock()
 		// Recheck to ensure instance wasn't created or changed between locks
 		i, ok = d.instances[cn]
 		if !ok {
 			// Create a new instance
 			if r == nil {
-				r = &d.defaultDialCfg.refreshCfg
+				r = &d.defaultDialConfig.refreshConfig
 			}
 			i = cloudsql.NewInstance(cn, d.sqladmin, d.key,
 				d.refreshTimeout, d.iamTokenSource, d.dialerID, *r)
 			d.instances[cn] = i
-		} else if r != nil && *r != i.RefreshCfg {
-			// Update the instance with the new refresh cfg
+		} else if r != nil && *r != i.RefreshConfig() {
+			// Update the instance with the new refresh config
 			i.UpdateRefresh(*r)
 		}
 		d.lock.Unlock()
@@ -366,5 +366,5 @@ func (d *Dialer) removeInstance(i *cloudsql.Instance) {
 	defer d.lock.Unlock()
 	// Stop all background refreshes
 	i.Close()
-	delete(d.instances, i.ConnName)
+	delete(d.instances, i.ConnName())
 }

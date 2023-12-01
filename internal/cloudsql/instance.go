@@ -120,8 +120,8 @@ func (r *refreshOperation) isValid() bool {
 	}
 }
 
-// RefreshCfg is a collection of attributes that trigger new refresh operations.
-type RefreshCfg struct {
+// RefreshConfig is a collection of attributes that trigger new refresh operations.
+type RefreshConfig struct {
 	UseIAMAuthN bool
 }
 
@@ -130,11 +130,11 @@ type RefreshCfg struct {
 // the required information approximately 4 minutes before the previous
 // certificate expires (every ~56 minutes).
 type Instance struct {
-	// OpenConns is the number of open connections to the instance.
-	OpenConns uint64
+	// openConns is the number of open connections to the instance.
+	openConns uint64
 
-	ConnName
-	key *rsa.PrivateKey
+	connName ConnName
+	key      *rsa.PrivateKey
 
 	// refreshTimeout sets the maximum duration a refresh cycle can run
 	// for.
@@ -143,8 +143,8 @@ type Instance struct {
 	l *rate.Limiter
 	r refresher
 
-	refreshLock sync.RWMutex
-	RefreshCfg  RefreshCfg
+	refreshLock   sync.RWMutex
+	refreshConfig RefreshConfig
 	// cur represents the current refreshOperation that will be used to
 	// create connections. If a valid complete refreshOperation isn't
 	// available it's possible for cur to be equal to next.
@@ -167,11 +167,11 @@ func NewInstance(
 	refreshTimeout time.Duration,
 	ts oauth2.TokenSource,
 	dialerID string,
-	r RefreshCfg,
+	r RefreshConfig,
 ) *Instance {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &Instance{
-		ConnName: cn,
+		connName: cn,
 		key:      key,
 		l:        rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
 		r: newRefresher(
@@ -180,7 +180,7 @@ func NewInstance(
 			dialerID,
 		),
 		refreshTimeout: refreshTimeout,
-		RefreshCfg:     r,
+		refreshConfig:  r,
 		ctx:            ctx,
 		cancel:         cancel,
 	}
@@ -191,6 +191,23 @@ func NewInstance(
 	i.next = i.cur
 	i.refreshLock.Unlock()
 	return i
+}
+
+// OpenConns returns a pointer to the number of open connections to
+// faciliate changing the value using atomics.
+func (i *Instance) OpenConns() *uint64 {
+	return &i.openConns
+}
+
+// ConnName returns the instance connection name associated with this Instance.
+func (i *Instance) ConnName() ConnName {
+	return i.connName
+}
+
+// RefreshConfig returns the refresh configuration associated with this
+// instance.
+func (i *Instance) RefreshConfig() RefreshConfig {
+	return i.refreshConfig
 }
 
 // Close closes the instance; it stops the refresh cycle and prevents it from
@@ -245,14 +262,14 @@ func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
 
 // UpdateRefresh cancels all existing refresh attempts and schedules new
 // attempts with the provided config.
-func (i *Instance) UpdateRefresh(cfg RefreshCfg) {
+func (i *Instance) UpdateRefresh(c RefreshConfig) {
 	i.refreshLock.Lock()
 	defer i.refreshLock.Unlock()
 	// Cancel any pending refreshes
 	i.cur.cancel()
 	i.next.cancel()
 	// update the refresh config as needed
-	i.RefreshCfg = cfg
+	i.refreshConfig = c
 	// reschedule a new refresh immediately
 	i.cur = i.scheduleRefresh(0)
 	i.next = i.cur
@@ -328,12 +345,12 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		if err != nil {
 			r.err = errtype.NewDialError(
 				"context was canceled or expired before refresh completed",
-				i.ConnName.String(),
+				i.connName.String(),
 				nil,
 			)
 		} else {
 			r.result, r.err = i.r.performRefresh(
-				ctx, i.ConnName, i.key, i.RefreshCfg.UseIAMAuthN)
+				ctx, i.connName, i.key, i.refreshConfig.UseIAMAuthN)
 		}
 
 		close(r.ready)
@@ -376,5 +393,5 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 
 // String returns the instance's connection name.
 func (i *Instance) String() string {
-	return i.ConnName.String()
+	return i.connName.String()
 }

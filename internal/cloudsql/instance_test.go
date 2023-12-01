@@ -95,7 +95,7 @@ func TestInstanceEngineVersion(t *testing.T) {
 				t.Fatalf("%v", err)
 			}
 		}()
-		i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", RefreshCfg{})
+		i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", RefreshConfig{})
 		if err != nil {
 			t.Fatalf("failed to init instance: %v", err)
 		}
@@ -129,7 +129,7 @@ func TestConnectInfo(t *testing.T) {
 		}
 	}()
 
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", RefreshCfg{})
+	i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", RefreshConfig{})
 
 	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, PublicIP)
 	if err != nil {
@@ -194,7 +194,7 @@ func TestConnectInfoAutoIP(t *testing.T) {
 			}
 		}()
 
-		i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", RefreshCfg{})
+		i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", RefreshConfig{})
 		if err != nil {
 			t.Fatalf("failed to create mock instance: %v", err)
 		}
@@ -223,7 +223,7 @@ func TestConnectInfoErrors(t *testing.T) {
 	defer cleanup()
 
 	// Use a timeout that should fail instantly
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 0, nil, "", RefreshCfg{})
+	i := NewInstance(testInstanceConnName(), client, RSAKey, 0, nil, "", RefreshConfig{})
 
 	_, _, err = i.ConnectInfo(ctx, PublicIP)
 	var wantErr *errtype.DialError
@@ -248,7 +248,7 @@ func TestClose(t *testing.T) {
 	defer cleanup()
 
 	// Set up an instance and then close it immediately
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 30, nil, "", RefreshCfg{})
+	i := NewInstance(testInstanceConnName(), client, RSAKey, 30, nil, "", RefreshConfig{})
 	i.Close()
 
 	_, _, err = i.ConnectInfo(ctx, PublicIP)
@@ -311,7 +311,7 @@ func TestContextCancelled(t *testing.T) {
 	defer cleanup()
 
 	// Set up an instance and then close it immediately
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 30, nil, "", RefreshCfg{})
+	i := NewInstance(testInstanceConnName(), client, RSAKey, 30, nil, "", RefreshConfig{})
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}
