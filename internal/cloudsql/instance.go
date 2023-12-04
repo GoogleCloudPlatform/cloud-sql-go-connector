@@ -266,9 +266,8 @@ func (i *Instance) UpdateRefresh(useIAMAuthNDial bool) {
 	// Cancel any pending refreshes
 	i.cur.cancel()
 	i.next.cancel()
-	// update the refresh config as needed
+
 	i.useIAMAuthNDial = useIAMAuthNDial
-	// reschedule a new refresh immediately
 	i.cur = i.scheduleRefresh(0)
 	i.next = i.cur
 }

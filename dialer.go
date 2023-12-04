@@ -343,12 +343,12 @@ func (d *Dialer) instance(cn cloudsql.ConnName, useIAMAuthN *bool) *cloudsql.Ins
 		// Recheck to ensure instance wasn't created or changed between locks
 		i, ok = d.instances[cn]
 		if !ok {
-			var enable bool
+			var useIAMAuthNDial bool
 			if useIAMAuthN != nil {
-				enable = *useIAMAuthN
+				useIAMAuthNDial = *useIAMAuthN
 			}
 			i = cloudsql.NewInstance(cn, d.sqladmin, d.key,
-				d.refreshTimeout, d.iamTokenSource, d.dialerID, enable)
+				d.refreshTimeout, d.iamTokenSource, d.dialerID, useIAMAuthNDial)
 			d.instances[cn] = i
 		} else if useIAMAuthN != nil && *useIAMAuthN != i.UseIAMAuthNDial() {
 			// Update the instance with the new refresh config
