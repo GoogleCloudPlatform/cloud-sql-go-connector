@@ -200,7 +200,7 @@ func (i *Instance) ConnName() ConnName {
 }
 
 // UseIAMAuthNDial reports whether the instance has set IAM AuthN on a per-dial
-// basis. This field can change from one Dial attemtp to another and affects
+// basis. This field can change from one Dial attempt to another and affects
 // how the background refresh functions by either inserting an OAuth2 token
 // into the ephemeral certificate request or leaving it blank. It is meant to
 // override the dialer setting.
