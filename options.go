@@ -213,10 +213,10 @@ func WithIAMAuthN() Option {
 type DialOption func(d *dialConfig)
 
 type dialConfig struct {
-	dialFunc      func(ctx context.Context, network, addr string) (net.Conn, error)
-	ipType        string
-	tcpKeepAlive  time.Duration
-	refreshConfig cloudsql.RefreshConfig
+	dialFunc     func(ctx context.Context, network, addr string) (net.Conn, error)
+	ipType       string
+	tcpKeepAlive time.Duration
+	useIAMAuthN  bool
 }
 
 // DialOptions turns a list of DialOption instances into an DialOption.
@@ -283,6 +283,6 @@ func WithAutoIP() DialOption {
 // and/or delayed connection attempts.
 func WithDialIAMAuthN(b bool) DialOption {
 	return func(cfg *dialConfig) {
-		cfg.refreshConfig.UseIAMAuthN = b
+		cfg.useIAMAuthN = b
 	}
 }

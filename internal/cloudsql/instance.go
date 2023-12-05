@@ -120,11 +120,6 @@ func (r *refreshOperation) isValid() bool {
 	}
 }
 
-// RefreshConfig is a collection of attributes that trigger new refresh operations.
-type RefreshConfig struct {
-	UseIAMAuthN bool
-}
-
 // Instance manages the information used to connect to the Cloud SQL instance
 // by periodically calling the Cloud SQL Admin API. It automatically refreshes
 // the required information approximately 4 minutes before the previous
@@ -143,8 +138,8 @@ type Instance struct {
 	l *rate.Limiter
 	r refresher
 
-	refreshLock   sync.RWMutex
-	refreshConfig RefreshConfig
+	mu              sync.RWMutex
+	useIAMAuthNDial bool
 	// cur represents the current refreshOperation that will be used to
 	// create connections. If a valid complete refreshOperation isn't
 	// available it's possible for cur to be equal to next.
@@ -167,7 +162,7 @@ func NewInstance(
 	refreshTimeout time.Duration,
 	ts oauth2.TokenSource,
 	dialerID string,
-	r RefreshConfig,
+	useIAMAuthNDial bool,
 ) *Instance {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &Instance{
@@ -179,17 +174,17 @@ func NewInstance(
 			ts,
 			dialerID,
 		),
-		refreshTimeout: refreshTimeout,
-		refreshConfig:  r,
-		ctx:            ctx,
-		cancel:         cancel,
+		refreshTimeout:  refreshTimeout,
+		useIAMAuthNDial: useIAMAuthNDial,
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 	// For the initial refresh operation, set cur = next so that connection
 	// requests block until the first refresh is complete.
-	i.refreshLock.Lock()
+	i.mu.Lock()
 	i.cur = i.scheduleRefresh(0)
 	i.next = i.cur
-	i.refreshLock.Unlock()
+	i.mu.Unlock()
 	return i
 }
 
@@ -204,10 +199,13 @@ func (i *Instance) ConnName() ConnName {
 	return i.connName
 }
 
-// RefreshConfig returns the refresh configuration associated with this
-// instance.
-func (i *Instance) RefreshConfig() RefreshConfig {
-	return i.refreshConfig
+// UseIAMAuthNDial reports whether the instance has set IAM AuthN on a per-dial
+// basis. This field can change from one Dial attempt to another and affects
+// how the background refresh functions by either inserting an OAuth2 token
+// into the ephemeral certificate request or leaving it blank. It is meant to
+// override the dialer setting.
+func (i *Instance) UseIAMAuthNDial() bool {
+	return i.useIAMAuthNDial
 }
 
 // Close closes the instance; it stops the refresh cycle and prevents it from
@@ -262,15 +260,14 @@ func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
 
 // UpdateRefresh cancels all existing refresh attempts and schedules new
 // attempts with the provided config.
-func (i *Instance) UpdateRefresh(c RefreshConfig) {
-	i.refreshLock.Lock()
-	defer i.refreshLock.Unlock()
+func (i *Instance) UpdateRefresh(useIAMAuthNDial bool) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	// Cancel any pending refreshes
 	i.cur.cancel()
 	i.next.cancel()
-	// update the refresh config as needed
-	i.refreshConfig = c
-	// reschedule a new refresh immediately
+
+	i.useIAMAuthNDial = useIAMAuthNDial
 	i.cur = i.scheduleRefresh(0)
 	i.next = i.cur
 }
@@ -279,8 +276,8 @@ func (i *Instance) UpdateRefresh(c RefreshConfig) {
 // used for future connection attempts. Until the refresh completes, the
 // existing connection info will be available for use if valid.
 func (i *Instance) ForceRefresh() {
-	i.refreshLock.Lock()
-	defer i.refreshLock.Unlock()
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	// If the next refresh hasn't started yet, we can cancel it and start an
 	// immediate one
 	if i.next.cancel() {
@@ -296,9 +293,9 @@ func (i *Instance) ForceRefresh() {
 // refreshOperation returns the most recent refresh operation
 // waiting for it to complete if necessary
 func (i *Instance) refreshOperation(ctx context.Context) (*refreshOperation, error) {
-	i.refreshLock.RLock()
+	i.mu.RLock()
 	cur := i.cur
-	i.refreshLock.RUnlock()
+	i.mu.RUnlock()
 	var err error
 	select {
 	case <-cur.ready:
@@ -350,7 +347,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			)
 		} else {
 			r.result, r.err = i.r.performRefresh(
-				ctx, i.connName, i.key, i.refreshConfig.UseIAMAuthN)
+				ctx, i.connName, i.key, i.useIAMAuthNDial)
 		}
 
 		close(r.ready)
@@ -364,8 +361,8 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 
 		// Once the refresh is complete, update "current" with working
 		// refreshOperation and schedule a new refresh
-		i.refreshLock.Lock()
-		defer i.refreshLock.Unlock()
+		i.mu.Lock()
+		defer i.mu.Unlock()
 
 		// if failed, scheduled the next refresh immediately
 		if r.err != nil {

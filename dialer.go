@@ -160,9 +160,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	dc := dialConfig{
 		ipType:       cloudsql.PublicIP,
 		tcpKeepAlive: defaultTCPKeepAlive,
-		refreshConfig: cloudsql.RefreshConfig{
-			UseIAMAuthN: cfg.useIAMAuthN,
-		},
+		useIAMAuthN:  cfg.useIAMAuthN,
 	}
 	for _, opt := range cfg.dialOpts {
 		opt(&dc)
@@ -209,7 +207,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	i := d.instance(cn, &cfg.refreshConfig)
+	i := d.instance(cn, &cfg.useIAMAuthN)
 	addr, tlsConfig, err := i.ConnectInfo(ctx, cfg.ipType)
 	if err != nil {
 		d.removeInstance(i)
@@ -289,7 +287,7 @@ func (d *Dialer) Warmup(_ context.Context, instance string, opts ...DialOption) 
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	_ = d.instance(cn, &cfg.refreshConfig)
+	_ = d.instance(cn, &cfg.useIAMAuthN)
 	return nil
 }
 
@@ -334,27 +332,27 @@ func (d *Dialer) Close() error {
 
 // instance is a helper function for returning the appropriate instance object in a threadsafe way.
 // It will create a new instance object, modify the existing one, or leave it unchanged as needed.
-func (d *Dialer) instance(cn cloudsql.ConnName, r *cloudsql.RefreshConfig) *cloudsql.Instance {
+func (d *Dialer) instance(cn cloudsql.ConnName, useIAMAuthN *bool) *cloudsql.Instance {
 	// Check instance cache
 	d.lock.RLock()
 	i, ok := d.instances[cn]
 	d.lock.RUnlock()
 	// If the instance hasn't been created yet or if the refreshConfig has changed
-	if !ok || (r != nil && *r != i.RefreshConfig()) {
+	if !ok || (useIAMAuthN != nil && *useIAMAuthN != i.UseIAMAuthNDial()) {
 		d.lock.Lock()
 		// Recheck to ensure instance wasn't created or changed between locks
 		i, ok = d.instances[cn]
 		if !ok {
-			// Create a new instance
-			if r == nil {
-				r = &d.defaultDialConfig.refreshConfig
+			var useIAMAuthNDial bool
+			if useIAMAuthN != nil {
+				useIAMAuthNDial = *useIAMAuthN
 			}
 			i = cloudsql.NewInstance(cn, d.sqladmin, d.key,
-				d.refreshTimeout, d.iamTokenSource, d.dialerID, *r)
+				d.refreshTimeout, d.iamTokenSource, d.dialerID, useIAMAuthNDial)
 			d.instances[cn] = i
-		} else if r != nil && *r != i.RefreshConfig() {
+		} else if useIAMAuthN != nil && *useIAMAuthN != i.UseIAMAuthNDial() {
 			// Update the instance with the new refresh config
-			i.UpdateRefresh(*r)
+			i.UpdateRefresh(*useIAMAuthN)
 		}
 		d.lock.Unlock()
 	}

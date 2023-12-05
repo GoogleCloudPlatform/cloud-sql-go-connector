@@ -306,7 +306,7 @@ type refresher struct {
 
 // performRefresh immediately performs a full refresh operation using the Cloud
 // SQL Admin API.
-func (r refresher) performRefresh(ctx context.Context, cn ConnName, k *rsa.PrivateKey, iamAuthN bool) (rr refreshResult, err error) {
+func (r refresher) performRefresh(ctx context.Context, cn ConnName, k *rsa.PrivateKey, iamAuthNDial bool) (rr refreshResult, err error) {
 	var refreshEnd trace.EndSpanFunc
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.RefreshConnection",
 		trace.AddInstanceName(cn.String()),
@@ -337,7 +337,7 @@ func (r refresher) performRefresh(ctx context.Context, cn ConnName, k *rsa.Priva
 	go func() {
 		defer close(ecC)
 		var iamTS oauth2.TokenSource
-		if iamAuthN {
+		if iamAuthNDial {
 			iamTS = r.ts
 		}
 		ec, err := fetchEphemeralCert(ctx, r.client, cn, k, iamTS)
@@ -355,7 +355,7 @@ func (r refresher) performRefresh(ctx context.Context, cn ConnName, k *rsa.Priva
 	case <-ctx.Done():
 		return rr, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
-	if iamAuthN {
+	if iamAuthNDial {
 		if vErr := supportsAutoIAMAuthN(md.version); vErr != nil {
 			return refreshResult{}, vErr
 		}
