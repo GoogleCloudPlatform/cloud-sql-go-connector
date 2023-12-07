@@ -330,21 +330,19 @@ func (d *Dialer) Close() error {
 	return nil
 }
 
-// instance is a helper function for returning the appropriate instance object in a threadsafe way.
-// It will create a new instance object, modify the existing one, or leave it unchanged as needed.
+// instance is a helper function for returning the appropriate instance object
+// in a threadsafe way. It will create a new instance object, modify the
+// existing one, or leave it unchanged as needed.
 func (d *Dialer) instance(cn cloudsql.ConnName, useIAMAuthN *bool) *cloudsql.Instance {
-	// Check instance cache
 	d.lock.RLock()
 	i, ok := d.instances[cn]
 	d.lock.RUnlock()
-	// If the instance hasn't been created yet or if the refreshConfig has changed
-	if !ok || i.NeedsUpdateRefresh(useIAMAuthN) {
+	if !ok {
 		d.lock.Lock()
 		defer d.lock.Unlock()
 		// Recheck to ensure instance wasn't created or changed between locks
 		i, ok = d.instances[cn]
-		switch {
-		case !ok:
+		if !ok {
 			var useIAMAuthNDial bool
 			if useIAMAuthN != nil {
 				useIAMAuthNDial = *useIAMAuthN
@@ -352,11 +350,11 @@ func (d *Dialer) instance(cn cloudsql.ConnName, useIAMAuthN *bool) *cloudsql.Ins
 			i = cloudsql.NewInstance(cn, d.sqladmin, d.key,
 				d.refreshTimeout, d.iamTokenSource, d.dialerID, useIAMAuthNDial)
 			d.instances[cn] = i
-		case i.NeedsUpdateRefresh(useIAMAuthN):
-			// Update the instance with the new refresh config
-			i.UpdateRefresh(*useIAMAuthN)
 		}
 	}
+
+	i.UpdateRefresh(useIAMAuthN)
+
 	return i
 }
 
