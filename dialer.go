@@ -231,6 +231,25 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	}
 	endInfo(err)
 
+	// If the client certificate has expired (as when the computer goes to
+	// sleep, and the refresh cycle cannot run), force a refresh immediately.
+	// The TLS handshake will not fail on an expired client certificate. It's
+	// not until the first read where the client cert error will be surfaced.
+	// So check that the certificate is valid before proceeding.
+	if invalidClientCert(tlsConfig) {
+		i.ForceRefresh()
+		// Block on refreshed connection info
+		addr, tlsConfig, err = i.ConnectInfo(ctx, cfg.ipType)
+		if err != nil {
+			d.lock.Lock()
+			defer d.lock.Unlock()
+			// Stop all background refreshes
+			i.Close()
+			delete(d.instances, cn)
+			return nil, err
+		}
+	}
+
 	var connectEnd trace.EndSpanFunc
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
 	defer func() { connectEnd(err) }()
@@ -273,6 +292,10 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		n := atomic.AddUint64(i.OpenConns(), ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
 	}), nil
+}
+
+func invalidClientCert(c *tls.Config) bool {
+	return time.Now().After(c.Certificates[0].Leaf.NotAfter)
 }
 
 // EngineVersion returns the engine type and version for the instance. The value will
