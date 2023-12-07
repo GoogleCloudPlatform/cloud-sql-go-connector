@@ -22,6 +22,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -68,6 +69,16 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 	return defaultKey, defaultKeyErr
 }
 
+type connectionInfoCache interface {
+	OpenConns() *uint64
+
+	ConnectInfo(context.Context, string) (string, *tls.Config, error)
+	InstanceEngineVersion(context.Context) (string, error)
+	UpdateRefresh(*bool)
+	ForceRefresh()
+	io.Closer
+}
+
 // A Dialer is used to create connections to Cloud SQL instances.
 //
 // Use NewDialer to initialize a Dialer.
@@ -75,7 +86,7 @@ type Dialer struct {
 	lock sync.RWMutex
 	// instances map connection names (e.g., my-project:us-central1:my-instance)
 	// to *cloudsql.Instance types.
-	instances      map[cloudsql.ConnName]*cloudsql.Instance
+	instances      map[cloudsql.ConnName]connectionInfoCache
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
 
@@ -170,7 +181,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, err
 	}
 	d := &Dialer{
-		instances:         make(map[cloudsql.ConnName]*cloudsql.Instance),
+		instances:         make(map[cloudsql.ConnName]connectionInfoCache),
 		key:               cfg.rsaKey,
 		refreshTimeout:    cfg.refreshTimeout,
 		sqladmin:          client,
@@ -210,7 +221,11 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	i := d.instance(cn, &cfg.useIAMAuthN)
 	addr, tlsConfig, err := i.ConnectInfo(ctx, cfg.ipType)
 	if err != nil {
-		d.removeInstance(i)
+		d.lock.Lock()
+		defer d.lock.Unlock()
+		// Stop all background refreshes
+		i.Close()
+		delete(d.instances, cn)
 		endInfo(err)
 		return nil, err
 	}
@@ -228,14 +243,14 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	if err != nil {
 		// refresh the instance info in case it caused the connection failure
 		i.ForceRefresh()
-		return nil, errtype.NewDialError("failed to dial", i.String(), err)
+		return nil, errtype.NewDialError("failed to dial", cn.String(), err)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
-			return nil, errtype.NewDialError("failed to set keep-alive", i.String(), err)
+			return nil, errtype.NewDialError("failed to set keep-alive", cn.String(), err)
 		}
 		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
-			return nil, errtype.NewDialError("failed to set keep-alive period", i.String(), err)
+			return nil, errtype.NewDialError("failed to set keep-alive period", cn.String(), err)
 		}
 	}
 
@@ -244,19 +259,19 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 		// refresh the instance info in case it caused the handshake failure
 		i.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
-		return nil, errtype.NewDialError("handshake failed", i.String(), err)
+		return nil, errtype.NewDialError("handshake failed", cn.String(), err)
 	}
 
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
 		n := atomic.AddUint64(i.OpenConns(), 1)
-		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, i.String())
+		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
 		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
 	}()
 
 	return newInstrumentedConn(tlsConn, func() {
 		n := atomic.AddUint64(i.OpenConns(), ^uint64(0))
-		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, i.String())
+		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
 	}), nil
 }
 
@@ -333,7 +348,7 @@ func (d *Dialer) Close() error {
 // instance is a helper function for returning the appropriate instance object
 // in a threadsafe way. It will create a new instance object, modify the
 // existing one, or leave it unchanged as needed.
-func (d *Dialer) instance(cn cloudsql.ConnName, useIAMAuthN *bool) *cloudsql.Instance {
+func (d *Dialer) instance(cn cloudsql.ConnName, useIAMAuthN *bool) connectionInfoCache {
 	d.lock.RLock()
 	i, ok := d.instances[cn]
 	d.lock.RUnlock()
@@ -356,12 +371,4 @@ func (d *Dialer) instance(cn cloudsql.ConnName, useIAMAuthN *bool) *cloudsql.Ins
 	i.UpdateRefresh(useIAMAuthN)
 
 	return i
-}
-
-func (d *Dialer) removeInstance(i *cloudsql.Instance) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	// Stop all background refreshes
-	i.Close()
-	delete(d.instances, i.ConnName())
 }

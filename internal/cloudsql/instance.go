@@ -194,24 +194,11 @@ func (i *Instance) OpenConns() *uint64 {
 	return &i.openConns
 }
 
-// ConnName returns the instance connection name associated with this Instance.
-func (i *Instance) ConnName() ConnName {
-	return i.connName
-}
-
-// UseIAMAuthNDial reports whether the instance has set IAM AuthN on a per-dial
-// basis. This field can change from one Dial attempt to another and affects
-// how the background refresh functions by either inserting an OAuth2 token
-// into the ephemeral certificate request or leaving it blank. It is meant to
-// override the dialer setting.
-func (i *Instance) UseIAMAuthNDial() bool {
-	return i.useIAMAuthNDial
-}
-
 // Close closes the instance; it stops the refresh cycle and prevents it from
 // making additional calls to the Cloud SQL Admin API.
-func (i *Instance) Close() {
+func (i *Instance) Close() error {
 	i.cancel()
+	return nil
 }
 
 // ConnectInfo returns an IP address specified by ipType (i.e., public or
@@ -240,7 +227,7 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 	if !ok {
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", ipType),
-			i.String(),
+			i.connName.String(),
 		)
 		return "", nil, err
 	}
@@ -390,9 +377,4 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		i.next = i.scheduleRefresh(t)
 	})
 	return r
-}
-
-// String returns the instance's connection name.
-func (i *Instance) String() string {
-	return i.connName.String()
 }
