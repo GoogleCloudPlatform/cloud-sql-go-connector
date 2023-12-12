@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.5.1...v1.5.2) (2023-12-12)
+
+
+### Bug Fixes
+
+* ensure cert refresh recovers from sleep ([#686](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/686)) ([95671ad](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/95671ada40905cf14209b5c54058463689ce6b20))
+
 ## [1.5.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.5.0...v1.5.1) (2023-11-14)
 
 
