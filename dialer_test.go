@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
-	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
+	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"golang.org/x/oauth2"
 )
@@ -551,7 +551,7 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 	// Populate instance map with connection info cache that will always fail
 	// This allows the test to verify the error case path invoking close.
 	badInstanceConnectionName := "doesntexist:us-central1:doesntexist"
-	badCN, _ := cloudsql.ParseConnName(badInstanceConnectionName)
+	badCN, _ := instance.ParseConnName(badInstanceConnectionName)
 	spy := &spyConnectionInfoCache{
 		connectInfoCalls: []struct {
 			tls *tls.Config
@@ -592,7 +592,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 
 	sentinel := errors.New("connect info failed")
 	icn := "project:region:instance"
-	cn, _ := cloudsql.ParseConnName(icn)
+	cn, _ := instance.ParseConnName(icn)
 	spy := &spyConnectionInfoCache{
 		connectInfoCalls: []struct {
 			tls *tls.Config
