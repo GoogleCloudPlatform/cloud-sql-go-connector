@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
 
@@ -36,43 +37,13 @@ func genRSAKey() *rsa.PrivateKey {
 	return key
 }
 
-func testInstanceConnName() ConnName {
-	cn, _ := ParseConnName("my-project:my-region:my-instance")
+func testInstanceConnName() instance.ConnName {
+	cn, _ := instance.ParseConnName("my-project:my-region:my-instance")
 	return cn
 }
 
 // RSAKey is used for test only.
 var RSAKey = genRSAKey()
-
-func TestParseConnName(t *testing.T) {
-	tests := []struct {
-		name string
-		want ConnName
-	}{
-		{
-			"project:region:instance",
-			ConnName{"project", "region", "instance"},
-		},
-		{
-			"google.com:project:region:instance",
-			ConnName{"google.com:project", "region", "instance"},
-		},
-		{
-			"project:instance", // missing region
-			ConnName{},
-		},
-	}
-
-	for _, tc := range tests {
-		c, err := ParseConnName(tc.name)
-		if err != nil && tc.want != (ConnName{}) {
-			t.Errorf("unexpected error: %e", err)
-		}
-		if c != tc.want {
-			t.Errorf("ParseConnName(%s) failed: want %v, got %v", tc.name, tc.want, err)
-		}
-	}
-}
 
 func TestInstanceEngineVersion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

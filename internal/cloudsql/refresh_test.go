@@ -38,10 +38,7 @@ func TestRefresh(t *testing.T) {
 	wantPSC := "abcde.12345.us-central1.sql.goog"
 	wantExpiry := time.Now().Add(time.Hour).UTC().Round(time.Second)
 	wantConnName := "my-project:my-region:my-instance"
-	cn, err := ParseConnName(wantConnName)
-	if err != nil {
-		t.Fatalf("ParseConnName(%s)failed : %v", cn, err)
-	}
+	cn := testInstanceConnName()
 	inst := mock.NewFakeCSQLInstance(
 		"my-project", "my-region", "my-instance",
 		mock.WithPublicIP(wantPublicIP),
@@ -99,7 +96,7 @@ func TestRefresh(t *testing.T) {
 }
 
 func TestRefreshFailsFast(t *testing.T) {
-	cn, _ := ParseConnName("my-project:my-region:my-instance")
+	cn := testInstanceConnName()
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	client, cleanup, err := mock.NewSQLAdminService(
 		context.Background(),
@@ -177,7 +174,7 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 			wantExpiry: certExpiry,
 		},
 	}
-	cn, _ := ParseConnName("my-project:my-region:my-instance")
+	cn := testInstanceConnName()
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance",
 		mock.WithCertExpiry(certExpiry))
 	client, cleanup, err := mock.NewSQLAdminService(
@@ -225,7 +222,7 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 			wantCount: 2,
 		},
 	}
-	cn, _ := ParseConnName("my-project:my-region:my-instance")
+	cn := testInstanceConnName()
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 	client, cleanup, err := mock.NewSQLAdminService(
 		context.Background(),
@@ -252,7 +249,7 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 }
 
 func TestRefreshMetadataConfigError(t *testing.T) {
-	cn, _ := ParseConnName("my-project:my-region:my-instance")
+	cn := testInstanceConnName()
 
 	testCases := []struct {
 		req     *mock.Request
@@ -262,7 +259,7 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 		{
 			req: mock.InstanceGetSuccess(
 				mock.NewFakeCSQLInstance(
-					cn.project, cn.region, cn.name,
+					cn.Project(), cn.Region(), cn.Name(),
 					mock.WithRegion("my-region"),
 					mock.WithFirstGenBackend(),
 				), 1),
@@ -271,7 +268,7 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 		},
 		{
 			req: mock.InstanceGetSuccess(
-				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
+				mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name(),
 					mock.WithRegion("some-other-region")), 1),
 			wantErr: &errtype.ConfigError{},
 			desc:    "When the region does not match",
@@ -279,7 +276,7 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 		{
 			req: mock.InstanceGetSuccess(
 				mock.NewFakeCSQLInstance(
-					cn.project, cn.region, cn.name,
+					cn.Project(), cn.Region(), cn.Name(),
 					mock.WithRegion("my-region"),
 					mock.WithNoIPAddrs(),
 				), 1),
@@ -309,7 +306,7 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 }
 
 func TestRefreshMetadataRefreshError(t *testing.T) {
-	cn, _ := ParseConnName("my-project:my-region:my-instance")
+	cn := testInstanceConnName()
 
 	testCases := []struct {
 		req     *mock.Request
@@ -318,14 +315,14 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 	}{
 		{
 			req: mock.CreateEphemeralSuccess(
-				mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name), 1),
+				mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name()), 1),
 			wantErr: &errtype.RefreshError{},
 			desc:    "When the Metadata call fails",
 		},
 		{
 			req: mock.InstanceGetSuccess(
 				mock.NewFakeCSQLInstance(
-					cn.project, cn.region, cn.name,
+					cn.Project(), cn.Region(), cn.Name(),
 					mock.WithRegion("my-region"),
 					mock.WithCertSigner(func(_ *x509.Certificate, _ *rsa.PrivateKey) ([]byte, error) {
 						return nil, nil
@@ -337,7 +334,7 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 		{
 			req: mock.InstanceGetSuccess(
 				mock.NewFakeCSQLInstance(
-					cn.project, cn.region, cn.name,
+					cn.Project(), cn.Region(), cn.Name(),
 					mock.WithRegion("my-region"),
 					mock.WithCertSigner(func(_ *x509.Certificate, _ *rsa.PrivateKey) ([]byte, error) {
 						certPEM := &bytes.Buffer{}
@@ -374,8 +371,8 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 }
 
 func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
-	cn, _ := ParseConnName("my-project:my-region:my-instance")
-	inst := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
+	cn := testInstanceConnName()
+	inst := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name())
 
 	testCases := []struct {
 		reqs    []*mock.Request
@@ -390,7 +387,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		{
 			reqs: []*mock.Request{mock.InstanceGetSuccess(inst, 1),
 				mock.CreateEphemeralSuccess(
-					mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
+					mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name(),
 						mock.WithClientCertSigner(
 							func(*x509.Certificate, *rsa.PrivateKey, *rsa.PublicKey) ([]byte, error) {
 								return nil, nil
@@ -403,7 +400,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		{
 			reqs: []*mock.Request{mock.InstanceGetSuccess(inst, 1),
 				mock.CreateEphemeralSuccess(
-					mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name,
+					mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name(),
 						mock.WithClientCertSigner(
 							func(*x509.Certificate, *rsa.PrivateKey, *rsa.PublicKey) ([]byte, error) {
 								certPEM := &bytes.Buffer{}
@@ -440,8 +437,8 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 
 func TestRefreshBuildsTLSConfig(t *testing.T) {
 	wantServerName := "my-project:my-region:my-instance"
-	cn, _ := ParseConnName(wantServerName)
-	inst := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
+	cn := testInstanceConnName()
+	inst := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name())
 	certBytes, err := mock.SelfSign(inst.Cert, inst.Key)
 	if err != nil {
 		t.Fatalf("failed to sign certificate: %v", err)
@@ -513,7 +510,7 @@ func TestRefreshBuildsTLSConfig(t *testing.T) {
 		t.Fatalf("when common names mismatch, want = %T, got = %v", wantErr, err)
 	}
 
-	other := mock.NewFakeCSQLInstance(cn.project, cn.region, cn.name)
+	other := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name())
 	certBytes, err = mock.SelfSign(other.Cert, other.Key)
 	if err != nil {
 		t.Fatalf("failed to sign certificate: %v", err)

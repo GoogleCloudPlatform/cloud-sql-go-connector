@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"github.com/google/uuid"
@@ -86,7 +87,7 @@ type Dialer struct {
 	lock sync.RWMutex
 	// instances map connection names (e.g., my-project:us-central1:my-instance)
 	// to *cloudsql.Instance types.
-	instances      map[cloudsql.ConnName]connectionInfoCache
+	instances      map[instance.ConnName]connectionInfoCache
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
 
@@ -181,7 +182,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, err
 	}
 	d := &Dialer{
-		instances:         make(map[cloudsql.ConnName]connectionInfoCache),
+		instances:         make(map[instance.ConnName]connectionInfoCache),
 		key:               cfg.rsaKey,
 		refreshTimeout:    cfg.refreshTimeout,
 		sqladmin:          client,
@@ -193,20 +194,21 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	return d, nil
 }
 
-// Dial returns a net.Conn connected to the specified Cloud SQL instance. The instance argument must be the
-// instance's connection name, which is in the format "project-name:region:instance-name".
-func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) (conn net.Conn, err error) {
+// Dial returns a net.Conn connected to the specified Cloud SQL instance. The
+// icn argument must be the instance's connection name, which is in the format
+// "project-name:region:instance-name".
+func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn net.Conn, err error) {
 	startTime := time.Now()
 	var endDial trace.EndSpanFunc
 	ctx, endDial = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn.Dial",
-		trace.AddInstanceName(instance),
+		trace.AddInstanceName(icn),
 		trace.AddDialerID(d.dialerID),
 	)
 	defer func() {
-		go trace.RecordDialError(context.Background(), instance, d.dialerID, err)
+		go trace.RecordDialError(context.Background(), icn, d.dialerID, err)
 		endDial(err)
 	}()
-	cn, err := cloudsql.ParseConnName(instance)
+	cn, err := instance.ParseConnName(icn)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +287,7 @@ func (d *Dialer) Dial(ctx context.Context, instance string, opts ...DialOption) 
 	go func() {
 		n := atomic.AddUint64(i.OpenConns(), 1)
 		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
-		trace.RecordDialLatency(ctx, instance, d.dialerID, latency)
+		trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
 	}()
 
 	return newInstrumentedConn(tlsConn, func() {
@@ -307,11 +309,12 @@ func invalidClientCert(c *tls.Config) bool {
 	return time.Now().After(c.Certificates[0].Leaf.NotAfter)
 }
 
-// EngineVersion returns the engine type and version for the instance. The value will
-// correspond to one of the following types for the instance:
+// EngineVersion returns the engine type and version for the instance
+// connection name. The value will correspond to one of the following types for
+// the instance:
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
-func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, error) {
-	cn, err := cloudsql.ParseConnName(instance)
+func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) {
+	cn, err := instance.ParseConnName(icn)
 	if err != nil {
 		return "", err
 	}
@@ -323,10 +326,11 @@ func (d *Dialer) EngineVersion(ctx context.Context, instance string) (string, er
 	return e, nil
 }
 
-// Warmup starts the background refresh necessary to connect to the instance. Use Warmup
-// to start the refresh process early if you don't know when you'll need to call "Dial".
-func (d *Dialer) Warmup(_ context.Context, instance string, opts ...DialOption) error {
-	cn, err := cloudsql.ParseConnName(instance)
+// Warmup starts the background refresh necessary to connect to the instance.
+// Use Warmup to start the refresh process early if you don't know when you'll
+// need to call "Dial".
+func (d *Dialer) Warmup(_ context.Context, icn string, opts ...DialOption) error {
+	cn, err := instance.ParseConnName(icn)
 	if err != nil {
 		return err
 	}
@@ -380,7 +384,7 @@ func (d *Dialer) Close() error {
 // instance is a helper function for returning the appropriate instance object
 // in a threadsafe way. It will create a new instance object, modify the
 // existing one, or leave it unchanged as needed.
-func (d *Dialer) instance(cn cloudsql.ConnName, useIAMAuthN *bool) connectionInfoCache {
+func (d *Dialer) instance(cn instance.ConnName, useIAMAuthN *bool) connectionInfoCache {
 	d.lock.RLock()
 	i, ok := d.instances[cn]
 	d.lock.RUnlock()

@@ -19,11 +19,11 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"fmt"
-	"regexp"
 	"sync"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/instance"
 	"golang.org/x/oauth2"
 	"golang.org/x/time/rate"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
@@ -46,45 +46,6 @@ const (
 	// refreshBurst is the initial burst allowed by the rate limiter.
 	refreshBurst = 2
 )
-
-var (
-	// Instance connection name is the format <PROJECT>:<REGION>:<INSTANCE>
-	// Additionally, we have to support legacy "domain-scoped" projects
-	// (e.g. "google.com:PROJECT")
-	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+)")
-)
-
-// ConnName represents the "instance connection name", in the format
-// "project:region:name".
-type ConnName struct {
-	project string
-	region  string
-	name    string
-}
-
-func (c *ConnName) String() string {
-	return fmt.Sprintf("%s:%s:%s", c.project, c.region, c.name)
-}
-
-// ParseConnName initializes a new ConnName struct.
-func ParseConnName(cn string) (ConnName, error) {
-	b := []byte(cn)
-	m := connNameRegex.FindSubmatch(b)
-	if m == nil {
-		err := errtype.NewConfigError(
-			"invalid instance connection name, expected PROJECT:REGION:INSTANCE",
-			cn,
-		)
-		return ConnName{}, err
-	}
-
-	c := ConnName{
-		project: string(m[1]),
-		region:  string(m[3]),
-		name:    string(m[4]),
-	}
-	return c, nil
-}
 
 // refreshOperation is a pending result of a refresh operation of data used to
 // connect securely. It should only be initialized by the Instance struct as
@@ -128,7 +89,7 @@ type Instance struct {
 	// openConns is the number of open connections to the instance.
 	openConns uint64
 
-	connName ConnName
+	connName instance.ConnName
 	key      *rsa.PrivateKey
 
 	// refreshTimeout sets the maximum duration a refresh cycle can run
@@ -156,7 +117,7 @@ type Instance struct {
 
 // NewInstance initializes a new Instance given an instance connection name
 func NewInstance(
-	cn ConnName,
+	cn instance.ConnName,
 	client *sqladmin.Service,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
