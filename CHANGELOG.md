@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.5.2...v1.6.0) (2024-01-17)
+
+
+### Features
+
+* add connection name to public API ([#698](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/698)) ([84f3b6e](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/84f3b6eedcf13402bcbf7da720924cf242893beb))
+
 ## [1.5.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.5.1...v1.5.2) (2023-12-12)
 
 
