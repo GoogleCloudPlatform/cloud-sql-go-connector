@@ -158,7 +158,11 @@ func (i *Instance) OpenConns() *uint64 {
 // Close closes the instance; it stops the refresh cycle and prevents it from
 // making additional calls to the Cloud SQL Admin API.
 func (i *Instance) Close() error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	i.cancel()
+	i.cur.cancel()
+	i.next.cancel()
 	return nil
 }
 
@@ -254,6 +258,8 @@ func (i *Instance) refreshOperation(ctx context.Context) (*refreshOperation, err
 		err = cur.err
 	case <-ctx.Done():
 		err = ctx.Err()
+	case <-i.ctx.Done():
+		err = i.ctx.Err()
 	}
 	if err != nil {
 		return nil, err
@@ -285,6 +291,13 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 	r := &refreshOperation{}
 	r.ready = make(chan struct{})
 	r.timer = time.AfterFunc(d, func() {
+		// instance has been closed, don't schedule anything
+		if err := i.ctx.Err(); err != nil {
+			r.err = err
+			close(r.ready)
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(i.ctx, i.refreshTimeout)
 		defer cancel()
 
@@ -303,13 +316,6 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		}
 
 		close(r.ready)
-
-		select {
-		case <-i.ctx.Done():
-			// instance has been closed, don't schedule anything
-			return
-		default:
-		}
 
 		// Once the refresh is complete, update "current" with working
 		// refreshOperation and schedule a new refresh
