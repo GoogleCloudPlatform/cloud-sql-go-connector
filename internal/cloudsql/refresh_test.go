@@ -17,6 +17,7 @@ package cloudsql
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -29,6 +30,18 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"golang.org/x/oauth2"
 )
+
+// genRSAKey generates an RSA key used for test.
+func genRSAKey() *rsa.PrivateKey {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(err) // unexpected, so just panic if it happens
+	}
+	return key
+}
+
+// RSAKey is used for test only.
+var RSAKey = genRSAKey()
 
 const testDialerID = "some-dialer-id"
 
@@ -60,10 +73,10 @@ func TestRefresh(t *testing.T) {
 		}
 	}()
 
-	r := newRefresher(client, nil, testDialerID)
-	rr, err := r.performRefresh(context.Background(), cn, RSAKey, false)
+	r := NewConnInfoStore(client, nil, testDialerID)
+	rr, err := r.ConnectionInfo(context.Background(), cn, RSAKey, false)
 	if err != nil {
-		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
+		t.Fatalf("ConnectionInfo unexpectedly failed with error: %v", err)
 	}
 
 	gotIP, ok := rr.ipAddrs[PublicIP]
@@ -108,8 +121,8 @@ func TestRefreshFailsFast(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := newRefresher(client, nil, testDialerID)
-	_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
+	r := NewConnInfoStore(client, nil, testDialerID)
+	_, err = r.ConnectionInfo(context.Background(), cn, RSAKey, false)
 	if err != nil {
 		t.Fatalf("expected no error, got = %v", err)
 	}
@@ -117,7 +130,7 @@ func TestRefreshFailsFast(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	// context is canceled
-	_, err = r.performRefresh(ctx, cn, RSAKey, false)
+	_, err = r.ConnectionInfo(ctx, cn, RSAKey, false)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled error, got = %v", err)
 	}
@@ -190,8 +203,8 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ts := &fakeTokenSource{responses: tc.resps}
-			r := newRefresher(client, ts, testDialerID)
-			rr, err := r.performRefresh(context.Background(), cn, RSAKey, true)
+			r := NewConnInfoStore(client, ts, testDialerID)
+			rr, err := r.ConnectionInfo(context.Background(), cn, RSAKey, true)
 			if err != nil {
 				t.Fatalf("want no error, got = %v", err)
 			}
@@ -236,8 +249,8 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ts := &fakeTokenSource{responses: tc.resps}
-			r := newRefresher(client, ts, testDialerID)
-			_, err := r.performRefresh(context.Background(), cn, RSAKey, true)
+			r := NewConnInfoStore(client, ts, testDialerID)
+			_, err := r.ConnectionInfo(context.Background(), cn, RSAKey, true)
 			if err == nil {
 				t.Fatalf("expected get failed error, got = %v", err)
 			}
@@ -296,8 +309,8 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 			}
 			defer cleanup()
 
-			r := newRefresher(client, nil, testDialerID)
-			_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
+			r := NewConnInfoStore(client, nil, testDialerID)
+			_, err = r.ConnectionInfo(context.Background(), cn, RSAKey, false)
 			if !errors.As(err, &tc.wantErr) {
 				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 			}
@@ -361,8 +374,8 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 			}
 			defer cleanup()
 
-			r := newRefresher(client, nil, testDialerID)
-			_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
+			r := NewConnInfoStore(client, nil, testDialerID)
+			_, err = r.ConnectionInfo(context.Background(), cn, RSAKey, false)
 			if !errors.As(err, &tc.wantErr) {
 				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 			}
@@ -426,11 +439,11 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		}
 		defer cleanup()
 
-		r := newRefresher(client, nil, testDialerID)
-		_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
+		r := NewConnInfoStore(client, nil, testDialerID)
+		_, err = r.ConnectionInfo(context.Background(), cn, RSAKey, false)
 
 		if !errors.As(err, &tc.wantErr) {
-			t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
+			t.Errorf("[%v] ConnectionInfo failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 		}
 	}
 }
@@ -453,8 +466,8 @@ func TestRefreshBuildsTLSConfig(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := newRefresher(client, nil, testDialerID)
-	rr, err := r.performRefresh(context.Background(), cn, RSAKey, false)
+	r := NewConnInfoStore(client, nil, testDialerID)
+	rr, err := r.ConnectionInfo(context.Background(), cn, RSAKey, false)
 	if err != nil {
 		t.Fatalf("expected no error, got = %v", err)
 	}

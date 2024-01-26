@@ -24,9 +24,7 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
-	"golang.org/x/oauth2"
 	"golang.org/x/time/rate"
-	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 const (
@@ -55,7 +53,7 @@ type refreshOperation struct {
 	ready chan struct{}
 	// timer that triggers refresh, can be used to cancel.
 	timer  *time.Timer
-	result refreshResult
+	result ConnectionInfo
 	err    error
 }
 
@@ -97,7 +95,7 @@ type Instance struct {
 	refreshTimeout time.Duration
 	// l controls the rate at which refresh cycles are run.
 	l *rate.Limiter
-	r refresher
+	r ConnectionInfoStore
 
 	mu              sync.RWMutex
 	useIAMAuthNDial bool
@@ -115,26 +113,26 @@ type Instance struct {
 	cancel context.CancelFunc
 }
 
+type ConnectionInfoStore interface {
+	ConnectionInfo(
+		context.Context, instance.ConnName, *rsa.PrivateKey, bool,
+	) (ConnectionInfo, error)
+}
+
 // NewInstance initializes a new Instance given an instance connection name
 func NewInstance(
 	cn instance.ConnName,
-	client *sqladmin.Service,
+	r ConnectionInfoStore,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
-	ts oauth2.TokenSource,
-	dialerID string,
 	useIAMAuthNDial bool,
 ) *Instance {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &Instance{
-		connName: cn,
-		key:      key,
-		l:        rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
-		r: newRefresher(
-			client,
-			ts,
-			dialerID,
-		),
+		connName:        cn,
+		key:             key,
+		l:               rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
+		r:               r,
 		refreshTimeout:  refreshTimeout,
 		useIAMAuthNDial: useIAMAuthNDial,
 		ctx:             ctx,
@@ -311,7 +309,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 				nil,
 			)
 		} else {
-			r.result, r.err = i.r.performRefresh(
+			r.result, r.err = i.r.ConnectionInfo(
 				ctx, i.connName, i.key, i.useIAMAuthNDial)
 		}
 

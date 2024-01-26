@@ -281,21 +281,21 @@ func genVerifyPeerCertificateFunc(cn instance.ConnName, pool *x509.CertPool) fun
 	}
 }
 
-// newRefresher creates a Refresher.
-func newRefresher(
+// NewConnInfoStore creates a Refresher.
+func NewConnInfoStore(
 	svc *sqladmin.Service,
 	ts oauth2.TokenSource,
 	dialerID string,
-) refresher {
-	return refresher{
+) ConnInfoStore {
+	return ConnInfoStore{
 		dialerID: dialerID,
 		client:   svc,
 		ts:       ts,
 	}
 }
 
-// refreshResult contains all the resulting data from the refresh operation.
-type refreshResult struct {
+// ConnectionInfo contains all the resulting data from the refresh operation.
+type ConnectionInfo struct {
 	ipAddrs      map[string]string
 	serverCaCert *x509.Certificate
 	version      string
@@ -303,9 +303,9 @@ type refreshResult struct {
 	expiry       time.Time
 }
 
-// refresher manages the SQL Admin API access to instance metadata and to
+// ConnInfoStore manages the SQL Admin API access to instance metadata and to
 // ephemeral certificates.
-type refresher struct {
+type ConnInfoStore struct {
 	// dialerID is the unique ID of the associated dialer.
 	dialerID string
 	client   *sqladmin.Service
@@ -315,16 +315,16 @@ type refresher struct {
 
 // performRefresh immediately performs a full refresh operation using the Cloud
 // SQL Admin API.
-func (r refresher) performRefresh(
+func (s ConnInfoStore) ConnectionInfo(
 	ctx context.Context, cn instance.ConnName, k *rsa.PrivateKey, iamAuthNDial bool,
-) (rr refreshResult, err error) {
+) (rr ConnectionInfo, err error) {
 
 	var refreshEnd trace.EndSpanFunc
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.RefreshConnection",
 		trace.AddInstanceName(cn.String()),
 	)
 	defer func() {
-		go trace.RecordRefreshResult(context.Background(), cn.String(), r.dialerID, err)
+		go trace.RecordRefreshResult(context.Background(), cn.String(), s.dialerID, err)
 		refreshEnd(err)
 	}()
 
@@ -336,7 +336,7 @@ func (r refresher) performRefresh(
 	mdC := make(chan mdRes, 1)
 	go func() {
 		defer close(mdC)
-		md, err := fetchMetadata(ctx, r.client, cn)
+		md, err := fetchMetadata(ctx, s.client, cn)
 		mdC <- mdRes{md, err}
 	}()
 
@@ -350,9 +350,9 @@ func (r refresher) performRefresh(
 		defer close(ecC)
 		var iamTS oauth2.TokenSource
 		if iamAuthNDial {
-			iamTS = r.ts
+			iamTS = s.ts
 		}
-		ec, err := fetchEphemeralCert(ctx, r.client, cn, k, iamTS)
+		ec, err := fetchEphemeralCert(ctx, s.client, cn, k, iamTS)
 		ecC <- ecRes{ec, err}
 	}()
 
@@ -361,7 +361,7 @@ func (r refresher) performRefresh(
 	select {
 	case r := <-mdC:
 		if r.err != nil {
-			return refreshResult{}, fmt.Errorf("failed to get instance: %w", r.err)
+			return ConnectionInfo{}, fmt.Errorf("failed to get instance: %w", r.err)
 		}
 		md = r.md
 	case <-ctx.Done():
@@ -369,7 +369,7 @@ func (r refresher) performRefresh(
 	}
 	if iamAuthNDial {
 		if vErr := supportsAutoIAMAuthN(md.version); vErr != nil {
-			return refreshResult{}, vErr
+			return ConnectionInfo{}, vErr
 		}
 	}
 
@@ -377,11 +377,11 @@ func (r refresher) performRefresh(
 	select {
 	case r := <-ecC:
 		if r.err != nil {
-			return refreshResult{}, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
+			return ConnectionInfo{}, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
 		}
 		ec = r.ec
 	case <-ctx.Done():
-		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
+		return ConnectionInfo{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
 	c := createTLSConfig(cn, md, ec)
@@ -390,7 +390,7 @@ func (r refresher) performRefresh(
 	if len(c.Certificates) > 0 {
 		expiry = c.Certificates[0].Leaf.NotAfter
 	}
-	return refreshResult{
+	return ConnectionInfo{
 		ipAddrs:      md.ipAddrs,
 		serverCaCert: md.serverCaCert,
 		version:      md.version,

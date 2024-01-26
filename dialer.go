@@ -398,8 +398,8 @@ func (d *Dialer) instance(cn instance.ConnName, useIAMAuthN *bool) connectionInf
 			if useIAMAuthN != nil {
 				useIAMAuthNDial = *useIAMAuthN
 			}
-			i = cloudsql.NewInstance(cn, d.sqladmin, d.key,
-				d.refreshTimeout, d.iamTokenSource, d.dialerID, useIAMAuthNDial)
+			s := cloudsql.NewConnInfoStore(d.sqladmin, d.iamTokenSource, d.dialerID)
+			i = cloudsql.NewInstance(cn, s, d.key, d.refreshTimeout, useIAMAuthNDial)
 			d.instances[cn] = i
 		}
 	}

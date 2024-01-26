@@ -16,107 +16,82 @@ package cloudsql
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"errors"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
-	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
-
-// genRSAKey generates an RSA key used for test.
-func genRSAKey() *rsa.PrivateKey {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		panic(err) // unexpected, so just panic if it happens
-	}
-	return key
-}
 
 func testInstanceConnName() instance.ConnName {
 	cn, _ := instance.ParseConnName("my-project:my-region:my-instance")
 	return cn
 }
 
-// RSAKey is used for test only.
-var RSAKey = genRSAKey()
+type stubRefresher struct {
+	stubResult ConnectionInfo
+	stubError  error
+}
+
+func (s stubRefresher) ConnectionInfo(
+	context.Context, instance.ConnName, *rsa.PrivateKey, bool,
+) (ConnectionInfo, error) {
+	return s.stubResult, s.stubError
+}
 
 func TestInstanceEngineVersion(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	tests := []string{
-		"MYSQL_5_7", "POSTGRES_14", "SQLSERVER_2019_STANDARD", "MYSQL_8_0_18",
+	want := "SOME_DB_ENGINE_VERSION"
+	r := stubRefresher{
+		stubResult: ConnectionInfo{
+			version: want,
+		},
 	}
-	for _, wantEV := range tests {
-		inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion(wantEV))
-		client, cleanup, err := mock.NewSQLAdminService(
-			ctx,
-			mock.InstanceGetSuccess(inst, 1),
-			mock.CreateEphemeralSuccess(inst, 1),
+	i := NewInstance(
+		testInstanceConnName(), r, nil, 30*time.Second, false,
+	)
+
+	got, err := i.InstanceEngineVersion(context.Background())
+	if err != nil {
+		t.Fatalf("failed to retrieve engine version: %v", err)
+	}
+	if want != got {
+		t.Errorf(
+			"InstanceEngineVersion(%s) failed: want %v, got %v",
+			want, got, err,
 		)
-		if err != nil {
-			t.Fatalf("%s", err)
-		}
-		defer func() {
-			if err := cleanup(); err != nil {
-				t.Fatalf("%v", err)
-			}
-		}()
-		i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", false)
-		if err != nil {
-			t.Fatalf("failed to init instance: %v", err)
-		}
-
-		gotEV, err := i.InstanceEngineVersion(ctx)
-		if err != nil {
-			t.Fatalf("failed to retrieve engine version: %v", err)
-		}
-		if wantEV != gotEV {
-			t.Errorf("InstanceEngineVersion(%s) failed: want %v, got %v", wantEV, gotEV, err)
-		}
-
 	}
 }
 
 func TestConnectInfo(t *testing.T) {
-	ctx := context.Background()
 	wantAddr := "0.0.0.0"
-	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithPublicIP(wantAddr))
-	client, cleanup, err := mock.NewSQLAdminService(
-		ctx,
-		mock.InstanceGetSuccess(inst, 1),
-		mock.CreateEphemeralSuccess(inst, 1),
-	)
-	if err != nil {
-		t.Fatalf("%s", err)
+	wantServerName := "my-project:my-region:my-instance"
+
+	r := stubRefresher{
+		stubResult: ConnectionInfo{
+			ipAddrs: map[string]string{PublicIP: wantAddr},
+			conf: &tls.Config{
+				ServerName: wantServerName,
+			},
+		},
 	}
-	defer func() {
-		if err := cleanup(); err != nil {
-			t.Fatalf("%v", err)
-		}
-	}()
+	i := NewInstance(testInstanceConnName(), r, nil, 30*time.Second, false)
 
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", false)
-
-	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, PublicIP)
+	gotAddr, gotTLSCfg, err := i.ConnectInfo(context.Background(), PublicIP)
 	if err != nil {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
-
 	if gotAddr != wantAddr {
 		t.Fatalf(
-			"ConnectInfo returned unexpected IP address, want = %v, got = %v",
+			"Unexpected IP address, want = %v, got = %v",
 			wantAddr, gotAddr,
 		)
 	}
-
-	wantServerName := "my-project:my-region:my-instance"
 	if gotTLSCfg.ServerName != wantServerName {
 		t.Fatalf(
-			"ConnectInfo return unexpected server name in TLS Config, want = %v, got = %v",
+			"Unexpected server name in TLS Config, want = %v, got = %v",
 			wantServerName, gotTLSCfg.ServerName,
 		)
 	}
@@ -125,49 +100,32 @@ func TestConnectInfo(t *testing.T) {
 func TestConnectInfoAutoIP(t *testing.T) {
 	tcs := []struct {
 		desc   string
-		ips    []mock.FakeCSQLInstanceOption
+		ips    map[string]string
 		wantIP string
 	}{
 		{
 			desc: "when public IP is enabled",
-			ips: []mock.FakeCSQLInstanceOption{
-				mock.WithPublicIP("8.8.8.8"),
-				mock.WithPrivateIP("10.0.0.1"),
+			ips: map[string]string{
+				PublicIP:  "8.8.8.8",
+				PrivateIP: "10.0.0.1",
 			},
 			wantIP: "8.8.8.8",
 		},
 		{
 			desc: "when only private IP is enabled",
-			ips: []mock.FakeCSQLInstanceOption{
-				mock.WithPrivateIP("10.0.0.1"),
+			ips: map[string]string{
+				PrivateIP: "10.0.0.1",
 			},
 			wantIP: "10.0.0.1",
 		},
 	}
-
 	for _, tc := range tcs {
-		var opts []mock.FakeCSQLInstanceOption
-		opts = append(opts, mock.WithNoIPAddrs())
-		opts = append(opts, tc.ips...)
-		inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", opts...)
-		client, cleanup, err := mock.NewSQLAdminService(
-			context.Background(),
-			mock.InstanceGetSuccess(inst, 1),
-			mock.CreateEphemeralSuccess(inst, 1),
-		)
-		if err != nil {
-			t.Fatalf("%s", err)
+		r := stubRefresher{
+			stubResult: ConnectionInfo{
+				ipAddrs: tc.ips,
+			},
 		}
-		defer func() {
-			if cErr := cleanup(); cErr != nil {
-				t.Fatalf("%v", cErr)
-			}
-		}()
-
-		i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", false)
-		if err != nil {
-			t.Fatalf("failed to create mock instance: %v", err)
-		}
+		i := NewInstance(testInstanceConnName(), r, nil, 30*time.Second, false)
 
 		got, _, err := i.ConnectInfo(context.Background(), AutoIP)
 		if err != nil {
@@ -176,7 +134,7 @@ func TestConnectInfoAutoIP(t *testing.T) {
 
 		if got != tc.wantIP {
 			t.Fatalf(
-				"ConnectInfo returned unexpected IP address, want = %v, got = %v",
+				"Unexpected IP address, want = %v, got = %v",
 				tc.wantIP, got,
 			)
 		}
@@ -184,44 +142,37 @@ func TestConnectInfoAutoIP(t *testing.T) {
 }
 
 func TestConnectInfoErrors(t *testing.T) {
-	ctx := context.Background()
-
-	client, cleanup, err := mock.NewSQLAdminService(ctx)
-	if err != nil {
-		t.Fatalf("%s", err)
+	r := stubRefresher{
+		stubError: errors.New("refresh failed"),
+		stubResult: ConnectionInfo{
+			ipAddrs: map[string]string{
+				PublicIP: "8.8.8.8", // no private IP
+			},
+		},
 	}
-	defer cleanup()
+	i := NewInstance(testInstanceConnName(), r, nil, 0, false)
 
-	// Use a timeout that should fail instantly
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 0, nil, "", false)
-
-	_, _, err = i.ConnectInfo(ctx, PublicIP)
+	_, _, err := i.ConnectInfo(context.Background(), PublicIP)
 	var wantErr *errtype.DialError
 	if !errors.As(err, &wantErr) {
-		t.Fatalf("when connect info fails, want = %T, got = %v", wantErr, err)
+		t.Fatalf("want = %T, got = %v", wantErr, err)
 	}
 
 	// when client asks for wrong IP address type
-	gotAddr, _, err := i.ConnectInfo(ctx, PrivateIP)
+	_, _, err = i.ConnectInfo(context.Background(), PrivateIP)
 	if err == nil {
-		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", gotAddr)
+		t.Fatalf("ConnectInfo should fail with missing private IP")
 	}
 }
 
 func TestClose(t *testing.T) {
 	ctx := context.Background()
 
-	client, cleanup, err := mock.NewSQLAdminService(ctx)
-	if err != nil {
-		t.Fatalf("%s", err)
-	}
-	defer cleanup()
+	r := stubRefresher{}
+	i := NewInstance(testInstanceConnName(), r, nil, 30, false)
+	_ = i.Close() // all future calls should fail
 
-	// Set up an instance and then close it immediately
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 30, nil, "", false)
-	i.Close()
-
-	_, _, err = i.ConnectInfo(ctx, PublicIP)
+	_, _, err := i.ConnectInfo(ctx, PublicIP)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
@@ -272,19 +223,9 @@ func TestRefreshDuration(t *testing.T) {
 }
 
 func TestContextCancelled(t *testing.T) {
-	ctx := context.Background()
-
-	client, cleanup, err := mock.NewSQLAdminService(ctx)
-	if err != nil {
-		t.Fatalf("%s", err)
-	}
-	defer cleanup()
-
 	// Set up an instance and then close it immediately
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 30, nil, "", false)
-	if err != nil {
-		t.Fatalf("failed to initialize Instance: %v", err)
-	}
+	r := stubRefresher{}
+	i := NewInstance(testInstanceConnName(), r, nil, 30, false)
 	i.Close()
 
 	// grab the current value of next before scheduling another refresh
@@ -302,6 +243,8 @@ func TestContextCancelled(t *testing.T) {
 	// if scheduleRefresh returns without scheduling another one,
 	// i.next should be untouched and remain the same pointer value
 	if otherNext != next {
-		t.Fatalf("refresh did not return after a closed context. next pointer changed: want = %p, got = %p", next, i.next)
+		t.Fatalf(
+			"refresh did not return after a closed context."+
+				" next pointer changed: want = %p, got = %p", next, i.next)
 	}
 }
