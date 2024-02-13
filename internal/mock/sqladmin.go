@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -129,7 +129,7 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 		reqMethod: http.MethodGet,
 		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s/connectSettings", i.project, i.name),
 		reqCt:     ct,
-		handle: func(resp http.ResponseWriter, req *http.Request) {
+		handle: func(resp http.ResponseWriter, _ *http.Request) {
 			b, err := db.MarshalJSON()
 			if err != nil {
 				http.Error(resp, err.Error(), http.StatusInternalServerError)
@@ -154,7 +154,7 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 		reqCt:     ct,
 		handle: func(resp http.ResponseWriter, req *http.Request) {
 			// Read the body from the request.
-			b, err := ioutil.ReadAll(req.Body)
+			b, err := io.ReadAll(req.Body)
 			defer req.Body.Close()
 			if err != nil {
 				http.Error(resp, fmt.Errorf("unable to read body: %w", err).Error(), http.StatusBadRequest)

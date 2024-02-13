@@ -78,7 +78,7 @@ func TestPostgresPgxConnect(t *testing.T) {
 		t.Fatalf("failed to parse pgx config: %v", err)
 	}
 
-	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
+	config.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 		return d.Dial(ctx, postgresConnName)
 	}
 
@@ -115,7 +115,7 @@ func TestPostgresConnectWithIAMUser(t *testing.T) {
 		t.Fatalf("failed to initiate Dialer: %v", err)
 	}
 	defer d.Close()
-	config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
+	config.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 		return d.Dial(ctx, postgresConnName)
 	}
 
@@ -326,7 +326,7 @@ func TestPostgresAuthentication(t *testing.T) {
 				t.Fatalf("failed to parse pgx config: %v", err)
 			}
 
-			config.DialFunc = func(ctx context.Context, network string, instance string) (net.Conn, error) {
+			config.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 				return d.Dial(ctx, postgresConnName)
 			}
 

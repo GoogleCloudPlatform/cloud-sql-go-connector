@@ -283,7 +283,7 @@ func TestDialerWithCustomDialFunc(t *testing.T) {
 	}
 	d, err := NewDialer(context.Background(),
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		WithDialFunc(func(context.Context, string, string) (net.Conn, error) {
 			return nil, errors.New("sentinel error")
 		}),
 	)
