@@ -60,7 +60,7 @@ func TestRefresh(t *testing.T) {
 		}
 	}()
 
-	r := newRefresher(client, nil, testDialerID)
+	r := newRefresher(nullLogger{}, client, nil, testDialerID)
 	rr, err := r.performRefresh(context.Background(), cn, RSAKey, false)
 	if err != nil {
 		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
@@ -108,7 +108,7 @@ func TestRefreshFailsFast(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := newRefresher(client, nil, testDialerID)
+	r := newRefresher(nullLogger{}, client, nil, testDialerID)
 	_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 	if err != nil {
 		t.Fatalf("expected no error, got = %v", err)
@@ -190,7 +190,7 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ts := &fakeTokenSource{responses: tc.resps}
-			r := newRefresher(client, ts, testDialerID)
+			r := newRefresher(nullLogger{}, client, ts, testDialerID)
 			rr, err := r.performRefresh(context.Background(), cn, RSAKey, true)
 			if err != nil {
 				t.Fatalf("want no error, got = %v", err)
@@ -236,7 +236,7 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ts := &fakeTokenSource{responses: tc.resps}
-			r := newRefresher(client, ts, testDialerID)
+			r := newRefresher(nullLogger{}, client, ts, testDialerID)
 			_, err := r.performRefresh(context.Background(), cn, RSAKey, true)
 			if err == nil {
 				t.Fatalf("expected get failed error, got = %v", err)
@@ -296,7 +296,7 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 			}
 			defer cleanup()
 
-			r := newRefresher(client, nil, testDialerID)
+			r := newRefresher(nullLogger{}, client, nil, testDialerID)
 			_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 			if !errors.As(err, &tc.wantErr) {
 				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
@@ -361,7 +361,7 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 			}
 			defer cleanup()
 
-			r := newRefresher(client, nil, testDialerID)
+			r := newRefresher(nullLogger{}, client, nil, testDialerID)
 			_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 			if !errors.As(err, &tc.wantErr) {
 				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
@@ -426,7 +426,7 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		}
 		defer cleanup()
 
-		r := newRefresher(client, nil, testDialerID)
+		r := newRefresher(nullLogger{}, client, nil, testDialerID)
 		_, err = r.performRefresh(context.Background(), cn, RSAKey, false)
 
 		if !errors.As(err, &tc.wantErr) {
@@ -453,7 +453,7 @@ func TestRefreshBuildsTLSConfig(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := newRefresher(client, nil, testDialerID)
+	r := newRefresher(nullLogger{}, client, nil, testDialerID)
 	rr, err := r.performRefresh(context.Background(), cn, RSAKey, false)
 	if err != nil {
 		t.Fatalf("expected no error, got = %v", err)

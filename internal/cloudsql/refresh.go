@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
@@ -283,12 +284,14 @@ func genVerifyPeerCertificateFunc(cn instance.ConnName, pool *x509.CertPool) fun
 
 // newRefresher creates a Refresher.
 func newRefresher(
+	l debug.Logger,
 	svc *sqladmin.Service,
 	ts oauth2.TokenSource,
 	dialerID string,
 ) refresher {
 	return refresher{
 		dialerID: dialerID,
+		logger:   l,
 		client:   svc,
 		ts:       ts,
 	}
@@ -308,6 +311,7 @@ type refreshResult struct {
 type refresher struct {
 	// dialerID is the unique ID of the associated dialer.
 	dialerID string
+	logger   debug.Logger
 	client   *sqladmin.Service
 	// ts is the TokenSource used for IAM DB AuthN.
 	ts oauth2.TokenSource

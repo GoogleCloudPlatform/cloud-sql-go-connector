@@ -17,11 +17,12 @@ package cloudsqlconn
 import (
 	"context"
 	"crypto/rsa"
-	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/oauth2"
@@ -40,6 +41,7 @@ type dialerConfig struct {
 	dialFunc               func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout         time.Duration
 	useIAMAuthN            bool
+	logger                 debug.Logger
 	iamLoginTokenSource    oauth2.TokenSource
 	useragents             []string
 	setCredentials         bool
@@ -63,7 +65,7 @@ func WithOptions(opts ...Option) Option {
 // authentication.
 func WithCredentialsFile(filename string) Option {
 	return func(d *dialerConfig) {
-		b, err := ioutil.ReadFile(filename)
+		b, err := os.ReadFile(filename)
 		if err != nil {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
@@ -206,6 +208,14 @@ func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn
 func WithIAMAuthN() Option {
 	return func(d *dialerConfig) {
 		d.useIAMAuthN = true
+	}
+}
+
+// WithDebugLogger configures a debug lgoger for reporting on internal
+// operations. By default the debug logger is disabled.
+func WithDebugLogger(l debug.Logger) Option {
+	return func(d *dialerConfig) {
+		d.logger = l
 	}
 }
 
