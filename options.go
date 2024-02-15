@@ -179,6 +179,14 @@ func WithAdminAPIEndpoint(url string) Option {
 	}
 }
 
+// WithUniverseDomain configures the underlying SQL Admin API client to use
+// the provided universe domain.
+func WithUniverseDomain(ud string) Option {
+	return func(d *dialerConfig) {
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithUniverseDomain(ud))
+	}
+}
+
 // WithQuotaProject returns an Option that specifies the project used for quota and billing purposes.
 func WithQuotaProject(p string) Option {
 	return func(cfg *dialerConfig) {
