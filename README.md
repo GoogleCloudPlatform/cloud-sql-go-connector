@@ -384,7 +384,7 @@ As OpenTelemetry has now reached feature parity with OpenCensus, the migration
 from OpenCensus to OpenTelemetry is strongly encouraged.
 [OpenTelemetry bridge](https://github.com/open-telemetry/opentelemetry-go/tree/main/bridge/opencensus)
 can be leveraged to migrate to OpenTelemetry without the need of replacing the
-OpenCensus APIs in this library. Example code is shown below for migrating an 
+OpenCensus APIs in this library. Example code is shown below for migrating an
 application using the OpenTelemetry bridge for traces.
 
 ```golang
@@ -427,6 +427,39 @@ It shouldn't impact database operations.
 [exporter]: https://opencensus.io/exporters/
 [Cloud Monitoring]: https://cloud.google.com/monitoring
 [Cloud Trace]: https://cloud.google.com/trace
+
+### Debug Logging
+
+The Go Connector supports optional debug logging to help diagnose problems with
+the background certificate refresh. To enable it, provide a logger that
+implements the `debug.Logger` interface when initializing the Dialer.
+
+For example:
+
+``` go
+import (
+    "context"
+    "net"
+
+    "cloud.google.com/go/cloudsqlconn"
+)
+
+type myLogger struct{}
+
+func (l *myLogger) Debugf(format string, args ...interface{}) {
+    // Log as you like here
+}
+
+func connect() {
+    l := &myLogger{}
+
+    d, err := NewDialer(
+        context.Background(),
+        cloudsqlconn.WithDebugLogger(l),
+    )
+    // use dialer as usual...
+}
+```
 
 ## Support policy
 

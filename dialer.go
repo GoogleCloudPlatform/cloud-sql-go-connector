@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
@@ -90,8 +91,8 @@ type Dialer struct {
 	instances      map[instance.ConnName]connectionInfoCache
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
-
-	sqladmin *sqladmin.Service
+	sqladmin       *sqladmin.Service
+	logger         debug.Logger
 
 	// defaultDialConfig holds the constructor level DialOptions, so that it
 	// can be copied and mutated by the Dial function.
@@ -114,6 +115,10 @@ var (
 	errUseIAMTokenSource = errors.New("use WithIAMAuthNTokenSources instead of WithTokenSource be used when IAM AuthN is enabled")
 )
 
+type nullLogger struct{}
+
+func (nullLogger) Debugf(_ string, _ ...interface{}) {}
+
 // NewDialer creates a new Dialer.
 //
 // Initial calls to NewDialer make take longer than normal because generation of an
@@ -123,6 +128,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg := &dialerConfig{
 		refreshTimeout: cloudsql.RefreshTimeout,
 		dialFunc:       proxy.Dial,
+		logger:         nullLogger{},
 		useragents:     []string{userAgent},
 	}
 	for _, opt := range opts {
@@ -186,6 +192,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		key:               cfg.rsaKey,
 		refreshTimeout:    cfg.refreshTimeout,
 		sqladmin:          client,
+		logger:            cfg.logger,
 		defaultDialConfig: dc,
 		dialerID:          uuid.New().String(),
 		iamTokenSource:    cfg.iamLoginTokenSource,
@@ -225,6 +232,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	if err != nil {
 		d.lock.Lock()
 		defer d.lock.Unlock()
+		d.logger.Debugf("[%v] Removing connection info from cache", cn.String())
 		// Stop all background refreshes
 		i.Close()
 		delete(d.instances, cn)
@@ -238,13 +246,14 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	// The TLS handshake will not fail on an expired client certificate. It's
 	// not until the first read where the client cert error will be surfaced.
 	// So check that the certificate is valid before proceeding.
-	if invalidClientCert(tlsConfig) {
+	if invalidClientCert(cn, d.logger, tlsConfig) {
 		i.ForceRefresh()
 		// Block on refreshed connection info
 		addr, tlsConfig, err = i.ConnectInfo(ctx, cfg.ipType)
 		if err != nil {
 			d.lock.Lock()
 			defer d.lock.Unlock()
+			d.logger.Debugf("[%v] Removing connection info from cache", cn.String())
 			// Stop all background refreshes
 			i.Close()
 			delete(d.instances, cn)
@@ -260,8 +269,10 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	if cfg.dialFunc != nil {
 		f = cfg.dialFunc
 	}
+	d.logger.Debugf("[%v] Dialing %v", cn.String(), addr)
 	conn, err = f(ctx, "tcp", addr)
 	if err != nil {
+		d.logger.Debugf("[%v] Dialing %v failed: %v", cn.String(), addr, err)
 		// refresh the instance info in case it caused the connection failure
 		i.ForceRefresh()
 		return nil, errtype.NewDialError("failed to dial", cn.String(), err)
@@ -276,7 +287,9 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	}
 
 	tlsConn := tls.Client(conn, tlsConfig)
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
+	err = tlsConn.HandshakeContext(ctx)
+	if err != nil {
+		d.logger.Debugf("[%v] TLS handshake failed: %v", cn.String(), err)
 		// refresh the instance info in case it caused the handshake failure
 		i.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
@@ -296,7 +309,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	}), nil
 }
 
-func invalidClientCert(c *tls.Config) bool {
+func invalidClientCert(cn instance.ConnName, l debug.Logger, c *tls.Config) bool {
 	// The following conditions should be impossible (no certs, nil leaf), but
 	// just in case there's an unknown edge case, check assumptions before
 	// proceeding.
@@ -306,7 +319,15 @@ func invalidClientCert(c *tls.Config) bool {
 	if c.Certificates[0].Leaf == nil {
 		return true
 	}
-	return time.Now().After(c.Certificates[0].Leaf.NotAfter)
+	now := time.Now()
+	notAfter := c.Certificates[0].Leaf.NotAfter
+	l.Debugf(
+		"[%v] Now = %v, Current cert expiration = %v",
+		cn.String(),
+		now.UTC().Format(time.RFC3339),
+		notAfter.Format(time.RFC3339),
+	)
+	return now.After(notAfter)
 }
 
 // EngineVersion returns the engine type and version for the instance
@@ -398,8 +419,14 @@ func (d *Dialer) instance(cn instance.ConnName, useIAMAuthN *bool) connectionInf
 			if useIAMAuthN != nil {
 				useIAMAuthNDial = *useIAMAuthN
 			}
-			i = cloudsql.NewInstance(cn, d.sqladmin, d.key,
-				d.refreshTimeout, d.iamTokenSource, d.dialerID, useIAMAuthNDial)
+			d.logger.Debugf("[%v] Connection info added to cache", cn.String())
+			i = cloudsql.NewInstance(
+				cn,
+				d.logger,
+				d.sqladmin, d.key,
+				d.refreshTimeout, d.iamTokenSource,
+				d.dialerID, useIAMAuthNDial,
+			)
 			d.instances[cn] = i
 		}
 	}

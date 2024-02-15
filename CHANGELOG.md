@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.7.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.6.0...v1.7.0) (2024-02-13)
+
+
+### Features
+
+* add support for debug logging ([#726](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/726)) ([d8ca89e](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/d8ca89e4403e2e3cf6ac278a19b4d93b77797ec6))
+* add support for Go 1.22 ([#723](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/723)) ([ebe31dc](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/ebe31dcaf2ec215470ce3b224732f4ff6282ba22))
+
+
+### Bug Fixes
+
+* ensure background refresh is closed cleanly ([#715](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/715)) ([0b4c342](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/0b4c3420bb5158cab63c51158e109b3bea926b59))
+
 ## [1.6.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.5.2...v1.6.0) (2024-01-17)
 
 

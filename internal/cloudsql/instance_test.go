@@ -27,6 +27,10 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
 
+type nullLogger struct{}
+
+func (nullLogger) Debugf(string, ...interface{}) {}
+
 // genRSAKey generates an RSA key used for test.
 func genRSAKey() *rsa.PrivateKey {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -65,7 +69,10 @@ func TestInstanceEngineVersion(t *testing.T) {
 				t.Fatalf("%v", err)
 			}
 		}()
-		i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", false)
+		i := NewInstance(
+			testInstanceConnName(), nullLogger{}, client,
+			RSAKey, 30*time.Second, nil, "", false,
+		)
 		if err != nil {
 			t.Fatalf("failed to init instance: %v", err)
 		}
@@ -99,7 +106,10 @@ func TestConnectInfo(t *testing.T) {
 		}
 	}()
 
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", false)
+	i := NewInstance(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 30*time.Second, nil, "", false,
+	)
 
 	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, PublicIP)
 	if err != nil {
@@ -164,7 +174,10 @@ func TestConnectInfoAutoIP(t *testing.T) {
 			}
 		}()
 
-		i := NewInstance(testInstanceConnName(), client, RSAKey, 30*time.Second, nil, "", false)
+		i := NewInstance(
+			testInstanceConnName(), nullLogger{}, client,
+			RSAKey, 30*time.Second, nil, "", false,
+		)
 		if err != nil {
 			t.Fatalf("failed to create mock instance: %v", err)
 		}
@@ -193,7 +206,10 @@ func TestConnectInfoErrors(t *testing.T) {
 	defer cleanup()
 
 	// Use a timeout that should fail instantly
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 0, nil, "", false)
+	i := NewInstance(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 0, nil, "", false,
+	)
 
 	_, _, err = i.ConnectInfo(ctx, PublicIP)
 	var wantErr *errtype.DialError
@@ -218,7 +234,10 @@ func TestClose(t *testing.T) {
 	defer cleanup()
 
 	// Set up an instance and then close it immediately
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 30, nil, "", false)
+	i := NewInstance(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 30*time.Second, nil, "", false,
+	)
 	i.Close()
 
 	_, _, err = i.ConnectInfo(ctx, PublicIP)
@@ -281,7 +300,10 @@ func TestContextCancelled(t *testing.T) {
 	defer cleanup()
 
 	// Set up an instance and then close it immediately
-	i := NewInstance(testInstanceConnName(), client, RSAKey, 30, nil, "", false)
+	i := NewInstance(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 30*time.Second, nil, "", false,
+	)
 	if err != nil {
 		t.Fatalf("failed to initialize Instance: %v", err)
 	}

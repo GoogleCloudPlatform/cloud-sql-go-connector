@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"golang.org/x/oauth2"
@@ -90,6 +91,7 @@ type Instance struct {
 	openConns uint64
 
 	connName instance.ConnName
+	logger   debug.Logger
 	key      *rsa.PrivateKey
 
 	// refreshTimeout sets the maximum duration a refresh cycle can run
@@ -118,6 +120,7 @@ type Instance struct {
 // NewInstance initializes a new Instance given an instance connection name
 func NewInstance(
 	cn instance.ConnName,
+	l debug.Logger,
 	client *sqladmin.Service,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
@@ -128,9 +131,11 @@ func NewInstance(
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &Instance{
 		connName: cn,
+		logger:   l,
 		key:      key,
 		l:        rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
 		r: newRefresher(
+			l,
 			client,
 			ts,
 			dialerID,
@@ -293,10 +298,18 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 	r.timer = time.AfterFunc(d, func() {
 		// instance has been closed, don't schedule anything
 		if err := i.ctx.Err(); err != nil {
+			i.logger.Debugf(
+				"[%v] Instance is closed, stopping refresh operations",
+				i.connName.String(),
+			)
 			r.err = err
 			close(r.ready)
 			return
 		}
+		i.logger.Debugf(
+			"[%v] Connection info refresh operation started",
+			i.connName.String(),
+		)
 
 		ctx, cancel := context.WithTimeout(i.ctx, i.refreshTimeout)
 		defer cancel()
@@ -314,6 +327,24 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			r.result, r.err = i.r.performRefresh(
 				ctx, i.connName, i.key, i.useIAMAuthNDial)
 		}
+		switch r.err {
+		case nil:
+			i.logger.Debugf(
+				"[%v] Connection info refresh operation complete",
+				i.connName.String(),
+			)
+			i.logger.Debugf(
+				"[%v] Current certificate expiration = %v",
+				i.connName.String(),
+				r.result.expiry.UTC().Format(time.RFC3339),
+			)
+		default:
+			i.logger.Debugf(
+				"[%v] Connection info refresh operation failed, err = %v",
+				i.connName.String(),
+				r.err,
+			)
+		}
 
 		close(r.ready)
 
@@ -324,6 +355,10 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 
 		// if failed, scheduled the next refresh immediately
 		if r.err != nil {
+			i.logger.Debugf(
+				"[%v] Connection info refresh operation scheduled immediately",
+				i.connName.String(),
+			)
 			i.next = i.scheduleRefresh(0)
 			// If the latest refreshOperation is bad, avoid replacing the
 			// used refreshOperation while it's still valid and potentially
@@ -341,6 +376,12 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		// the future
 		i.cur = r
 		t := refreshDuration(time.Now(), i.cur.result.expiry)
+		i.logger.Debugf(
+			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
+			i.connName.String(),
+			time.Now().Add(t).UTC().Format(time.RFC3339),
+			t.Round(time.Second),
+		)
 		i.next = i.scheduleRefresh(t)
 	})
 	return r
