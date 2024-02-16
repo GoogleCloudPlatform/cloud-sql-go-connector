@@ -295,6 +295,10 @@ func TestUniverseDomainErrors(t *testing.T) {
 			opts: WithOptions(WithUniverseDomain("test-universe.test")),
 		},
 		{
+			desc: "When service domain from admin api does not match credential domain",
+			opts: WithOptions(WithAdminAPIEndpoint("https:sqladmin.test-universe.test")),
+		},
+		{
 			desc: "When default service domain does not match credential domain",
 			opts: WithOptions(WithCredentialsJSON(fakeTPCServiceAccount)),
 		},
