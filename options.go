@@ -192,7 +192,7 @@ func WithAdminAPIEndpoint(url string) Option {
 }
 
 // WithUniverseDomain configures the underlying SQL Admin API client to use
-// the provided universe domain.
+// the provided universe domain. Enables Trusted Partner Cloud (TPC).
 func WithUniverseDomain(ud string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithUniverseDomain(ud))
