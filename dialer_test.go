@@ -320,15 +320,15 @@ func TestUniverseDomainErrors(t *testing.T) {
 		opts Option
 	}{
 		{
-			desc: "When service domain does match default credential domain",
+			desc: "When universe domain does not match GDU credentials",
 			opts: WithOptions(WithUniverseDomain("test-universe.test")),
 		},
 		{
-			desc: "When service domain from admin api does not match credential domain",
+			desc: "When universe domain from admin api does not match GDU credentials",
 			opts: WithOptions(WithAdminAPIEndpoint("https:sqladmin.test-universe.test")),
 		},
 		{
-			desc: "When default service domain does not match credential domain",
+			desc: "When GDU does not match credential domain",
 			opts: WithOptions(WithCredentialsJSON(fakeTPCServiceAccount)),
 		},
 	}
