@@ -44,6 +44,8 @@ type dialerConfig struct {
 	logger                 debug.Logger
 	iamLoginTokenSource    oauth2.TokenSource
 	useragents             []string
+	authUniverseDomain     string
+	serviceUniverseDomain  string
 	setCredentials         bool
 	setTokenSource         bool
 	setIAMAuthNTokenSource bool
@@ -84,6 +86,12 @@ func WithCredentialsJSON(b []byte) Option {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
 		}
+		ud, err := c.GetUniverseDomain()
+		if err != nil {
+			d.err = errtype.NewConfigError(err.Error(), "n/a")
+			return
+		}
+		d.authUniverseDomain = ud
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentials(c))
 
 		// Create another set of credentials scoped to login only
@@ -178,6 +186,7 @@ func WithHTTPClient(client *http.Client) Option {
 func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithEndpoint(url))
+		d.serviceUniverseDomain = ""
 	}
 }
 
@@ -186,6 +195,7 @@ func WithAdminAPIEndpoint(url string) Option {
 func WithUniverseDomain(ud string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithUniverseDomain(ud))
+		d.serviceUniverseDomain = ud
 	}
 }
 
