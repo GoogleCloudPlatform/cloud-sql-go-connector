@@ -292,11 +292,11 @@ func TestUniverseDomain(t *testing.T) {
 	}{
 		{
 			desc: "When universe domain matches GDU",
-			opts: WithOptions(WithUniverseDomain("googleapis.com")),
+			opts: WithOptions(WithUniverseDomain("googleapis.com"), WithCredentialsJSON(fakeServiceAccount)),
 		},
 		{
 			desc: "When universe domain from admin api matches GDU",
-			opts: WithOptions(WithAdminAPIEndpoint("https:sqladmin.googleapis.com")),
+			opts: WithOptions(WithAdminAPIEndpoint("https:sqladmin.googleapis.com"), WithCredentialsJSON(fakeServiceAccount)),
 		},
 		{
 			desc: "When TPC universe matches TPC credential domain",
