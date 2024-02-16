@@ -190,6 +190,20 @@ var fakeServiceAccount = []byte(`{
   "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/email%40example.com"
 }`)
 
+var fakeTPCServiceAccount = []byte(`{
+	"type": "service_account",
+	"project_id": "a-project-id",
+	"private_key_id": "a-private-key-id",
+	"private_key": "a-private-key",
+	"client_email": "email@example.com",
+	"client_id": "12345",
+	"auth_uri": "https://accounts.google.com/o/oauth2/auth",
+	"token_uri": "https://oauth2.googleapis.com/token",
+	"auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+	"client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/email%40example.com",
+	"universe_domain": "test-universe.test"
+  }`)
+
 func TestIAMAuthn(t *testing.T) {
 	tcs := []struct {
 		desc         string
@@ -266,6 +280,32 @@ func TestIAMAuthNErrors(t *testing.T) {
 			t.Log(err)
 			if err == nil {
 				t.Fatalf("version = %v, want error, got nil", tc.version)
+			}
+		})
+	}
+}
+
+func TestUniverseDomainErrors(t *testing.T) {
+	tcs := []struct {
+		desc string
+		opts Option
+	}{
+		{
+			desc: "When service domain does match default credential domain",
+			opts: WithOptions(WithUniverseDomain("test-universe.test")),
+		},
+		{
+			desc: "When default service domain does not match credential domain",
+			opts: WithOptions(WithCredentialsJSON(fakeTPCServiceAccount)),
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			_, err := NewDialer(context.Background(), tc.opts)
+			t.Log(err)
+			if err == nil {
+				t.Fatalf("Wanted universe domain mismatch, want error, got nil")
 			}
 		})
 	}
