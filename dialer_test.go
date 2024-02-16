@@ -285,6 +285,35 @@ func TestIAMAuthNErrors(t *testing.T) {
 	}
 }
 
+func TestUniverseDomain(t *testing.T) {
+	tcs := []struct {
+		desc string
+		opts Option
+	}{
+		{
+			desc: "When universe domain matches GDU",
+			opts: WithOptions(WithUniverseDomain("googleapis.com")),
+		},
+		{
+			desc: "When universe domain from admin api matches GDU",
+			opts: WithOptions(WithAdminAPIEndpoint("https:sqladmin.googleapis.com")),
+		},
+		{
+			desc: "When TPC universe matches TPC credential domain",
+			opts: WithOptions(WithUniverseDomain("test-universe.test"), WithCredentialsJSON(fakeTPCServiceAccount)),
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			_, err := NewDialer(context.Background(), tc.opts)
+			if err != nil {
+				t.Fatalf("NewDialer failed with error = %v", err)
+			}
+		})
+	}
+}
+
 func TestUniverseDomainErrors(t *testing.T) {
 	tcs := []struct {
 		desc string
