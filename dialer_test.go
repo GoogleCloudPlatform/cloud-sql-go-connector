@@ -295,10 +295,6 @@ func TestUniverseDomain(t *testing.T) {
 			opts: WithOptions(WithUniverseDomain("googleapis.com"), WithCredentialsJSON(fakeServiceAccount)),
 		},
 		{
-			desc: "When universe domain from admin api matches GDU",
-			opts: WithOptions(WithAdminAPIEndpoint("https:sqladmin.googleapis.com"), WithCredentialsJSON(fakeServiceAccount)),
-		},
-		{
 			desc: "When TPC universe matches TPC credential domain",
 			opts: WithOptions(WithUniverseDomain("test-universe.test"), WithCredentialsJSON(fakeTPCServiceAccount)),
 		},
@@ -324,12 +320,12 @@ func TestUniverseDomainErrors(t *testing.T) {
 			opts: WithOptions(WithUniverseDomain("test-universe.test")),
 		},
 		{
-			desc: "When universe domain from admin api does not match GDU credentials",
-			opts: WithOptions(WithAdminAPIEndpoint("https:sqladmin.test-universe.test")),
-		},
-		{
 			desc: "When GDU does not match credential domain",
 			opts: WithOptions(WithCredentialsJSON(fakeTPCServiceAccount)),
+		},
+		{
+			desc: "WithUniverseDomain used alongside WithAdminAPIEndpoint",
+			opts: WithOptions(WithUniverseDomain("googleapis.com"), WithAdminAPIEndpoint("https://sqladmin.googleapis.com")),
 		},
 	}
 

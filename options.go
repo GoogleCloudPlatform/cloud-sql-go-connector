@@ -20,7 +20,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/debug"
@@ -47,6 +46,7 @@ type dialerConfig struct {
 	useragents             []string
 	authUniverseDomain     string
 	serviceUniverseDomain  string
+	setUniverseDomain      bool
 	setCredentials         bool
 	setTokenSource         bool
 	setIAMAuthNTokenSource bool
@@ -187,7 +187,7 @@ func WithHTTPClient(client *http.Client) Option {
 func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithEndpoint(url))
-		d.serviceUniverseDomain = strings.SplitN(url, ".", 2)[1]
+		d.serviceUniverseDomain = ""
 	}
 }
 
@@ -197,6 +197,7 @@ func WithUniverseDomain(ud string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithUniverseDomain(ud))
 		d.serviceUniverseDomain = ud
+		d.setUniverseDomain = true
 	}
 }
 
