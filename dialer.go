@@ -177,7 +177,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 
 	if cfg.setUniverseDomain && cfg.serviceUniverseDomain == "" {
-		return nil, errors.New("can not use WithAdminAPIEndpoint and WithUniverseDomain Options together. Use just WithAdminAPIEndpoint, it already contains the universe domain.")
+		return nil, errors.New("can not use WithAdminAPIEndpoint and WithUniverseDomain Options together. Use just WithAdminAPIEndpoint, it already contains the universe domain")
 	}
 	// we can not compare auth and service endpoint domains
 	// for certain Options (WithTokenSource, WithAdminAPIEndpoint)
