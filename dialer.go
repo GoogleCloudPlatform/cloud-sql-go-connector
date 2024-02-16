@@ -176,9 +176,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		cfg.rsaKey = key
 	}
 
-	// we can not compare auth and service endpoint domains
-	// for certain Options (WithTokenSource, WithAdminAPIEndpoint)
-	if cfg.authUniverseDomain != "" && cfg.serviceUniverseDomain != "" {
+	// we can not compare auth universe domain
+	// for certain Options (WithTokenSource)
+	if cfg.authUniverseDomain != "" {
 		if cfg.authUniverseDomain != cfg.serviceUniverseDomain {
 			return nil, fmt.Errorf("The configured service universe domain (%s) does not match the credential universe domain (%s)", cfg.serviceUniverseDomain, cfg.authUniverseDomain)
 		}

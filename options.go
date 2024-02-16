@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/debug"
@@ -186,7 +187,7 @@ func WithHTTPClient(client *http.Client) Option {
 func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithEndpoint(url))
-		d.serviceUniverseDomain = ""
+		d.serviceUniverseDomain = strings.SplitN(url, ".", 2)[1]
 	}
 }
 
