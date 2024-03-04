@@ -292,7 +292,10 @@ func TestUniverseDomain(t *testing.T) {
 	}{
 		{
 			desc: "When universe domain matches GDU",
-			opts: WithOptions(WithUniverseDomain("googleapis.com"), WithCredentialsJSON(fakeServiceAccount)),
+			opts: WithOptions(
+				WithUniverseDomain("googleapis.com"),
+				WithCredentialsJSON(fakeServiceAccount),
+			),
 		},
 		{
 			desc: "When TPC universe matches TPC credential domain",
