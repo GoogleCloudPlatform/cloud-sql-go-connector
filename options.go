@@ -46,6 +46,7 @@ type dialerConfig struct {
 	useragents             []string
 	authUniverseDomain     string
 	serviceUniverseDomain  string
+	setAdminAPIEndpoint    bool
 	setUniverseDomain      bool
 	setCredentials         bool
 	setTokenSource         bool
@@ -187,6 +188,7 @@ func WithHTTPClient(client *http.Client) Option {
 func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithEndpoint(url))
+		d.setAdminAPIEndpoint = true
 		d.serviceUniverseDomain = ""
 	}
 }
