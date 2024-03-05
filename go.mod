@@ -9,8 +9,8 @@ require (
 	github.com/jackc/pgx/v5 v5.5.3
 	github.com/microsoft/go-mssqldb v1.6.0
 	go.opencensus.io v0.24.0
-	golang.org/x/net v0.21.0
-	golang.org/x/oauth2 v0.17.0
+	golang.org/x/net v0.22.0
+	golang.org/x/oauth2 v0.18.0
 	golang.org/x/time v0.5.0
 	google.golang.org/api v0.168.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240304161311-37d4d3c04a78
@@ -43,9 +43,9 @@ require (
 	go.opentelemetry.io/otel v1.24.0 // indirect
 	go.opentelemetry.io/otel/metric v1.24.0 // indirect
 	go.opentelemetry.io/otel/trace v1.24.0 // indirect
-	golang.org/x/crypto v0.19.0 // indirect
+	golang.org/x/crypto v0.21.0 // indirect
 	golang.org/x/sync v0.6.0 // indirect
-	golang.org/x/sys v0.17.0 // indirect
+	golang.org/x/sys v0.18.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/protobuf v1.32.0 // indirect
