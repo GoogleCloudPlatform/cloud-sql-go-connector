@@ -182,8 +182,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 				"use WithAdminAPIEndpoint (it already contains the universe domain)",
 		)
 	}
-	// we can not compare auth and service endpoint domains
-	// for certain Options (WithTokenSource, WithAdminAPIEndpoint)
+
 	if cfg.credentialsUniverse != "" && cfg.serviceUniverse != "" {
 		if cfg.credentialsUniverse != cfg.serviceUniverse {
 			return nil, fmt.Errorf(
