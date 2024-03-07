@@ -44,6 +44,10 @@ type dialerConfig struct {
 	logger                 debug.Logger
 	iamLoginTokenSource    oauth2.TokenSource
 	useragents             []string
+	credentialsUniverse    string
+	serviceUniverse        string
+	setAdminAPIEndpoint    bool
+	setUniverseDomain      bool
 	setCredentials         bool
 	setTokenSource         bool
 	setIAMAuthNTokenSource bool
@@ -84,6 +88,12 @@ func WithCredentialsJSON(b []byte) Option {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
 		}
+		ud, err := c.GetUniverseDomain()
+		if err != nil {
+			d.err = errtype.NewConfigError(err.Error(), "n/a")
+			return
+		}
+		d.credentialsUniverse = ud
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentials(c))
 
 		// Create another set of credentials scoped to login only
@@ -178,6 +188,18 @@ func WithHTTPClient(client *http.Client) Option {
 func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithEndpoint(url))
+		d.setAdminAPIEndpoint = true
+		d.serviceUniverse = ""
+	}
+}
+
+// WithUniverseDomain configures the underlying SQL Admin API client to use
+// the provided universe domain. Enables Trusted Partner Cloud (TPC).
+func WithUniverseDomain(ud string) Option {
+	return func(d *dialerConfig) {
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithUniverseDomain(ud))
+		d.serviceUniverse = ud
+		d.setUniverseDomain = true
 	}
 }
 
