@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.7.0...v1.8.0) (2024-03-08)
+
+
+### Features
+
+* add support for TPC ([#732](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/732)) ([b7364d9](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/b7364d93cc93893b2af8eeda6cdf9cf36aaf9d67))
+
 ## [1.7.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.6.0...v1.7.0) (2024-02-13)
 
 
