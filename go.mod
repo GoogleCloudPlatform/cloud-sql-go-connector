@@ -5,7 +5,7 @@ go 1.20
 require (
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v4 v4.18.1
+	github.com/jackc/pgx/v4 v4.18.2
 	github.com/jackc/pgx/v5 v5.5.4
 	github.com/microsoft/go-mssqldb v1.7.0
 	go.opencensus.io v0.24.0
@@ -31,10 +31,10 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.2 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.2 // indirect
 	github.com/jackc/chunkreader/v2 v2.0.1 // indirect
-	github.com/jackc/pgconn v1.14.0 // indirect
+	github.com/jackc/pgconn v1.14.3 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
-	github.com/jackc/pgproto3/v2 v2.3.2 // indirect
+	github.com/jackc/pgproto3/v2 v2.3.3 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
 	github.com/jackc/pgtype v1.14.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.1 // indirect
