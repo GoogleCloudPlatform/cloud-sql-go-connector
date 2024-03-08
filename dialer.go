@@ -269,6 +269,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	// not until the first read where the client cert error will be surfaced.
 	// So check that the certificate is valid before proceeding.
 	if invalidClientCert(cn, d.logger, tlsConfig) {
+		d.logger.Debugf("[%v] Refreshing certificate now", cn.String())
 		i.ForceRefresh()
 		// Block on refreshed connection info
 		addr, tlsConfig, err = i.ConnectInfo(ctx, cfg.ipType)
@@ -343,13 +344,15 @@ func invalidClientCert(cn instance.ConnName, l debug.Logger, c *tls.Config) bool
 	}
 	now := time.Now()
 	notAfter := c.Certificates[0].Leaf.NotAfter
+	invalid := now.After(notAfter)
 	l.Debugf(
 		"[%v] Now = %v, Current cert expiration = %v",
 		cn.String(),
 		now.UTC().Format(time.RFC3339),
-		notAfter.Format(time.RFC3339),
+		notAfter.UTC().Format(time.RFC3339),
 	)
-	return now.After(notAfter)
+	l.Debugf("[%v] Cert is valid = %v", cn.String(), !invalid)
+	return invalid
 }
 
 // EngineVersion returns the engine type and version for the instance
