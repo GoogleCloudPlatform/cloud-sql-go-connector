@@ -297,15 +297,6 @@ func newRefresher(
 	}
 }
 
-// refreshResult contains all the resulting data from the refresh operation.
-type refreshResult struct {
-	ipAddrs      map[string]string
-	serverCaCert *x509.Certificate
-	version      string
-	conf         *tls.Config
-	expiry       time.Time
-}
-
 // refresher manages the SQL Admin API access to instance metadata and to
 // ephemeral certificates.
 type refresher struct {
@@ -317,11 +308,11 @@ type refresher struct {
 	ts oauth2.TokenSource
 }
 
-// performRefresh immediately performs a full refresh operation using the Cloud
+// ConnectionInfo immediately performs a full refresh operation using the Cloud
 // SQL Admin API.
-func (r refresher) performRefresh(
+func (r refresher) ConnectionInfo(
 	ctx context.Context, cn instance.ConnName, k *rsa.PrivateKey, iamAuthNDial bool,
-) (rr refreshResult, err error) {
+) (ci ConnectionInfo, err error) {
 
 	var refreshEnd trace.EndSpanFunc
 	ctx, refreshEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.RefreshConnection",
@@ -365,15 +356,15 @@ func (r refresher) performRefresh(
 	select {
 	case r := <-mdC:
 		if r.err != nil {
-			return refreshResult{}, fmt.Errorf("failed to get instance: %w", r.err)
+			return ConnectionInfo{}, fmt.Errorf("failed to get instance: %w", r.err)
 		}
 		md = r.md
 	case <-ctx.Done():
-		return rr, fmt.Errorf("refresh failed: %w", ctx.Err())
+		return ci, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 	if iamAuthNDial {
 		if vErr := supportsAutoIAMAuthN(md.version); vErr != nil {
-			return refreshResult{}, vErr
+			return ConnectionInfo{}, vErr
 		}
 	}
 
@@ -381,11 +372,11 @@ func (r refresher) performRefresh(
 	select {
 	case r := <-ecC:
 		if r.err != nil {
-			return refreshResult{}, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
+			return ConnectionInfo{}, fmt.Errorf("fetch ephemeral cert failed: %w", r.err)
 		}
 		ec = r.ec
 	case <-ctx.Done():
-		return refreshResult{}, fmt.Errorf("refresh failed: %w", ctx.Err())
+		return ConnectionInfo{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
 	c := createTLSConfig(cn, md, ec)
@@ -394,12 +385,12 @@ func (r refresher) performRefresh(
 	if len(c.Certificates) > 0 {
 		expiry = c.Certificates[0].Leaf.NotAfter
 	}
-	return refreshResult{
-		ipAddrs:      md.ipAddrs,
-		serverCaCert: md.serverCaCert,
-		version:      md.version,
-		conf:         c,
-		expiry:       expiry,
+	return ConnectionInfo{
+		addrs:        md.ipAddrs,
+		ServerCaCert: md.serverCaCert,
+		DBVersion:    md.version,
+		Conf:         c,
+		Expiry:       expiry,
 	}, nil
 }
 

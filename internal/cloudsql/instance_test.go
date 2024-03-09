@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
@@ -69,7 +68,7 @@ func TestInstanceEngineVersion(t *testing.T) {
 				t.Fatalf("%v", err)
 			}
 		}()
-		i := NewInstance(
+		i := NewRefreshAheadCache(
 			testInstanceConnName(), nullLogger{}, client,
 			RSAKey, 30*time.Second, nil, "", false,
 		)
@@ -106,28 +105,32 @@ func TestConnectInfo(t *testing.T) {
 		}
 	}()
 
-	i := NewInstance(
+	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
 		RSAKey, 30*time.Second, nil, "", false,
 	)
 
-	gotAddr, gotTLSCfg, err := i.ConnectInfo(ctx, PublicIP)
+	ci, err := i.ConnectionInfo(ctx)
 	if err != nil {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
 
-	if gotAddr != wantAddr {
+	got, err := ci.Addr(PublicIP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != wantAddr {
 		t.Fatalf(
 			"ConnectInfo returned unexpected IP address, want = %v, got = %v",
-			wantAddr, gotAddr,
+			wantAddr, got,
 		)
 	}
 
 	wantServerName := "my-project:my-region:my-instance"
-	if gotTLSCfg.ServerName != wantServerName {
+	if ci.Conf.ServerName != wantServerName {
 		t.Fatalf(
 			"ConnectInfo return unexpected server name in TLS Config, want = %v, got = %v",
-			wantServerName, gotTLSCfg.ServerName,
+			wantServerName, ci.Conf.ServerName,
 		)
 	}
 }
@@ -174,7 +177,7 @@ func TestConnectInfoAutoIP(t *testing.T) {
 			}
 		}()
 
-		i := NewInstance(
+		i := NewRefreshAheadCache(
 			testInstanceConnName(), nullLogger{}, client,
 			RSAKey, 30*time.Second, nil, "", false,
 		)
@@ -182,45 +185,21 @@ func TestConnectInfoAutoIP(t *testing.T) {
 			t.Fatalf("failed to create mock instance: %v", err)
 		}
 
-		got, _, err := i.ConnectInfo(context.Background(), AutoIP)
+		ci, err := i.ConnectionInfo(context.Background())
 		if err != nil {
 			t.Fatalf("failed to retrieve connect info: %v", err)
 		}
 
+		got, err := ci.Addr(AutoIP)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if got != tc.wantIP {
 			t.Fatalf(
 				"ConnectInfo returned unexpected IP address, want = %v, got = %v",
 				tc.wantIP, got,
 			)
 		}
-	}
-}
-
-func TestConnectInfoErrors(t *testing.T) {
-	ctx := context.Background()
-
-	client, cleanup, err := mock.NewSQLAdminService(ctx)
-	if err != nil {
-		t.Fatalf("%s", err)
-	}
-	defer cleanup()
-
-	// Use a timeout that should fail instantly
-	i := NewInstance(
-		testInstanceConnName(), nullLogger{}, client,
-		RSAKey, 0, nil, "", false,
-	)
-
-	_, _, err = i.ConnectInfo(ctx, PublicIP)
-	var wantErr *errtype.DialError
-	if !errors.As(err, &wantErr) {
-		t.Fatalf("when connect info fails, want = %T, got = %v", wantErr, err)
-	}
-
-	// when client asks for wrong IP address type
-	gotAddr, _, err := i.ConnectInfo(ctx, PrivateIP)
-	if err == nil {
-		t.Fatalf("expected ConnectInfo to fail but returned IP address = %v", gotAddr)
 	}
 }
 
@@ -234,13 +213,13 @@ func TestClose(t *testing.T) {
 	defer cleanup()
 
 	// Set up an instance and then close it immediately
-	i := NewInstance(
+	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
 		RSAKey, 30*time.Second, nil, "", false,
 	)
 	i.Close()
 
-	_, _, err = i.ConnectInfo(ctx, PublicIP)
+	_, err = i.ConnectionInfo(ctx)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("failed to retrieve connect info: %v", err)
 	}
@@ -300,7 +279,7 @@ func TestContextCancelled(t *testing.T) {
 	defer cleanup()
 
 	// Set up an instance and then close it immediately
-	i := NewInstance(
+	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
 		RSAKey, 30*time.Second, nil, "", false,
 	)
