@@ -30,6 +30,7 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
+	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"golang.org/x/oauth2"
 )
@@ -109,8 +110,7 @@ func TestDialWithAdminAPIErrors(t *testing.T) {
 }
 
 func TestDialWithConfigurationErrors(t *testing.T) {
-	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance",
-		mock.WithCertExpiry(time.Now().Add(-time.Hour)))
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
 
 	svc, cleanup, err := mock.NewSQLAdminService(
 		context.Background(),
@@ -732,12 +732,14 @@ type spyConnectionInfoCache struct {
 	connectionInfoCache
 }
 
-func (s *spyConnectionInfoCache) ConnectInfo(_ context.Context, _ string) (string, *tls.Config, error) {
+func (s *spyConnectionInfoCache) ConnectionInfo(
+	context.Context,
+) (cloudsql.ConnectionInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	res := s.connectInfoCalls[s.connectInfoIndex]
 	s.connectInfoIndex++
-	return "unused", res.tls, res.err
+	return cloudsql.ConnectionInfo{Conf: res.tls}, res.err
 }
 
 func (s *spyConnectionInfoCache) ForceRefresh() {

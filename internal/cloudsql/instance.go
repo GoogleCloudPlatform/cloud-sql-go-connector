@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"sync"
 	"time"
@@ -56,7 +57,7 @@ type refreshOperation struct {
 	ready chan struct{}
 	// timer that triggers refresh, can be used to cancel.
 	timer  *time.Timer
-	result refreshResult
+	result ConnectionInfo
 	err    error
 }
 
@@ -75,7 +76,7 @@ func (r *refreshOperation) isValid() bool {
 	default:
 		return false
 	case <-r.ready:
-		if r.err != nil || time.Now().After(r.result.expiry.Round(0)) {
+		if r.err != nil || time.Now().After(r.result.Expiry.Round(0)) {
 			return false
 		}
 		return true
@@ -171,14 +172,18 @@ func (i *Instance) Close() error {
 	return nil
 }
 
-// ConnectInfo returns an IP address specified by ipType (i.e., public or
-// private) and a TLS config that can be used to connect to a Cloud SQL
-// instance.
-func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls.Config, error) {
-	op, err := i.refreshOperation(ctx)
-	if err != nil {
-		return "", nil, err
-	}
+// ConnectionInfo contains all necessary information to connect securely to the
+// server-side Proxy running on a Cloud SQL instance.
+type ConnectionInfo struct {
+	addrs        map[string]string
+	ServerCaCert *x509.Certificate
+	DBVersion    string
+	Conf         *tls.Config
+	Expiry       time.Time
+}
+
+// Addr returns the IP address or DNS name for the given IP type.
+func (c ConnectionInfo) Addr(ipType string) (string, error) {
 	var (
 		addr string
 		ok   bool
@@ -186,22 +191,34 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 	switch ipType {
 	case AutoIP:
 		// Try Public first
-		addr, ok = op.result.ipAddrs[PublicIP]
+		addr, ok = c.addrs[PublicIP]
 		if !ok {
 			// Try Private second
-			addr, ok = op.result.ipAddrs[PrivateIP]
+			addr, ok = c.addrs[PrivateIP]
 		}
 	default:
-		addr, ok = op.result.ipAddrs[ipType]
+		addr, ok = c.addrs[ipType]
 	}
 	if !ok {
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", ipType),
-			i.connName.String(),
+			// i.connName.String(),
+			"TODO",
 		)
-		return "", nil, err
+		return "", err
 	}
-	return addr, op.result.conf, nil
+	return addr, nil
+}
+
+// ConnectionInfo returns an IP address specified by ipType (i.e., public or
+// private) and a TLS config that can be used to connect to a Cloud SQL
+// instance.
+func (i *Instance) ConnectionInfo(ctx context.Context) (ConnectionInfo, error) {
+	op, err := i.refreshOperation(ctx)
+	if err != nil {
+		return ConnectionInfo{}, err
+	}
+	return op.result, nil
 }
 
 // InstanceEngineVersion returns the engine type and version for the instance.
@@ -212,7 +229,7 @@ func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return op.result.version, nil
+	return op.result.DBVersion, nil
 }
 
 // UpdateRefresh cancels all existing refresh attempts and schedules new
@@ -324,7 +341,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 				nil,
 			)
 		} else {
-			r.result, r.err = i.r.performRefresh(
+			r.result, r.err = i.r.ConnectionInfo(
 				ctx, i.connName, i.key, i.useIAMAuthNDial)
 		}
 		switch r.err {
@@ -336,7 +353,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			i.logger.Debugf(
 				"[%v] Current certificate expiration = %v",
 				i.connName.String(),
-				r.result.expiry.UTC().Format(time.RFC3339),
+				r.result.Expiry.UTC().Format(time.RFC3339),
 			)
 		default:
 			i.logger.Debugf(
@@ -375,7 +392,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		// Update the current results, and schedule the next refresh in
 		// the future
 		i.cur = r
-		t := refreshDuration(time.Now(), i.cur.result.expiry)
+		t := refreshDuration(time.Now(), i.cur.result.Expiry)
 		i.logger.Debugf(
 			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
 			i.connName.String(),
