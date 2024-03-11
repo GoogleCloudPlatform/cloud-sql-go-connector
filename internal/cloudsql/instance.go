@@ -380,7 +380,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
 			i.connName.String(),
 			time.Now().Add(t).UTC().Format(time.RFC3339),
-			t.Round(time.Second),
+			t.Round(time.Minute),
 		)
 		i.next = i.scheduleRefresh(t)
 	})

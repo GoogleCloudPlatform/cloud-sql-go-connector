@@ -268,7 +268,8 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	// The TLS handshake will not fail on an expired client certificate. It's
 	// not until the first read where the client cert error will be surfaced.
 	// So check that the certificate is valid before proceeding.
-	if invalidClientCert(cn, d.logger, tlsConfig) {
+	if !validClientCert(cn, d.logger, tlsConfig) {
+		d.logger.Debugf("[%v] Refreshing certificate now", cn.String())
 		i.ForceRefresh()
 		// Block on refreshed connection info
 		addr, tlsConfig, err = i.ConnectInfo(ctx, cfg.ipType)
@@ -331,25 +332,34 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	}), nil
 }
 
-func invalidClientCert(cn instance.ConnName, l debug.Logger, c *tls.Config) bool {
+// validClientCert checks that the ephemeral client certificate retrieved from
+// the cache is unexpired. The time comparisons strip the monotonic clock value
+// to ensure an accurate result, even after laptop sleep.
+func validClientCert(cn instance.ConnName, l debug.Logger, c *tls.Config) bool {
 	// The following conditions should be impossible (no certs, nil leaf), but
 	// just in case there's an unknown edge case, check assumptions before
 	// proceeding.
 	if len(c.Certificates) == 0 {
-		return true
+		return false
 	}
 	if c.Certificates[0].Leaf == nil {
-		return true
+		return false
 	}
-	now := time.Now()
-	notAfter := c.Certificates[0].Leaf.NotAfter
+	// Use UTC() to strip monotonic clock value to guard against inaccurate
+	// comparisons, especially after laptop sleep.
+	// See the comments on the monotonic clock in the Go documentation for
+	// details: https://pkg.go.dev/time#hdr-Monotonic_Clocks
+	now := time.Now().UTC()
+	expiration := c.Certificates[0].Leaf.NotAfter.UTC()
+	valid := expiration.After(now)
 	l.Debugf(
 		"[%v] Now = %v, Current cert expiration = %v",
 		cn.String(),
-		now.UTC().Format(time.RFC3339),
-		notAfter.Format(time.RFC3339),
+		now.Format(time.RFC3339),
+		expiration.Format(time.RFC3339),
 	)
-	return now.After(notAfter)
+	l.Debugf("[%v] Cert is valid = %v", cn.String(), valid)
+	return valid
 }
 
 // EngineVersion returns the engine type and version for the instance
