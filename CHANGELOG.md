@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.8.0...v1.8.1) (2024-03-12)
+
+
+### Bug Fixes
+
+* strip monotonic clock reading in cert check ([#750](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/750)) ([6ae33b0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/6ae33b0a6e281293823e75ff97a51575c053bf9f)), closes [#749](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/749)
+
 ## [1.8.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.7.0...v1.8.0) (2024-03-08)
 
 
