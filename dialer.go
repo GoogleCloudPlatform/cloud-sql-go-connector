@@ -268,7 +268,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	// The TLS handshake will not fail on an expired client certificate. It's
 	// not until the first read where the client cert error will be surfaced.
 	// So check that the certificate is valid before proceeding.
-	if !validClientCert(cn, d.logger, ci.Conf) {
+	if !validClientCert(cn, d.logger, ci.Expiration) {
 		d.logger.Debugf("[%v] Refreshing certificate now", cn.String())
 		i.ForceRefresh()
 		// Block on refreshed connection info
@@ -313,7 +313,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		}
 	}
 
-	tlsConn := tls.Client(conn, ci.Conf)
+	tlsConn := tls.Client(conn, ci.TLSConfig())
 	err = tlsConn.HandshakeContext(ctx)
 	if err != nil {
 		d.logger.Debugf("[%v] TLS handshake failed: %v", cn.String(), err)
@@ -339,28 +339,18 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 // validClientCert checks that the ephemeral client certificate retrieved from
 // the cache is unexpired. The time comparisons strip the monotonic clock value
 // to ensure an accurate result, even after laptop sleep.
-func validClientCert(cn instance.ConnName, l debug.Logger, c *tls.Config) bool {
-	// The following conditions should be impossible (no certs, nil leaf), but
-	// just in case there's an unknown edge case, check assumptions before
-	// proceeding.
-	if len(c.Certificates) == 0 {
-		return false
-	}
-	if c.Certificates[0].Leaf == nil {
-		return false
-	}
+func validClientCert(cn instance.ConnName, l debug.Logger, expiration time.Time) bool {
 	// Use UTC() to strip monotonic clock value to guard against inaccurate
 	// comparisons, especially after laptop sleep.
 	// See the comments on the monotonic clock in the Go documentation for
 	// details: https://pkg.go.dev/time#hdr-Monotonic_Clocks
 	now := time.Now().UTC()
-	expiration := c.Certificates[0].Leaf.NotAfter.UTC()
-	valid := expiration.After(now)
+	valid := expiration.UTC().After(now)
 	l.Debugf(
 		"[%v] Now = %v, Current cert expiration = %v",
 		cn.String(),
 		now.Format(time.RFC3339),
-		expiration.Format(time.RFC3339),
+		expiration.UTC().Format(time.RFC3339),
 	)
 	l.Debugf("[%v] Cert is valid = %v", cn.String(), valid)
 	return valid

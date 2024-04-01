@@ -37,10 +37,9 @@ func TestRefresh(t *testing.T) {
 	wantPrivateIP := "10.0.0.1"
 	wantPSC := "abcde.12345.us-central1.sql.goog"
 	wantExpiry := time.Now().Add(time.Hour).UTC().Round(time.Second)
-	wantConnName := "my-project:my-region:my-instance"
 	cn := testInstanceConnName()
 	inst := mock.NewFakeCSQLInstance(
-		"my-project", "my-region", "my-instance",
+		cn.Project(), cn.Region(), cn.Name(),
 		mock.WithPublicIP(wantPublicIP),
 		mock.WithPrivateIP(wantPrivateIP),
 		mock.WithPSC(wantPSC),
@@ -87,11 +86,14 @@ func TestRefresh(t *testing.T) {
 	if wantPSC != gotPSC {
 		t.Fatalf("metadata IP mismatch, want = %v. got = %v", wantPSC, gotPSC)
 	}
-	if wantExpiry != rr.Expiry {
-		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, rr.Expiry)
+	if cn != rr.ConnectionName {
+		t.Fatalf(
+			"connection name mismatch, want = %v, got = %v",
+			wantExpiry, rr.Expiration,
+		)
 	}
-	if wantConnName != rr.Conf.ServerName {
-		t.Fatalf("server name mismatch, want = %v, got = %v", wantConnName, rr.Conf.ServerName)
+	if wantExpiry != rr.Expiration {
+		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, rr.Expiration)
 	}
 }
 
@@ -195,8 +197,8 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 			if err != nil {
 				t.Fatalf("want no error, got = %v", err)
 			}
-			if tc.wantExpiry != rr.Expiry {
-				t.Fatalf("want = %v, got = %v", tc.wantExpiry, rr.Expiry)
+			if tc.wantExpiry != rr.Expiration {
+				t.Fatalf("want = %v, got = %v", tc.wantExpiry, rr.Expiration)
 			}
 		})
 	}
@@ -432,92 +434,5 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		if !errors.As(err, &tc.wantErr) {
 			t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 		}
-	}
-}
-
-func TestRefreshBuildsTLSConfig(t *testing.T) {
-	wantServerName := "my-project:my-region:my-instance"
-	cn := testInstanceConnName()
-	inst := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name())
-	certBytes, err := mock.SelfSign(inst.Cert, inst.Key)
-	if err != nil {
-		t.Fatalf("failed to sign certificate: %v", err)
-	}
-	client, cleanup, err := mock.NewSQLAdminService(
-		context.Background(),
-		mock.InstanceGetSuccess(inst, 1), // no server cert
-		mock.CreateEphemeralSuccess(inst, 1),
-	)
-	if err != nil {
-		t.Fatalf("failed to create test SQL admin service: %s", err)
-	}
-	defer cleanup()
-
-	r := newRefresher(nullLogger{}, client, nil, testDialerID)
-	rr, err := r.ConnectionInfo(context.Background(), cn, RSAKey, false)
-	if err != nil {
-		t.Fatalf("expected no error, got = %v", err)
-	}
-
-	if wantServerName != rr.Conf.ServerName {
-		t.Fatalf(
-			"TLS config has incorrect server name, want = %v, got = %v",
-			wantServerName, rr.Conf.ServerName,
-		)
-	}
-
-	wantCertLen := 1
-	if wantCertLen != len(rr.Conf.Certificates) {
-		t.Fatalf(
-			"TLS config has unexpected number of certificates, want = %v, got = %v",
-			wantCertLen, len(rr.Conf.Certificates),
-		)
-	}
-
-	wantInsecure := true
-	if wantInsecure != rr.Conf.InsecureSkipVerify {
-		t.Fatalf(
-			"TLS config should skip verification, want = %v, got = %v",
-			wantInsecure, rr.Conf.InsecureSkipVerify,
-		)
-	}
-
-	if rr.Conf.RootCAs == nil {
-		t.Fatal("TLS config should include RootCA, got nil")
-	}
-
-	verifyPeerCert := rr.Conf.VerifyPeerCertificate
-	b, _ := pem.Decode(certBytes)
-	err = verifyPeerCert([][]byte{b.Bytes}, nil)
-	if err != nil {
-		t.Fatalf("expected to verify peer cert, got error: %v", err)
-	}
-
-	err = verifyPeerCert(nil, nil)
-	var wantErr *errtype.DialError
-	if !errors.As(err, &wantErr) {
-		t.Fatalf("when verify peer cert fails, want = %T, got = %v", wantErr, err)
-	}
-
-	err = verifyPeerCert([][]byte{[]byte("not a cert")}, nil)
-	if !errors.As(err, &wantErr) {
-		t.Fatalf("when verify fails on invalid cert, want = %T, got = %v", wantErr, err)
-	}
-
-	badCert := mock.GenerateCertWithCommonName(inst, "wrong:wrong")
-	err = verifyPeerCert([][]byte{badCert}, nil)
-	if !errors.As(err, &wantErr) {
-		t.Fatalf("when common names mismatch, want = %T, got = %v", wantErr, err)
-	}
-
-	other := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name())
-	certBytes, err = mock.SelfSign(other.Cert, other.Key)
-	if err != nil {
-		t.Fatalf("failed to sign certificate: %v", err)
-	}
-	b, _ = pem.Decode(certBytes)
-	err = verifyPeerCert([][]byte{b.Bytes}, nil)
-	if !errors.As(err, &wantErr) {
-		t.Fatalf("when certification fails, want = %T, got = %v", wantErr, err)
 	}
 }

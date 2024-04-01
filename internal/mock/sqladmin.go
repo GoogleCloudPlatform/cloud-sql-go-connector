@@ -178,7 +178,7 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 				return
 			}
 
-			certBytes, err := i.clientCert(pubKey.(*rsa.PublicKey))
+			certBytes, err := i.ClientCert(pubKey.(*rsa.PublicKey))
 			if err != nil {
 				http.Error(resp, fmt.Errorf("failed to sign client certificate: %v", err).Error(), http.StatusBadRequest)
 				return

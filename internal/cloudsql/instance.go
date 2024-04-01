@@ -76,7 +76,7 @@ func (r *refreshOperation) isValid() bool {
 	default:
 		return false
 	case <-r.ready:
-		if r.err != nil || time.Now().After(r.result.Expiry.Round(0)) {
+		if r.err != nil || time.Now().After(r.result.Expiration.Round(0)) {
 			return false
 		}
 		return true
@@ -175,11 +175,13 @@ func (i *RefreshAheadCache) Close() error {
 // ConnectionInfo contains all necessary information to connect securely to the
 // server-side Proxy running on a Cloud SQL instance.
 type ConnectionInfo struct {
-	addrs        map[string]string
-	ServerCaCert *x509.Certificate
-	DBVersion    string
-	Conf         *tls.Config
-	Expiry       time.Time
+	ConnectionName    instance.ConnName
+	ClientCertificate tls.Certificate
+	ServerCaCert      *x509.Certificate
+	DBVersion         string
+	Expiration        time.Time
+
+	addrs map[string]string
 }
 
 // Addr returns the IP address or DNS name for the given IP type.
@@ -202,12 +204,77 @@ func (c ConnectionInfo) Addr(ipType string) (string, error) {
 	if !ok {
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", ipType),
-			// i.connName.String(),
-			"TODO",
+			c.ConnectionName.String(),
 		)
 		return "", err
 	}
 	return addr, nil
+}
+
+// TLSConfig constructs a TLS configuration for the given connection info.
+func (c ConnectionInfo) TLSConfig() *tls.Config {
+	pool := x509.NewCertPool()
+	pool.AddCert(c.ServerCaCert)
+	return &tls.Config{
+		ServerName:   c.ConnectionName.String(),
+		Certificates: []tls.Certificate{c.ClientCertificate},
+		RootCAs:      pool,
+		// We need to set InsecureSkipVerify to true due to
+		// https://github.com/GoogleCloudPlatform/cloudsql-proxy/issues/194
+		// https://tip.golang.org/doc/go1.11#crypto/x509
+		//
+		// Since we have a secure channel to the Cloud SQL API which we use to
+		// retrieve the certificates, we instead need to implement our own
+		// VerifyPeerCertificate function that will verify that the certificate
+		// is OK.
+		InsecureSkipVerify:    true,
+		VerifyPeerCertificate: verifyPeerCertificateFunc(c.ConnectionName, pool),
+		MinVersion:            tls.VersionTLS13,
+	}
+}
+
+// verifyPeerCertificateFunc creates a VerifyPeerCertificate func that
+// verifies that the peer certificate is in the cert pool. We need to define
+// our own because CloudSQL instances use the instance name (e.g.,
+// my-project:my-instance) instead of a valid domain name for the certificate's
+// Common Name.
+func verifyPeerCertificateFunc(
+	cn instance.ConnName, pool *x509.CertPool,
+) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		if len(rawCerts) == 0 {
+			return errtype.NewDialError(
+				"no certificate to verify", cn.String(), nil,
+			)
+		}
+
+		cert, err := x509.ParseCertificate(rawCerts[0])
+		if err != nil {
+			return errtype.NewDialError(
+				"failed to parse X.509 certificate", cn.String(), err,
+			)
+		}
+
+		opts := x509.VerifyOptions{Roots: pool}
+		if _, err = cert.Verify(opts); err != nil {
+			return errtype.NewDialError(
+				"failed to verify certificate", cn.String(), err,
+			)
+		}
+
+		certInstanceName := fmt.Sprintf("%s:%s", cn.Project(), cn.Name())
+		if cert.Subject.CommonName != certInstanceName {
+			return errtype.NewDialError(
+				fmt.Sprintf(
+					"certificate had CN %q, expected %q",
+					cert.Subject.CommonName, certInstanceName,
+				),
+				cn.String(),
+				nil,
+			)
+		}
+		return nil
+	}
 }
 
 // ConnectionInfo returns an IP address specified by ipType (i.e., public or
@@ -353,7 +420,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			i.logger.Debugf(
 				"[%v] Current certificate expiration = %v",
 				i.connName.String(),
-				r.result.Expiry.UTC().Format(time.RFC3339),
+				r.result.Expiration.UTC().Format(time.RFC3339),
 			)
 		default:
 			i.logger.Debugf(
@@ -392,7 +459,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		// Update the current results, and schedule the next refresh in
 		// the future
 		i.cur = r
-		t := refreshDuration(time.Now(), i.cur.result.Expiry)
+		t := refreshDuration(time.Now(), i.cur.result.Expiration)
 		i.logger.Debugf(
 			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
 			i.connName.String(),

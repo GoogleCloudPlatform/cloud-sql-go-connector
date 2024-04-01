@@ -16,8 +16,6 @@ package cloudsqlconn
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -630,8 +628,8 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 	badCN, _ := instance.ParseConnName(badInstanceConnectionName)
 	spy := &spyConnectionInfoCache{
 		connectInfoCalls: []struct {
-			tls *tls.Config
-			err error
+			info cloudsql.ConnectionInfo
+			err  error
 		}{{
 			err: errors.New("connect info failed"),
 		}},
@@ -671,18 +669,14 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 	cn, _ := instance.ParseConnName(icn)
 	spy := &spyConnectionInfoCache{
 		connectInfoCalls: []struct {
-			tls *tls.Config
-			err error
+			info cloudsql.ConnectionInfo
+			err  error
 		}{
 			// First call returns expired certificate
 			{
-				tls: &tls.Config{
-					Certificates: []tls.Certificate{{
-						Leaf: &x509.Certificate{
-							// Certificate expired 10 hours ago.
-							NotAfter: time.Now().Add(-10 * time.Hour),
-						},
-					}},
+				// Certificate expired 10 hours ago.
+				info: cloudsql.ConnectionInfo{
+					Expiration: time.Now().Add(-10 * time.Hour),
 				},
 			},
 			// Second call errors to validate error path
@@ -723,8 +717,8 @@ type spyConnectionInfoCache struct {
 	mu               sync.Mutex
 	connectInfoIndex int
 	connectInfoCalls []struct {
-		tls *tls.Config
-		err error
+		info cloudsql.ConnectionInfo
+		err  error
 	}
 	closeWasCalled        bool
 	forceRefreshWasCalled bool
@@ -739,7 +733,7 @@ func (s *spyConnectionInfoCache) ConnectionInfo(
 	defer s.mu.Unlock()
 	res := s.connectInfoCalls[s.connectInfoIndex]
 	s.connectInfoIndex++
-	return cloudsql.ConnectionInfo{Conf: res.tls}, res.err
+	return res.info, res.err
 }
 
 func (s *spyConnectionInfoCache) ForceRefresh() {
