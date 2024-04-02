@@ -11,6 +11,11 @@
     {
       "matchManagers": ["github-actions"],
       "groupName": "dependencies for github"
-    }
+    },
+    {
+      "groupName": "Non-major dependency updates",
+      "matchLanguages": ["go"],
+      "matchUpdateTypes": ["minor", "patch"],
+    },
   ]
 }
