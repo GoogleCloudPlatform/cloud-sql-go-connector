@@ -74,7 +74,7 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 type connectionInfoCache interface {
 	OpenConns() *uint64
 
-	ConnectInfo(context.Context, string) (string, *tls.Config, error)
+	ConnectionInfo(context.Context) (cloudsql.ConnectionInfo, error)
 	InstanceEngineVersion(context.Context) (string, error)
 	UpdateRefresh(*bool)
 	ForceRefresh()
@@ -250,7 +250,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
 	i := d.instance(cn, &cfg.useIAMAuthN)
-	addr, tlsConfig, err := i.ConnectInfo(ctx, cfg.ipType)
+	ci, err := i.ConnectionInfo(ctx)
 	if err != nil {
 		d.lock.Lock()
 		defer d.lock.Unlock()
@@ -268,11 +268,11 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	// The TLS handshake will not fail on an expired client certificate. It's
 	// not until the first read where the client cert error will be surfaced.
 	// So check that the certificate is valid before proceeding.
-	if !validClientCert(cn, d.logger, tlsConfig) {
+	if !validClientCert(cn, d.logger, ci.Conf) {
 		d.logger.Debugf("[%v] Refreshing certificate now", cn.String())
 		i.ForceRefresh()
 		// Block on refreshed connection info
-		addr, tlsConfig, err = i.ConnectInfo(ctx, cfg.ipType)
+		ci, err = i.ConnectionInfo(ctx)
 		if err != nil {
 			d.lock.Lock()
 			defer d.lock.Unlock()
@@ -287,6 +287,10 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	var connectEnd trace.EndSpanFunc
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
 	defer func() { connectEnd(err) }()
+	addr, err := ci.Addr(cfg.ipType)
+	if err != nil {
+		return nil, err
+	}
 	addr = net.JoinHostPort(addr, serverProxyPort)
 	f := d.dialFunc
 	if cfg.dialFunc != nil {
@@ -309,7 +313,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		}
 	}
 
-	tlsConn := tls.Client(conn, tlsConfig)
+	tlsConn := tls.Client(conn, ci.Conf)
 	err = tlsConn.HandshakeContext(ctx)
 	if err != nil {
 		d.logger.Debugf("[%v] TLS handshake failed: %v", cn.String(), err)
@@ -452,7 +456,7 @@ func (d *Dialer) instance(cn instance.ConnName, useIAMAuthN *bool) connectionInf
 				useIAMAuthNDial = *useIAMAuthN
 			}
 			d.logger.Debugf("[%v] Connection info added to cache", cn.String())
-			i = cloudsql.NewInstance(
+			i = cloudsql.NewRefreshAheadCache(
 				cn,
 				d.logger,
 				d.sqladmin, d.key,

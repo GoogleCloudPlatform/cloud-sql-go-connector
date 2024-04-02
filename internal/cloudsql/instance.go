@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"sync"
 	"time"
@@ -56,13 +57,13 @@ type refreshOperation struct {
 	ready chan struct{}
 	// timer that triggers refresh, can be used to cancel.
 	timer  *time.Timer
-	result refreshResult
+	result ConnectionInfo
 	err    error
 }
 
-// cancel prevents the instanceInfo from starting, if it hasn't already
-// started. Returns true if timer was stopped successfully, or false if it has
-// already started.
+// cancel prevents the the refresh operation from starting, if it hasn't
+// already started. Returns true if timer was stopped successfully, or false if
+// it has already started.
 func (r *refreshOperation) cancel() bool {
 	return r.timer.Stop()
 }
@@ -75,18 +76,18 @@ func (r *refreshOperation) isValid() bool {
 	default:
 		return false
 	case <-r.ready:
-		if r.err != nil || time.Now().After(r.result.expiry.Round(0)) {
+		if r.err != nil || time.Now().After(r.result.Expiry.Round(0)) {
 			return false
 		}
 		return true
 	}
 }
 
-// Instance manages the information used to connect to the Cloud SQL instance
-// by periodically calling the Cloud SQL Admin API. It automatically refreshes
-// the required information approximately 4 minutes before the previous
-// certificate expires (every ~56 minutes).
-type Instance struct {
+// RefreshAheadCache manages the information used to connect to the Cloud SQL
+// instance by periodically calling the Cloud SQL Admin API. It automatically
+// refreshes the required information approximately 4 minutes before the
+// previous certificate expires (every ~56 minutes).
+type RefreshAheadCache struct {
 	// openConns is the number of open connections to the instance.
 	openConns uint64
 
@@ -117,8 +118,8 @@ type Instance struct {
 	cancel context.CancelFunc
 }
 
-// NewInstance initializes a new Instance given an instance connection name
-func NewInstance(
+// NewRefreshAheadCache initializes a new Instance given an instance connection name
+func NewRefreshAheadCache(
 	cn instance.ConnName,
 	l debug.Logger,
 	client *sqladmin.Service,
@@ -127,9 +128,9 @@ func NewInstance(
 	ts oauth2.TokenSource,
 	dialerID string,
 	useIAMAuthNDial bool,
-) *Instance {
+) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
-	i := &Instance{
+	i := &RefreshAheadCache{
 		connName: cn,
 		logger:   l,
 		key:      key,
@@ -156,13 +157,13 @@ func NewInstance(
 
 // OpenConns returns a pointer to the number of open connections to
 // faciliate changing the value using atomics.
-func (i *Instance) OpenConns() *uint64 {
+func (i *RefreshAheadCache) OpenConns() *uint64 {
 	return &i.openConns
 }
 
 // Close closes the instance; it stops the refresh cycle and prevents it from
 // making additional calls to the Cloud SQL Admin API.
-func (i *Instance) Close() error {
+func (i *RefreshAheadCache) Close() error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.cancel()
@@ -171,14 +172,18 @@ func (i *Instance) Close() error {
 	return nil
 }
 
-// ConnectInfo returns an IP address specified by ipType (i.e., public or
-// private) and a TLS config that can be used to connect to a Cloud SQL
-// instance.
-func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls.Config, error) {
-	op, err := i.refreshOperation(ctx)
-	if err != nil {
-		return "", nil, err
-	}
+// ConnectionInfo contains all necessary information to connect securely to the
+// server-side Proxy running on a Cloud SQL instance.
+type ConnectionInfo struct {
+	addrs        map[string]string
+	ServerCaCert *x509.Certificate
+	DBVersion    string
+	Conf         *tls.Config
+	Expiry       time.Time
+}
+
+// Addr returns the IP address or DNS name for the given IP type.
+func (c ConnectionInfo) Addr(ipType string) (string, error) {
 	var (
 		addr string
 		ok   bool
@@ -186,39 +191,51 @@ func (i *Instance) ConnectInfo(ctx context.Context, ipType string) (string, *tls
 	switch ipType {
 	case AutoIP:
 		// Try Public first
-		addr, ok = op.result.ipAddrs[PublicIP]
+		addr, ok = c.addrs[PublicIP]
 		if !ok {
 			// Try Private second
-			addr, ok = op.result.ipAddrs[PrivateIP]
+			addr, ok = c.addrs[PrivateIP]
 		}
 	default:
-		addr, ok = op.result.ipAddrs[ipType]
+		addr, ok = c.addrs[ipType]
 	}
 	if !ok {
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", ipType),
-			i.connName.String(),
+			// i.connName.String(),
+			"TODO",
 		)
-		return "", nil, err
+		return "", err
 	}
-	return addr, op.result.conf, nil
+	return addr, nil
+}
+
+// ConnectionInfo returns an IP address specified by ipType (i.e., public or
+// private) and a TLS config that can be used to connect to a Cloud SQL
+// instance.
+func (i *RefreshAheadCache) ConnectionInfo(ctx context.Context) (ConnectionInfo, error) {
+	op, err := i.refreshOperation(ctx)
+	if err != nil {
+		return ConnectionInfo{}, err
+	}
+	return op.result, nil
 }
 
 // InstanceEngineVersion returns the engine type and version for the instance.
 // The value corresponds to one of the following types for the instance:
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
-func (i *Instance) InstanceEngineVersion(ctx context.Context) (string, error) {
+func (i *RefreshAheadCache) InstanceEngineVersion(ctx context.Context) (string, error) {
 	op, err := i.refreshOperation(ctx)
 	if err != nil {
 		return "", err
 	}
-	return op.result.version, nil
+	return op.result.DBVersion, nil
 }
 
 // UpdateRefresh cancels all existing refresh attempts and schedules new
 // attempts with the provided config only if it differs from the current
 // configuration.
-func (i *Instance) UpdateRefresh(useIAMAuthNDial *bool) {
+func (i *RefreshAheadCache) UpdateRefresh(useIAMAuthNDial *bool) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if useIAMAuthNDial != nil && *useIAMAuthNDial != i.useIAMAuthNDial {
@@ -236,7 +253,7 @@ func (i *Instance) UpdateRefresh(useIAMAuthNDial *bool) {
 // ForceRefresh triggers an immediate refresh operation to be scheduled and
 // used for future connection attempts. Until the refresh completes, the
 // existing connection info will be available for use if valid.
-func (i *Instance) ForceRefresh() {
+func (i *RefreshAheadCache) ForceRefresh() {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	// If the next refresh hasn't started yet, we can cancel it and start an
@@ -253,7 +270,7 @@ func (i *Instance) ForceRefresh() {
 
 // refreshOperation returns the most recent refresh operation
 // waiting for it to complete if necessary
-func (i *Instance) refreshOperation(ctx context.Context) (*refreshOperation, error) {
+func (i *RefreshAheadCache) refreshOperation(ctx context.Context) (*refreshOperation, error) {
 	i.mu.RLock()
 	cur := i.cur
 	i.mu.RUnlock()
@@ -292,7 +309,7 @@ func refreshDuration(now, certExpiry time.Time) time.Duration {
 // scheduleRefresh schedules a refresh operation to be triggered after a given
 // duration. The returned refreshOperation can be used to either Cancel or Wait
 // for the operation's completion.
-func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
+func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 	r := &refreshOperation{}
 	r.ready = make(chan struct{})
 	r.timer = time.AfterFunc(d, func() {
@@ -324,7 +341,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 				nil,
 			)
 		} else {
-			r.result, r.err = i.r.performRefresh(
+			r.result, r.err = i.r.ConnectionInfo(
 				ctx, i.connName, i.key, i.useIAMAuthNDial)
 		}
 		switch r.err {
@@ -336,7 +353,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 			i.logger.Debugf(
 				"[%v] Current certificate expiration = %v",
 				i.connName.String(),
-				r.result.expiry.UTC().Format(time.RFC3339),
+				r.result.Expiry.UTC().Format(time.RFC3339),
 			)
 		default:
 			i.logger.Debugf(
@@ -375,7 +392,7 @@ func (i *Instance) scheduleRefresh(d time.Duration) *refreshOperation {
 		// Update the current results, and schedule the next refresh in
 		// the future
 		i.cur = r
-		t := refreshDuration(time.Now(), i.cur.result.expiry)
+		t := refreshDuration(time.Now(), i.cur.result.Expiry)
 		i.logger.Debugf(
 			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
 			i.connName.String(),
