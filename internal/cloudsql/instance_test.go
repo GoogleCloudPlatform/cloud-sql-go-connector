@@ -18,10 +18,14 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 )
@@ -87,10 +91,12 @@ func TestInstanceEngineVersion(t *testing.T) {
 	}
 }
 
-func TestConnectInfo(t *testing.T) {
+func TestConnectionInfo(t *testing.T) {
 	ctx := context.Background()
 	wantAddr := "0.0.0.0"
-	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithPublicIP(wantAddr))
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance", mock.WithPublicIP(wantAddr),
+	)
 	client, cleanup, err := mock.NewSQLAdminService(
 		ctx,
 		mock.InstanceGetSuccess(inst, 1),
@@ -125,13 +131,114 @@ func TestConnectInfo(t *testing.T) {
 			wantAddr, got,
 		)
 	}
+}
 
-	wantServerName := "my-project:my-region:my-instance"
-	if ci.Conf.ServerName != wantServerName {
+func TestConnectionInfoTLSConfig(t *testing.T) {
+	cn := testInstanceConnName()
+	i := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name())
+	// Generate a client certificate with the client's public key and signed by
+	// the server's private key
+	cert, err := i.ClientCert(&RSAKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Now parse the bytes back out as structured data
+	// TODO: this should be done in the ClientCert method and not here.
+	b, _ := pem.Decode(cert)
+	clientCert, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Now self sign the server's cert
+	// TODO: this also should return structured data and handle the PEM
+	// encoding elsewhere
+	certBytes, err := mock.SelfSign(i.Cert, i.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = pem.Decode(certBytes)
+	serverCert, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assemble a connection info with the raw and parsed client cert
+	// and the self-signed server certificate
+	ci := ConnectionInfo{
+		ConnectionName: cn,
+		ClientCertificate: tls.Certificate{
+			Certificate: [][]byte{clientCert.Raw},
+			PrivateKey:  RSAKey,
+			Leaf:        clientCert,
+		},
+		ServerCaCert: serverCert,
+		DBVersion:    "doesn't matter here",
+		Expiration:   clientCert.NotAfter,
+	}
+
+	got := ci.TLSConfig()
+	wantServerName := cn.String()
+	if got.ServerName != wantServerName {
 		t.Fatalf(
-			"ConnectInfo return unexpected server name in TLS Config, want = %v, got = %v",
-			wantServerName, ci.Conf.ServerName,
+			"ConnectInfo return unexpected server name in TLS Config, "+
+				"want = %v, got = %v",
+			wantServerName, got.ServerName,
 		)
+	}
+
+	if got.MinVersion != tls.VersionTLS13 {
+		t.Fatalf(
+			"want TLS 1.3, got = %v", got.MinVersion,
+		)
+	}
+
+	if got.Certificates[0].Leaf != ci.ClientCertificate.Leaf {
+		t.Fatal("leaf certificates do not match")
+	}
+
+	verifyPeerCert := got.VerifyPeerCertificate
+	err = verifyPeerCert([][]byte{serverCert.Raw}, nil)
+	if err != nil {
+		t.Fatalf("expected to verify peer cert, got error: %v", err)
+	}
+
+	err = verifyPeerCert(nil, nil)
+	var wantErr *errtype.DialError
+	if !errors.As(err, &wantErr) {
+		t.Fatalf(
+			"when verify peer cert fails, want = %T, got = %v", wantErr, err,
+		)
+	}
+
+	// Ensure invalid certs result in an error
+	err = verifyPeerCert([][]byte{[]byte("not a cert")}, nil)
+	if !errors.As(err, &wantErr) {
+		t.Fatalf(
+			"when verify fails on invalid cert, want = %T, got = %v",
+			wantErr, err,
+		)
+	}
+
+	// Ensure the common name is verified againsts the expected name
+	badCert := mock.GenerateCertWithCommonName(i, "wrong:wrong")
+	err = verifyPeerCert([][]byte{badCert}, nil)
+	if !errors.As(err, &wantErr) {
+		t.Fatalf(
+			"when common names mismatch, want = %T, got = %v", wantErr, err,
+		)
+	}
+
+	// Verify an unreconigzed authority is rejected
+	other := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name())
+	cert, err = mock.SelfSign(other.Cert, other.Key)
+	if err != nil {
+		t.Fatalf("failed to sign certificate: %v", err)
+	}
+	b, _ = pem.Decode(cert)
+	err = verifyPeerCert([][]byte{b.Bytes}, nil)
+	if !errors.As(err, &wantErr) {
+		t.Fatalf("when certification fails, want = %T, got = %v", wantErr, err)
 	}
 }
 

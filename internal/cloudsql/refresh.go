@@ -225,63 +225,6 @@ func fetchEphemeralCert(
 	return c, nil
 }
 
-// createTLSConfig returns a *tls.Config for connecting securely to the Cloud SQL instance.
-func createTLSConfig(inst instance.ConnName, m metadata, cert tls.Certificate) *tls.Config {
-	certs := x509.NewCertPool()
-	certs.AddCert(m.serverCaCert)
-
-	cfg := &tls.Config{
-		ServerName:   inst.String(),
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      certs,
-		// We need to set InsecureSkipVerify to true due to
-		// https://github.com/GoogleCloudPlatform/cloudsql-proxy/issues/194
-		// https://tip.golang.org/doc/go1.11#crypto/x509
-		//
-		// Since we have a secure channel to the Cloud SQL API which we use to retrieve the
-		// certificates, we instead need to implement our own VerifyPeerCertificate function
-		// that will verify that the certificate is OK.
-		InsecureSkipVerify:    true,
-		VerifyPeerCertificate: genVerifyPeerCertificateFunc(inst, certs),
-		MinVersion:            tls.VersionTLS13,
-	}
-	return cfg
-}
-
-// genVerifyPeerCertificateFunc creates a VerifyPeerCertificate func that
-// verifies that the peer certificate is in the cert pool. We need to define
-// our own because CloudSQL instances use the instance name (e.g.,
-// my-project:my-instance) instead of a valid domain name for the certificate's
-// Common Name.
-func genVerifyPeerCertificateFunc(cn instance.ConnName, pool *x509.CertPool) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-		if len(rawCerts) == 0 {
-			return errtype.NewDialError("no certificate to verify", cn.String(), nil)
-		}
-
-		cert, err := x509.ParseCertificate(rawCerts[0])
-		if err != nil {
-			return errtype.NewDialError("failed to parse X.509 certificate", cn.String(), err)
-		}
-
-		opts := x509.VerifyOptions{Roots: pool}
-		if _, err = cert.Verify(opts); err != nil {
-			return errtype.NewDialError("failed to verify certificate", cn.String(), err)
-		}
-
-		certInstanceName := fmt.Sprintf("%s:%s", cn.Project(), cn.Name())
-		if cert.Subject.CommonName != certInstanceName {
-			return errtype.NewDialError(
-				fmt.Sprintf("certificate had CN %q, expected %q",
-					cert.Subject.CommonName, certInstanceName),
-				cn.String(),
-				nil,
-			)
-		}
-		return nil
-	}
-}
-
 // newRefresher creates a Refresher.
 func newRefresher(
 	l debug.Logger,
@@ -379,18 +322,13 @@ func (r refresher) ConnectionInfo(
 		return ConnectionInfo{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
-	c := createTLSConfig(cn, md, ec)
-	var expiry time.Time
-	// This should never not be the case, but we check to avoid a potential nil-pointer
-	if len(c.Certificates) > 0 {
-		expiry = c.Certificates[0].Leaf.NotAfter
-	}
 	return ConnectionInfo{
-		addrs:        md.ipAddrs,
-		ServerCaCert: md.serverCaCert,
-		DBVersion:    md.version,
-		Conf:         c,
-		Expiry:       expiry,
+		addrs:             md.ipAddrs,
+		ServerCaCert:      md.serverCaCert,
+		ClientCertificate: ec,
+		Expiration:        ec.Leaf.NotAfter,
+		DBVersion:         md.version,
+		ConnectionName:    cn,
 	}, nil
 }
 

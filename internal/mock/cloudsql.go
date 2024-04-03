@@ -53,15 +53,19 @@ type FakeCSQLInstance struct {
 	DNSName      string
 	signer       SignFunc
 	clientSigner ClientSignFunc
-	Key          *rsa.PrivateKey
-	Cert         *x509.Certificate
+	// Key is the server's private key
+	Key *rsa.PrivateKey
+	// Cert is the server's certificate
+	Cert *x509.Certificate
 }
 
 func (f FakeCSQLInstance) signedCert() ([]byte, error) {
 	return f.signer(f.Cert, f.Key)
 }
 
-func (f FakeCSQLInstance) clientCert(pubKey *rsa.PublicKey) ([]byte, error) {
+// ClientCert creates an ephemeral client certificate signed with the Cloud SQL
+// instance's private key. The return value is PEM encoded.
+func (f FakeCSQLInstance) ClientCert(pubKey *rsa.PublicKey) ([]byte, error) {
 	return f.clientSigner(f.Cert, f.Key, pubKey)
 }
 
