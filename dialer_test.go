@@ -795,3 +795,27 @@ func TestDialerSupportsOneOffDialFunction(t *testing.T) {
 		t.Fatal("one-off dial func was not called")
 	}
 }
+
+func TestDialerCloseReportsFriendlyError(t *testing.T) {
+	d, err := NewDialer(
+		context.Background(),
+		WithTokenSource(mock.EmptyTokenSource{}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Close()
+
+	_, err = d.Dial(context.Background(), "p:r:i")
+	if !errors.Is(err, ErrDialerClosed) {
+		t.Fatalf("want = %v, got = %v", ErrDialerClosed, err)
+	}
+
+	// Ensure multiple calls to close don't panic
+	_ = d.Close()
+
+	_, err = d.Dial(context.Background(), "p:r:i")
+	if !errors.Is(err, ErrDialerClosed) {
+		t.Fatalf("want = %v, got = %v", ErrDialerClosed, err)
+	}
+}
