@@ -42,6 +42,7 @@ type dialerConfig struct {
 	refreshTimeout         time.Duration
 	useIAMAuthN            bool
 	logger                 debug.Logger
+	lazyRefresh            bool
 	iamLoginTokenSource    oauth2.TokenSource
 	useragents             []string
 	credentialsUniverse    string
@@ -238,6 +239,19 @@ func WithIAMAuthN() Option {
 func WithDebugLogger(l debug.Logger) Option {
 	return func(d *dialerConfig) {
 		d.logger = l
+	}
+}
+
+// WithLazyRefresh configures the dialer to refresh certificates on an
+// as-needed basis. If a certificate is expired when a connection request
+// occurs, the Go Connector will block the attempt and refresh the certificate
+// immediately. This option is useful when running the Go Connector in
+// environments where the CPU may be throttled, thus preventing a background
+// goroutine from running consistently (e.g., in Cloud Run the CPU is throttled
+// outside of a request context causing the background refresh to fail).
+func WithLazyRefresh() Option {
+	return func(d *dialerConfig) {
+		d.lazyRefresh = true
 	}
 }
 
