@@ -93,9 +93,7 @@ type monitoredCache struct {
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
-	lock sync.RWMutex
-	// cache map connection names (e.g., my-project:us-central1:my-instance)
-	// to *cloudsql.Instance types.
+	lock           sync.RWMutex
 	cache          map[instance.ConnName]monitoredCache
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
