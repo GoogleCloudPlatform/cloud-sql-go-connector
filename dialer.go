@@ -75,23 +75,26 @@ func getDefaultKeys() (*rsa.PrivateKey, error) {
 }
 
 type connectionInfoCache interface {
-	OpenConns() *uint64
-
 	ConnectionInfo(context.Context) (cloudsql.ConnectionInfo, error)
-	InstanceEngineVersion(context.Context) (string, error)
 	UpdateRefresh(*bool)
 	ForceRefresh()
 	io.Closer
+}
+
+// monitoredCache is a wrapper around a connectionInfoCache that tracks the
+// number of connections to the associated instance.
+type monitoredCache struct {
+	openConns uint64
+
+	connectionInfoCache
 }
 
 // A Dialer is used to create connections to Cloud SQL instances.
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
-	lock sync.RWMutex
-	// instances map connection names (e.g., my-project:us-central1:my-instance)
-	// to *cloudsql.Instance types.
-	instances      map[instance.ConnName]connectionInfoCache
+	lock           sync.RWMutex
+	cache          map[instance.ConnName]monitoredCache
 	key            *rsa.PrivateKey
 	refreshTimeout time.Duration
 	// closed reports if the dialer has been closed.
@@ -217,7 +220,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 	d := &Dialer{
 		closed:            make(chan struct{}),
-		instances:         make(map[instance.ConnName]connectionInfoCache),
+		cache:             make(map[instance.ConnName]monitoredCache),
 		key:               cfg.rsaKey,
 		refreshTimeout:    cfg.refreshTimeout,
 		sqladmin:          client,
@@ -261,15 +264,15 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	i := d.instance(cn, &cfg.useIAMAuthN)
-	ci, err := i.ConnectionInfo(ctx)
+	c := d.connectionInfoCache(cn, &cfg.useIAMAuthN)
+	ci, err := c.ConnectionInfo(ctx)
 	if err != nil {
 		d.lock.Lock()
 		defer d.lock.Unlock()
 		d.logger.Debugf("[%v] Removing connection info from cache", cn.String())
 		// Stop all background refreshes
-		i.Close()
-		delete(d.instances, cn)
+		c.Close()
+		delete(d.cache, cn)
 		endInfo(err)
 		return nil, err
 	}
@@ -282,16 +285,16 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	// So check that the certificate is valid before proceeding.
 	if !validClientCert(cn, d.logger, ci.Expiration) {
 		d.logger.Debugf("[%v] Refreshing certificate now", cn.String())
-		i.ForceRefresh()
+		c.ForceRefresh()
 		// Block on refreshed connection info
-		ci, err = i.ConnectionInfo(ctx)
+		ci, err = c.ConnectionInfo(ctx)
 		if err != nil {
 			d.lock.Lock()
 			defer d.lock.Unlock()
 			d.logger.Debugf("[%v] Removing connection info from cache", cn.String())
 			// Stop all background refreshes
-			i.Close()
-			delete(d.instances, cn)
+			c.Close()
+			delete(d.cache, cn)
 			return nil, err
 		}
 	}
@@ -313,7 +316,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	if err != nil {
 		d.logger.Debugf("[%v] Dialing %v failed: %v", cn.String(), addr, err)
 		// refresh the instance info in case it caused the connection failure
-		i.ForceRefresh()
+		c.ForceRefresh()
 		return nil, errtype.NewDialError("failed to dial", cn.String(), err)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
@@ -330,20 +333,20 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	if err != nil {
 		d.logger.Debugf("[%v] TLS handshake failed: %v", cn.String(), err)
 		// refresh the instance info in case it caused the handshake failure
-		i.ForceRefresh()
+		c.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
 		return nil, errtype.NewDialError("handshake failed", cn.String(), err)
 	}
 
 	latency := time.Since(startTime).Milliseconds()
 	go func() {
-		n := atomic.AddUint64(i.OpenConns(), 1)
+		n := atomic.AddUint64(&c.openConns, 1)
 		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
 		trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
 	}()
 
 	return newInstrumentedConn(tlsConn, func() {
-		n := atomic.AddUint64(i.OpenConns(), ^uint64(0))
+		n := atomic.AddUint64(&c.openConns, ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
 	}), nil
 }
@@ -377,12 +380,12 @@ func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	i := d.instance(cn, nil)
-	e, err := i.InstanceEngineVersion(ctx)
+	i := d.connectionInfoCache(cn, nil)
+	ci, err := i.ConnectionInfo(ctx)
 	if err != nil {
 		return "", err
 	}
-	return e, nil
+	return ci.DBVersion, nil
 }
 
 // Warmup starts the background refresh necessary to connect to the instance.
@@ -397,7 +400,7 @@ func (d *Dialer) Warmup(_ context.Context, icn string, opts ...DialOption) error
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	_ = d.instance(cn, &cfg.useIAMAuthN)
+	_ = d.connectionInfoCache(cn, &cfg.useIAMAuthN)
 	return nil
 }
 
@@ -441,42 +444,46 @@ func (d *Dialer) Close() error {
 	close(d.closed)
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	for _, i := range d.instances {
+	for _, i := range d.cache {
 		i.Close()
 	}
 	return nil
 }
 
-// instance is a helper function for returning the appropriate instance object
-// in a threadsafe way. It will create a new instance object, modify the
-// existing one, or leave it unchanged as needed.
-func (d *Dialer) instance(cn instance.ConnName, useIAMAuthN *bool) connectionInfoCache {
+// connectionInfoCache is a helper function for returning the appropriate
+// connection info Cache in a threadsafe way. It will create a new cache,
+// modify the existing one, or leave it unchanged as needed.
+func (d *Dialer) connectionInfoCache(
+	cn instance.ConnName, useIAMAuthN *bool,
+) monitoredCache {
 	d.lock.RLock()
-	i, ok := d.instances[cn]
+	c, ok := d.cache[cn]
 	d.lock.RUnlock()
 	if !ok {
 		d.lock.Lock()
 		defer d.lock.Unlock()
 		// Recheck to ensure instance wasn't created or changed between locks
-		i, ok = d.instances[cn]
+		c, ok = d.cache[cn]
 		if !ok {
 			var useIAMAuthNDial bool
 			if useIAMAuthN != nil {
 				useIAMAuthNDial = *useIAMAuthN
 			}
 			d.logger.Debugf("[%v] Connection info added to cache", cn.String())
-			i = cloudsql.NewRefreshAheadCache(
-				cn,
-				d.logger,
-				d.sqladmin, d.key,
-				d.refreshTimeout, d.iamTokenSource,
-				d.dialerID, useIAMAuthNDial,
-			)
-			d.instances[cn] = i
+			c = monitoredCache{
+				connectionInfoCache: cloudsql.NewRefreshAheadCache(
+					cn,
+					d.logger,
+					d.sqladmin, d.key,
+					d.refreshTimeout, d.iamTokenSource,
+					d.dialerID, useIAMAuthNDial,
+				),
+			}
+			d.cache[cn] = c
 		}
 	}
 
-	i.UpdateRefresh(useIAMAuthN)
+	c.UpdateRefresh(useIAMAuthN)
 
-	return i
+	return c
 }

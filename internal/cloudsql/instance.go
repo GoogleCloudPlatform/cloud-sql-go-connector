@@ -155,12 +155,6 @@ func NewRefreshAheadCache(
 	return i
 }
 
-// OpenConns returns a pointer to the number of open connections to
-// faciliate changing the value using atomics.
-func (i *RefreshAheadCache) OpenConns() *uint64 {
-	return &i.openConns
-}
-
 // Close closes the instance; it stops the refresh cycle and prevents it from
 // making additional calls to the Cloud SQL Admin API.
 func (i *RefreshAheadCache) Close() error {
@@ -286,17 +280,6 @@ func (i *RefreshAheadCache) ConnectionInfo(ctx context.Context) (ConnectionInfo,
 		return ConnectionInfo{}, err
 	}
 	return op.result, nil
-}
-
-// InstanceEngineVersion returns the engine type and version for the instance.
-// The value corresponds to one of the following types for the instance:
-// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
-func (i *RefreshAheadCache) InstanceEngineVersion(ctx context.Context) (string, error) {
-	op, err := i.refreshOperation(ctx)
-	if err != nil {
-		return "", err
-	}
-	return op.result.DBVersion, nil
 }
 
 // UpdateRefresh cancels all existing refresh attempts and schedules new

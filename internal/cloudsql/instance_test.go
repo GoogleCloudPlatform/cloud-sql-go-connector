@@ -51,7 +51,7 @@ func testInstanceConnName() instance.ConnName {
 // RSAKey is used for test only.
 var RSAKey = genRSAKey()
 
-func TestInstanceEngineVersion(t *testing.T) {
+func TestConnectionInfoDBVersion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tests := []string{
@@ -80,12 +80,12 @@ func TestInstanceEngineVersion(t *testing.T) {
 			t.Fatalf("failed to init instance: %v", err)
 		}
 
-		gotEV, err := i.InstanceEngineVersion(ctx)
+		ci, err := i.ConnectionInfo(ctx)
 		if err != nil {
 			t.Fatalf("failed to retrieve engine version: %v", err)
 		}
-		if wantEV != gotEV {
-			t.Errorf("InstanceEngineVersion(%s) failed: want %v, got %v", wantEV, gotEV, err)
+		if wantEV != ci.DBVersion {
+			t.Errorf("ConnectionInfo(%s) failed: want %v, got %v", wantEV, ci, err)
 		}
 
 	}
