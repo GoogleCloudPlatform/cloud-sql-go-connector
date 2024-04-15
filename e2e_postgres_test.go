@@ -133,6 +133,47 @@ func TestPostgresConnectWithIAMUser(t *testing.T) {
 	t.Log(now)
 }
 
+func TestPostgresConnectWithLazyRefresh(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
+	requirePostgresVars(t)
+
+	ctx := context.Background()
+
+	// password is intentionally blank
+	dsn := fmt.Sprintf("user=%s password=\"\" dbname=%s sslmode=disable", postgresUserIAM, postgresDB)
+	config, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("failed to parse pgx config: %v", err)
+	}
+	d, err := cloudsqlconn.NewDialer(
+		ctx,
+		cloudsqlconn.WithLazyRefresh(),
+		cloudsqlconn.WithIAMAuthN(), // use IAM AuthN to exercise all paths
+	)
+	if err != nil {
+		t.Fatalf("failed to initiate Dialer: %v", err)
+	}
+	defer d.Close()
+	config.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+		return d.Dial(ctx, postgresConnName)
+	}
+
+	conn, connErr := pgx.ConnectConfig(ctx, config)
+	if connErr != nil {
+		t.Fatalf("failed to connect: %s", connErr)
+	}
+	defer conn.Close(ctx)
+
+	var now time.Time
+	err = conn.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+	if err != nil {
+		t.Fatalf("QueryRow failed: %s", err)
+	}
+	t.Log(now)
+}
+
 func TestPostgresEngineVersion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")

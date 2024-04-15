@@ -103,6 +103,13 @@ type Dialer struct {
 	sqladmin *sqladmin.Service
 	logger   debug.Logger
 
+	// lazyRefresh determines what kind of caching is used for ephemeral
+	// certificates. When lazyRefresh is true, the dialer will use a lazy
+	// cache, refresh certificates only when a connection attempt needs a fresh
+	// certificate. Otherwise, a refresh ahead cache will be used. The refresh
+	// ahead cache assumes a background goroutine may run consistently.
+	lazyRefresh bool
+
 	// defaultDialConfig holds the constructor level DialOptions, so that it
 	// can be copied and mutated by the Dial function.
 	defaultDialConfig dialConfig
@@ -221,6 +228,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	d := &Dialer{
 		closed:            make(chan struct{}),
 		cache:             make(map[instance.ConnName]monitoredCache),
+		lazyRefresh:       cfg.lazyRefresh,
 		key:               cfg.rsaKey,
 		refreshTimeout:    cfg.refreshTimeout,
 		sqladmin:          client,
@@ -470,15 +478,25 @@ func (d *Dialer) connectionInfoCache(
 				useIAMAuthNDial = *useIAMAuthN
 			}
 			d.logger.Debugf("[%v] Connection info added to cache", cn.String())
-			c = monitoredCache{
-				connectionInfoCache: cloudsql.NewRefreshAheadCache(
+			var cache connectionInfoCache
+			if d.lazyRefresh {
+				cache = cloudsql.NewLazyRefreshCache(
 					cn,
 					d.logger,
 					d.sqladmin, d.key,
 					d.refreshTimeout, d.iamTokenSource,
 					d.dialerID, useIAMAuthNDial,
-				),
+				)
+			} else {
+				cache = cloudsql.NewRefreshAheadCache(
+					cn,
+					d.logger,
+					d.sqladmin, d.key,
+					d.refreshTimeout, d.iamTokenSource,
+					d.dialerID, useIAMAuthNDial,
+				)
 			}
+			c = monitoredCache{connectionInfoCache: cache}
 			d.cache[cn] = c
 		}
 	}

@@ -777,3 +777,38 @@ func TestDialerCloseReportsFriendlyError(t *testing.T) {
 		t.Fatalf("want = %v, got = %v", ErrDialerClosed, err)
 	}
 }
+
+func TestDialerInitializesLazyCache(t *testing.T) {
+	cn, _ := instance.ParseConnName("my-project:my-region:my-instance")
+	inst := mock.NewFakeCSQLInstance(
+		cn.Project(), cn.Region(), cn.Name(),
+	)
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithLazyRefresh(),
+		},
+	})
+
+	// Initialize the connection info cache
+	_, err := d.Dial(context.Background(), inst.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c, ok := d.cache[cn]
+	if !ok {
+		t.Fatal("cache was not populated")
+	}
+	switch tt := c.connectionInfoCache.(type) {
+	case *cloudsql.LazyRefreshCache:
+		// Pass -- the cache was initialized with the correct type
+	default:
+		t.Fatalf("dialer was initialized with non-lazy type: %T", tt)
+	}
+}
