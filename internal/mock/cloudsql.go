@@ -59,6 +59,12 @@ type FakeCSQLInstance struct {
 	Cert *x509.Certificate
 }
 
+// String returns the instance connection name for the
+// instance.
+func (f FakeCSQLInstance) String() string {
+	return fmt.Sprintf("%v:%v:%v", f.project, f.region, f.name)
+}
+
 func (f FakeCSQLInstance) signedCert() ([]byte, error) {
 	return f.signer(f.Cert, f.Key)
 }
