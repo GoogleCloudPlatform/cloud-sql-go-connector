@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.9.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.8.1...v1.9.0) (2024-04-16)
+
+
+### Features
+
+* add support for a lazy refresh ([#772](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/772)) ([931150f](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/931150f492cb461cf623a9bbafae6f704b9c5a36)), closes [#770](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/770)
+
+
+### Bug Fixes
+
+* return a friendly error if the dialer is closed ([#766](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/766)) ([d1c13e0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/d1c13e039a29ccbc085e2d3ca8451f83825e8d32))
+
 ## [1.8.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.8.0...v1.8.1) (2024-03-12)
 
 
