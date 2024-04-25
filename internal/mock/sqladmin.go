@@ -142,6 +142,36 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 	return r
 }
 
+// InstanceGet500 returns a 500 HTTP response
+func InstanceGet500(i FakeCSQLInstance, count int) *Request {
+	return &Request{
+		reqMethod: http.MethodGet,
+		reqPath: fmt.Sprintf(
+			"/sql/v1beta4/projects/%s/instances/%s/connectSettings",
+			i.project, i.name,
+		),
+		reqCt: count,
+		handle: func(resp http.ResponseWriter, _ *http.Request) {
+			http.Error(resp, "server error", http.StatusInternalServerError)
+		},
+	}
+}
+
+// CreateEphemeral500 returns a 500 HTTP response.
+func CreateEphemeral500(i FakeCSQLInstance, count int) *Request {
+	return &Request{
+		reqMethod: http.MethodPost,
+		reqPath: fmt.Sprintf(
+			"/sql/v1beta4/projects/%s/instances/%s:generateEphemeralCert",
+			i.project, i.name,
+		),
+		reqCt: count,
+		handle: func(resp http.ResponseWriter, _ *http.Request) {
+			http.Error(resp, "server error", http.StatusInternalServerError)
+		},
+	}
+}
+
 // CreateEphemeralSuccess returns a Request that responds to the
 // `connect.generateEphemeralCert` SQL Admin endpoint. It responds with a
 // "StatusOK" and a SslCerts object.

@@ -62,7 +62,12 @@ func fetchMetadata(
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.FetchMetadata")
 	defer func() { end(err) }()
-	db, err := client.Connect.Get(inst.Project(), inst.Name()).Context(ctx).Do()
+
+	db, err := retry50x(ctx, func(ctx2 context.Context) (*sqladmin.ConnectSettings, error) {
+		return client.Connect.Get(
+			inst.Project(), inst.Name(),
+		).Context(ctx2).Do()
+	}, exponentialBackoff)
 	if err != nil {
 		return metadata{}, errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
@@ -181,9 +186,11 @@ func fetchEphemeralCert(
 		}
 		req.AccessToken = tok.AccessToken
 	}
-	resp, err := client.Connect.GenerateEphemeralCert(
-		inst.Project(), inst.Name(), &req,
-	).Context(ctx).Do()
+	resp, err := retry50x(ctx, func(ctx2 context.Context) (*sqladmin.GenerateEphemeralCertResponse, error) {
+		return client.Connect.GenerateEphemeralCert(
+			inst.Project(), inst.Name(), &req,
+		).Context(ctx2).Do()
+	}, exponentialBackoff)
 	if err != nil {
 		return tls.Certificate{}, errtype.NewRefreshError(
 			"create ephemeral cert failed",

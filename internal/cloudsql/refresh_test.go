@@ -96,6 +96,40 @@ func TestRefresh(t *testing.T) {
 		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, rr.Expiration)
 	}
 }
+func TestRefreshRetries50xResponses(t *testing.T) {
+	cn := testInstanceConnName()
+	inst := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name(),
+		mock.WithEngineVersion("WANTED_VERSION"),
+	)
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		// First a 500, then a 200 response
+		mock.InstanceGet500(inst, 1),
+		mock.InstanceGetSuccess(inst, 1),
+		// First a 500, then a 200 response
+		mock.CreateEphemeral500(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	if err != nil {
+		t.Fatalf("failed to create test SQL admin service: %s", err)
+	}
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	r := newRefresher(nullLogger{}, client, nil, testDialerID)
+	rr, err := r.ConnectionInfo(context.Background(), cn, RSAKey, false)
+	if err != nil {
+		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
+	}
+	if rr.DBVersion != "WANTED_VERSION" {
+		t.Fatalf("DB version did not match expected, got = %v, want = %v",
+			rr.DBVersion, "WANTED_VERSION",
+		)
+	}
+}
 
 func TestRefreshFailsFast(t *testing.T) {
 	cn := testInstanceConnName()
