@@ -440,8 +440,7 @@ func (i *instrumentedConn) Close() error {
 }
 
 // Close closes the Dialer; it prevents the Dialer from refreshing the information
-// needed to connect. Additional dial operations may succeed until the information
-// expires.
+// needed to connect.
 func (d *Dialer) Close() error {
 	// Check if Close has already been called.
 	select {
