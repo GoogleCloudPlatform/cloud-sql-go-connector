@@ -67,26 +67,36 @@ func TestPostgresPgxPoolConnect(t *testing.T) {
 
 	ctx := context.Background()
 
-	d, err := cloudsqlconn.NewDialer(ctx)
-	if err != nil {
-		t.Fatalf("failed to init Dialer: %v", err)
-	}
-	defer d.Close()
-
+	// Configure the driver to connect to the database
 	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDB)
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("failed to parse pgx config: %v", err)
 	}
 
+	// Create a new dialer with any options
+	d, err := cloudsqlconn.NewDialer(ctx)
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+
+	// call cleanup when you're done with the database connection to close dialer
+	cleanup := func() error { return d.Close() }
+
+	// Tell the driver to use the Cloud SQL Go Connector to create connections
+	// postgresConnName takes the form of 'project:region:instance'.
 	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 		return d.Dial(ctx, postgresConnName)
 	}
 
+	// Interact with the driver directly as you normally would
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		t.Fatalf("failed to create pool: %s", err)
 	}
+	// ... etc
+
+	defer cleanup()
 	defer pool.Close()
 
 	var now time.Time
