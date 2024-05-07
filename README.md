@@ -96,7 +96,7 @@ using [pgx][] directly. See [pgx's advice on which to choose][pgx-advice].
 ##### Using the dialer with pgx
 
 To use the dialer with [pgx][], we recommend using connection pooling with
-[pgxpool](https://pkg.go.dev/github.com/jackc/pgx/v4/pgxpool) by configuring
+[pgxpool](https://pkg.go.dev/github.com/jackc/pgx/v5/pgxpool) by configuring
 a [Config.DialFunc][dial-func] like so:
 
 ``` go
@@ -105,7 +105,7 @@ import (
     "net"
 
     "cloud.google.com/go/cloudsqlconn"
-    "github.com/jackc/pgx/v4/pgxpool"
+    "github.com/jackc/pgx/v5/pgxpool"
 )
 
 func connect() {
@@ -128,7 +128,7 @@ func connect() {
     }
 
     // Interact with the driver directly as you normally would
-    conn, err := pgxpool.ConnectConfig(context.Background(), config)
+    pool, err := pgxpool.NewWithConfig(context.Background(), config)
     if err != nil {
         /* handle error */
     }
@@ -143,7 +143,7 @@ func connect() {
 
 ##### Using the dialer with `database/sql`
 
-To use `database/sql`, call `pgxv4.RegisterDriver` with any necessary Dialer
+To use `database/sql`, call `pgxv5.RegisterDriver` with any necessary Dialer
 configuration. Note: the connection string must use the keyword/value format
 with host set to the instance connection name. The returned `cleanup` func
 will stop the dialer's background refresh goroutine and so should only be called
@@ -154,11 +154,11 @@ import (
     "database/sql"
 
     "cloud.google.com/go/cloudsqlconn"
-    "cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
+    "cloud.google.com/go/cloudsqlconn/postgres/pgxv5"
 )
 
 func connect() {
-    cleanup, err := pgxv4.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())
+    cleanup, err := pgxv5.RegisterDriver("cloudsql-postgres", cloudsqlconn.WithIAMAuthN())
     if err != nil {
         // ... handle error
     }
