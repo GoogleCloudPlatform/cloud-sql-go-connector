@@ -80,12 +80,11 @@ func TestPostgresPgxPoolConnect(t *testing.T) {
 		t.Fatalf("failed to init Dialer: %v", err)
 	}
 
-	// call cleanup when you're done with the database connection
-    	cleanup := func() error { return d.Close() }
+	// call cleanup when you're done with the database connection to close dialer
+	cleanup := func() error { return d.Close() }
 
 	// Tell the driver to use the Cloud SQL Go Connector to create connections
-	// postgresConnName is Cloud SQL instance connection name,
-	// in the form of 'project:region:instance'.
+	// postgresConnName takes the form of 'project:region:instance'.
 	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 		return d.Dial(ctx, postgresConnName)
 	}
@@ -96,6 +95,7 @@ func TestPostgresPgxPoolConnect(t *testing.T) {
 		t.Fatalf("failed to create pool: %s", err)
 	}
 	// ... etc
+
 	defer cleanup()
 	defer pool.Close()
 
