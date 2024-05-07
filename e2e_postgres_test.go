@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
@@ -59,7 +59,7 @@ func requirePostgresVars(t *testing.T) {
 	}
 }
 
-func TestPostgresPgxConnect(t *testing.T) {
+func TestPostgresPgxPoolConnect(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
 	}
@@ -71,25 +71,26 @@ func TestPostgresPgxConnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init Dialer: %v", err)
 	}
+	defer d.Close()
 
 	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDB)
-	config, err := pgx.ParseConfig(dsn)
+	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("failed to parse pgx config: %v", err)
 	}
 
-	config.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 		return d.Dial(ctx, postgresConnName)
 	}
 
-	conn, connErr := pgx.ConnectConfig(ctx, config)
-	if connErr != nil {
-		t.Fatalf("failed to connect: %s", connErr)
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("failed to create pool: %s", err)
 	}
-	defer conn.Close(ctx)
+	defer pool.Close()
 
 	var now time.Time
-	err = conn.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
 	if err != nil {
 		t.Fatalf("QueryRow failed: %s", err)
 	}
@@ -106,7 +107,7 @@ func TestPostgresConnectWithIAMUser(t *testing.T) {
 
 	// password is intentionally blank
 	dsn := fmt.Sprintf("user=%s password=\"\" dbname=%s sslmode=disable", postgresUserIAM, postgresDB)
-	config, err := pgx.ParseConfig(dsn)
+	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("failed to parse pgx config: %v", err)
 	}
@@ -115,18 +116,19 @@ func TestPostgresConnectWithIAMUser(t *testing.T) {
 		t.Fatalf("failed to initiate Dialer: %v", err)
 	}
 	defer d.Close()
-	config.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+
+	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 		return d.Dial(ctx, postgresConnName)
 	}
 
-	conn, connErr := pgx.ConnectConfig(ctx, config)
-	if connErr != nil {
-		t.Fatalf("failed to connect: %s", connErr)
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("failed to create pool: %s", err)
 	}
-	defer conn.Close(ctx)
+	defer pool.Close()
 
 	var now time.Time
-	err = conn.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
 	if err != nil {
 		t.Fatalf("QueryRow failed: %s", err)
 	}
@@ -143,7 +145,7 @@ func TestPostgresConnectWithLazyRefresh(t *testing.T) {
 
 	// password is intentionally blank
 	dsn := fmt.Sprintf("user=%s password=\"\" dbname=%s sslmode=disable", postgresUserIAM, postgresDB)
-	config, err := pgx.ParseConfig(dsn)
+	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("failed to parse pgx config: %v", err)
 	}
@@ -156,18 +158,18 @@ func TestPostgresConnectWithLazyRefresh(t *testing.T) {
 		t.Fatalf("failed to initiate Dialer: %v", err)
 	}
 	defer d.Close()
-	config.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 		return d.Dial(ctx, postgresConnName)
 	}
 
-	conn, connErr := pgx.ConnectConfig(ctx, config)
-	if connErr != nil {
-		t.Fatalf("failed to connect: %s", connErr)
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("failed to create pool: %s", err)
 	}
-	defer conn.Close(ctx)
+	defer pool.Close()
 
 	var now time.Time
-	err = conn.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
 	if err != nil {
 		t.Fatalf("QueryRow failed: %s", err)
 	}
@@ -360,25 +362,26 @@ func TestPostgresAuthentication(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to init Dialer: %v", err)
 			}
+			defer d.Close()
 
 			dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDB)
-			config, err := pgx.ParseConfig(dsn)
+			config, err := pgxpool.ParseConfig(dsn)
 			if err != nil {
 				t.Fatalf("failed to parse pgx config: %v", err)
 			}
 
-			config.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+			config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 				return d.Dial(ctx, postgresConnName)
 			}
 
-			conn, connErr := pgx.ConnectConfig(ctx, config)
-			if connErr != nil {
-				t.Fatalf("failed to connect: %s", connErr)
+			pool, err := pgxpool.NewWithConfig(ctx, config)
+			if err != nil {
+				t.Fatalf("failed to create pool: %s", err)
 			}
-			defer conn.Close(ctx)
+			defer pool.Close()
 
 			var now time.Time
-			err = conn.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+			err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
 			if err != nil {
 				t.Fatalf("QueryRow failed: %s", err)
 			}
