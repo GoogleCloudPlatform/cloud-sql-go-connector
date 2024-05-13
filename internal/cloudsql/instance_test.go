@@ -32,7 +32,7 @@ import (
 
 type nullLogger struct{}
 
-func (nullLogger) Debugf(string, ...interface{}) {}
+func (nullLogger) Debugf(context.Context, string, ...interface{}) {}
 
 // genRSAKey generates an RSA key used for test.
 func genRSAKey() *rsa.PrivateKey {

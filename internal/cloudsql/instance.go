@@ -92,7 +92,7 @@ type RefreshAheadCache struct {
 	openConns uint64
 
 	connName instance.ConnName
-	logger   debug.Logger
+	logger   debug.ContextLogger
 	key      *rsa.PrivateKey
 
 	// refreshTimeout sets the maximum duration a refresh cycle can run
@@ -121,7 +121,7 @@ type RefreshAheadCache struct {
 // NewRefreshAheadCache initializes a new Instance given an instance connection name
 func NewRefreshAheadCache(
 	cn instance.ConnName,
-	l debug.Logger,
+	l debug.ContextLogger,
 	client *sqladmin.Service,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
@@ -366,6 +366,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		// instance has been closed, don't schedule anything
 		if err := i.ctx.Err(); err != nil {
 			i.logger.Debugf(
+				context.Background(),
 				"[%v] Instance is closed, stopping refresh operations",
 				i.connName.String(),
 			)
@@ -374,6 +375,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			return
 		}
 		i.logger.Debugf(
+			context.Background(),
 			"[%v] Connection info refresh operation started",
 			i.connName.String(),
 		)
@@ -397,16 +399,19 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		switch r.err {
 		case nil:
 			i.logger.Debugf(
+				ctx,
 				"[%v] Connection info refresh operation complete",
 				i.connName.String(),
 			)
 			i.logger.Debugf(
+				ctx,
 				"[%v] Current certificate expiration = %v",
 				i.connName.String(),
 				r.result.Expiration.UTC().Format(time.RFC3339),
 			)
 		default:
 			i.logger.Debugf(
+				ctx,
 				"[%v] Connection info refresh operation failed, err = %v",
 				i.connName.String(),
 				r.err,
@@ -423,6 +428,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		// if failed, scheduled the next refresh immediately
 		if r.err != nil {
 			i.logger.Debugf(
+				ctx,
 				"[%v] Connection info refresh operation scheduled immediately",
 				i.connName.String(),
 			)
@@ -444,6 +450,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		i.cur = r
 		t := refreshDuration(time.Now(), i.cur.result.Expiration)
 		i.logger.Debugf(
+			ctx,
 			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
 			i.connName.String(),
 			time.Now().Add(t).UTC().Format(time.RFC3339),

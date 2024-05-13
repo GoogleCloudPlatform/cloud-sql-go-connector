@@ -30,7 +30,7 @@ import (
 // a caller requests connection info and the current certificate is expired.
 type LazyRefreshCache struct {
 	connName        instance.ConnName
-	logger          debug.Logger
+	logger          debug.ContextLogger
 	key             *rsa.PrivateKey
 	r               refresher
 	mu              sync.Mutex
@@ -42,7 +42,7 @@ type LazyRefreshCache struct {
 // NewLazyRefreshCache initializes a new LazyRefreshCache.
 func NewLazyRefreshCache(
 	cn instance.ConnName,
-	l debug.Logger,
+	l debug.ContextLogger,
 	client *sqladmin.Service,
 	key *rsa.PrivateKey,
 	_ time.Duration,
@@ -80,6 +80,7 @@ func (c *LazyRefreshCache) ConnectionInfo(
 	exp := c.cached.Expiration.UTC().Add(-refreshBuffer)
 	if !c.needsRefresh && now.Before(exp) {
 		c.logger.Debugf(
+			ctx,
 			"[%v] Connection info is still valid, using cached info",
 			c.connName.String(),
 		)
@@ -87,12 +88,14 @@ func (c *LazyRefreshCache) ConnectionInfo(
 	}
 
 	c.logger.Debugf(
+		ctx,
 		"[%v] Connection info refresh operation started",
 		c.connName.String(),
 	)
 	ci, err := c.r.ConnectionInfo(ctx, c.connName, c.key, c.useIAMAuthNDial)
 	if err != nil {
 		c.logger.Debugf(
+			ctx,
 			"[%v] Connection info refresh operation failed, err = %v",
 			c.connName.String(),
 			err,
@@ -100,10 +103,12 @@ func (c *LazyRefreshCache) ConnectionInfo(
 		return ConnectionInfo{}, err
 	}
 	c.logger.Debugf(
+		ctx,
 		"[%v] Connection info refresh operation complete",
 		c.connName.String(),
 	)
 	c.logger.Debugf(
+		ctx,
 		"[%v] Current certificate expiration = %v",
 		c.connName.String(),
 		ci.Expiration.UTC().Format(time.RFC3339),

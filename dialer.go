@@ -101,7 +101,7 @@ type Dialer struct {
 	closed chan struct{}
 
 	sqladmin *sqladmin.Service
-	logger   debug.Logger
+	logger   debug.ContextLogger
 
 	// lazyRefresh determines what kind of caching is used for ephemeral
 	// certificates. When lazyRefresh is true, the dialer will use a lazy
@@ -133,7 +133,7 @@ var (
 
 type nullLogger struct{}
 
-func (nullLogger) Debugf(_ string, _ ...interface{}) {}
+func (nullLogger) Debugf(_ context.Context, _ string, _ ...interface{}) {}
 
 // NewDialer creates a new Dialer.
 //
@@ -272,12 +272,12 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	c := d.connectionInfoCache(cn, &cfg.useIAMAuthN)
+	c := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
 	ci, err := c.ConnectionInfo(ctx)
 	if err != nil {
 		d.lock.Lock()
 		defer d.lock.Unlock()
-		d.logger.Debugf("[%v] Removing connection info from cache", cn.String())
+		d.logger.Debugf(ctx, "[%v] Removing connection info from cache", cn.String())
 		// Stop all background refreshes
 		c.Close()
 		delete(d.cache, cn)
@@ -291,15 +291,15 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	// The TLS handshake will not fail on an expired client certificate. It's
 	// not until the first read where the client cert error will be surfaced.
 	// So check that the certificate is valid before proceeding.
-	if !validClientCert(cn, d.logger, ci.Expiration) {
-		d.logger.Debugf("[%v] Refreshing certificate now", cn.String())
+	if !validClientCert(ctx, cn, d.logger, ci.Expiration) {
+		d.logger.Debugf(ctx, "[%v] Refreshing certificate now", cn.String())
 		c.ForceRefresh()
 		// Block on refreshed connection info
 		ci, err = c.ConnectionInfo(ctx)
 		if err != nil {
 			d.lock.Lock()
 			defer d.lock.Unlock()
-			d.logger.Debugf("[%v] Removing connection info from cache", cn.String())
+			d.logger.Debugf(ctx, "[%v] Removing connection info from cache", cn.String())
 			// Stop all background refreshes
 			c.Close()
 			delete(d.cache, cn)
@@ -319,10 +319,10 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	if cfg.dialFunc != nil {
 		f = cfg.dialFunc
 	}
-	d.logger.Debugf("[%v] Dialing %v", cn.String(), addr)
+	d.logger.Debugf(ctx, "[%v] Dialing %v", cn.String(), addr)
 	conn, err = f(ctx, "tcp", addr)
 	if err != nil {
-		d.logger.Debugf("[%v] Dialing %v failed: %v", cn.String(), addr, err)
+		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", cn.String(), addr, err)
 		// refresh the instance info in case it caused the connection failure
 		c.ForceRefresh()
 		return nil, errtype.NewDialError("failed to dial", cn.String(), err)
@@ -339,7 +339,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	tlsConn := tls.Client(conn, ci.TLSConfig())
 	err = tlsConn.HandshakeContext(ctx)
 	if err != nil {
-		d.logger.Debugf("[%v] TLS handshake failed: %v", cn.String(), err)
+		d.logger.Debugf(ctx, "[%v] TLS handshake failed: %v", cn.String(), err)
 		// refresh the instance info in case it caused the handshake failure
 		c.ForceRefresh()
 		_ = tlsConn.Close() // best effort close attempt
@@ -362,7 +362,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 // validClientCert checks that the ephemeral client certificate retrieved from
 // the cache is unexpired. The time comparisons strip the monotonic clock value
 // to ensure an accurate result, even after laptop sleep.
-func validClientCert(cn instance.ConnName, l debug.Logger, expiration time.Time) bool {
+func validClientCert(ctx context.Context, cn instance.ConnName, l debug.ContextLogger, expiration time.Time) bool {
 	// Use UTC() to strip monotonic clock value to guard against inaccurate
 	// comparisons, especially after laptop sleep.
 	// See the comments on the monotonic clock in the Go documentation for
@@ -370,12 +370,13 @@ func validClientCert(cn instance.ConnName, l debug.Logger, expiration time.Time)
 	now := time.Now().UTC()
 	valid := expiration.UTC().After(now)
 	l.Debugf(
+		ctx,
 		"[%v] Now = %v, Current cert expiration = %v",
 		cn.String(),
 		now.Format(time.RFC3339),
 		expiration.UTC().Format(time.RFC3339),
 	)
-	l.Debugf("[%v] Cert is valid = %v", cn.String(), valid)
+	l.Debugf(ctx, "[%v] Cert is valid = %v", cn.String(), valid)
 	return valid
 }
 
@@ -388,7 +389,7 @@ func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	i := d.connectionInfoCache(cn, nil)
+	i := d.connectionInfoCache(ctx, cn, nil)
 	ci, err := i.ConnectionInfo(ctx)
 	if err != nil {
 		return "", err
@@ -399,7 +400,7 @@ func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) 
 // Warmup starts the background refresh necessary to connect to the instance.
 // Use Warmup to start the refresh process early if you don't know when you'll
 // need to call "Dial".
-func (d *Dialer) Warmup(_ context.Context, icn string, opts ...DialOption) error {
+func (d *Dialer) Warmup(ctx context.Context, icn string, opts ...DialOption) error {
 	cn, err := instance.ParseConnName(icn)
 	if err != nil {
 		return err
@@ -408,7 +409,7 @@ func (d *Dialer) Warmup(_ context.Context, icn string, opts ...DialOption) error
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	_ = d.connectionInfoCache(cn, &cfg.useIAMAuthN)
+	_ = d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
 	return nil
 }
 
@@ -461,7 +462,7 @@ func (d *Dialer) Close() error {
 // connection info Cache in a threadsafe way. It will create a new cache,
 // modify the existing one, or leave it unchanged as needed.
 func (d *Dialer) connectionInfoCache(
-	cn instance.ConnName, useIAMAuthN *bool,
+	ctx context.Context, cn instance.ConnName, useIAMAuthN *bool,
 ) monitoredCache {
 	d.lock.RLock()
 	c, ok := d.cache[cn]
@@ -476,7 +477,7 @@ func (d *Dialer) connectionInfoCache(
 			if useIAMAuthN != nil {
 				useIAMAuthNDial = *useIAMAuthN
 			}
-			d.logger.Debugf("[%v] Connection info added to cache", cn.String())
+			d.logger.Debugf(ctx, "[%v] Connection info added to cache", cn.String())
 			var cache connectionInfoCache
 			if d.lazyRefresh {
 				cache = cloudsql.NewLazyRefreshCache(

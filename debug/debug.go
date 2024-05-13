@@ -14,8 +14,18 @@
 
 package debug
 
+import "context"
+
 // Logger is the interface used for debug logging. By default, it is unused.
+//
+// Deprecated: use ContextLogger instead.
 type Logger interface {
 	// Debugf is for reporting information about internal operations.
 	Debugf(format string, args ...interface{})
+}
+
+// ContextLogger is the interface used for debug logging. By default, it is unused.
+type ContextLogger interface {
+	// Debugf is for reporting information about internal operations.
+	Debugf(ctx context.Context, format string, args ...interface{})
 }

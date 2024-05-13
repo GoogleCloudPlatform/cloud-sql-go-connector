@@ -41,7 +41,7 @@ type dialerConfig struct {
 	dialFunc               func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout         time.Duration
 	useIAMAuthN            bool
-	logger                 debug.Logger
+	logger                 debug.ContextLogger
 	lazyRefresh            bool
 	iamLoginTokenSource    oauth2.TokenSource
 	useragents             []string
@@ -234,9 +234,30 @@ func WithIAMAuthN() Option {
 	}
 }
 
+type debugLoggerWithoutContext struct {
+	logger debug.Logger
+}
+
+// Debugf implements debug.ContextLogger.
+func (d *debugLoggerWithoutContext) Debugf(_ context.Context, format string, args ...interface{}) {
+	d.logger.Debugf(format, args...)
+}
+
+var _ debug.ContextLogger = new(debugLoggerWithoutContext)
+
 // WithDebugLogger configures a debug lgoger for reporting on internal
 // operations. By default the debug logger is disabled.
+//
+// Deprecated: use WithContextDebugLogger instead
 func WithDebugLogger(l debug.Logger) Option {
+	return func(d *dialerConfig) {
+		d.logger = &debugLoggerWithoutContext{l}
+	}
+}
+
+// WithContextDebugLogger configures a debug lgoger for reporting on internal
+// operations. By default the debug logger is disabled.
+func WithContextDebugLogger(l debug.ContextLogger) Option {
 	return func(d *dialerConfig) {
 		d.logger = l
 	}
