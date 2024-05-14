@@ -18,7 +18,7 @@ import "context"
 
 // Logger is the interface used for debug logging. By default, it is unused.
 //
-// Deprecated: use ContextLogger instead.
+// Prefer ContextLogger instead.
 type Logger interface {
 	// Debugf is for reporting information about internal operations.
 	Debugf(format string, args ...interface{})
