@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.9.0...v1.10.0) (2024-05-14)
+
+
+### Features
+
+* expose context to debug logger ([#797](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/797)) ([847f7c1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/847f7c10cc796761e81a86e0551f00832a5056d5))
+
+
+### Bug Fixes
+
+* retry 50x errors with exponential backoff ([#781](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/781)) ([40dc789](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/40dc789baabbe40cebabee7a287222940b120e6a))
+
 ## [1.9.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.8.1...v1.9.0) (2024-04-16)
 
 
