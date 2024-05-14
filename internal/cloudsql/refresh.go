@@ -234,7 +234,7 @@ func fetchEphemeralCert(
 
 // newRefresher creates a Refresher.
 func newRefresher(
-	l debug.Logger,
+	l debug.ContextLogger,
 	svc *sqladmin.Service,
 	ts oauth2.TokenSource,
 	dialerID string,
@@ -252,7 +252,7 @@ func newRefresher(
 type refresher struct {
 	// dialerID is the unique ID of the associated dialer.
 	dialerID string
-	logger   debug.Logger
+	logger   debug.ContextLogger
 	client   *sqladmin.Service
 	// ts is the TokenSource used for IAM DB AuthN.
 	ts oauth2.TokenSource
