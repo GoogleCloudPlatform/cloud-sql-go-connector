@@ -255,7 +255,7 @@ func WithDebugLogger(l debug.Logger) Option {
 	}
 }
 
-// WithContextDebugLogger configures a debug lgoger for reporting on internal
+// WithContextDebugLogger configures a debug logger for reporting on internal
 // operations. By default the debug logger is disabled.
 func WithContextDebugLogger(l debug.ContextLogger) Option {
 	return func(d *dialerConfig) {
