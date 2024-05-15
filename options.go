@@ -248,7 +248,7 @@ var _ debug.ContextLogger = new(debugLoggerWithoutContext)
 // WithDebugLogger configures a debug lgoger for reporting on internal
 // operations. By default the debug logger is disabled.
 //
-// Deprecated: use WithContextDebugLogger instead
+// Prefer WithContextDebugLogger instead
 func WithDebugLogger(l debug.Logger) Option {
 	return func(d *dialerConfig) {
 		d.logger = &debugLoggerWithoutContext{l}
