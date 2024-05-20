@@ -132,12 +132,23 @@ func fetchMetadata(
 	return m, nil
 }
 
+var expired = time.Time{}.Add(1)
+
+// canRefresh determines if the provided token was refreshed or if it still has
+// the sentinel expiration, which means the token was provided without a
+// refresh token (as with the Cloud SQL Proxy's --token flag) and therefore
+// cannot be refreshed.
+func canRefresh(t *oauth2.Token) bool {
+	return t.Expiry.Unix() != expired.Unix()
+}
+
+// refreshToken will retrieve a new token, only if a refresh token is present.
 func refreshToken(ts oauth2.TokenSource, tok *oauth2.Token) (*oauth2.Token, error) {
 	expiredToken := &oauth2.Token{
 		AccessToken:  tok.AccessToken,
 		TokenType:    tok.TokenType,
 		RefreshToken: tok.RefreshToken,
-		Expiry:       time.Time{}.Add(1), // Expired
+		Expiry:       expired,
 	}
 	return oauth2.ReuseTokenSource(expiredToken, ts).Token()
 }
@@ -217,9 +228,9 @@ func fetchEphemeralCert(
 		)
 	}
 	if ts != nil {
-		// Adjust the certificate's expiration to be the earliest of the token's
-		// expiration or the certificate's expiration.
-		if tok.Expiry.Before(clientCert.NotAfter) {
+		// Adjust the certificate's expiration to be the earliest of
+		// the token's expiration or the certificate's expiration.
+		if canRefresh(tok) && tok.Expiry.Before(clientCert.NotAfter) {
 			clientCert.NotAfter = tok.Expiry
 		}
 	}

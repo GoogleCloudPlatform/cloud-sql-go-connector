@@ -389,7 +389,7 @@ func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	i := d.connectionInfoCache(ctx, cn, nil)
+	i := d.connectionInfoCache(ctx, cn, &d.defaultDialConfig.useIAMAuthN)
 	ci, err := i.ConnectionInfo(ctx)
 	if err != nil {
 		return "", err

@@ -396,6 +396,38 @@ func TestDialerEngineVersion(t *testing.T) {
 	}
 }
 
+// When Auto IAM AuthN is enabled, EngineVersion should warm the cache with a
+// client certificate with Auto IAM AuthN enabled.
+func TestEngineVersionAvoidsDuplicateRefreshWithIAMAuthN(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+	)
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		dialerOptions: []Option{
+			WithIAMAuthN(), WithIAMAuthNTokenSources(
+				mock.EmptyTokenSource{},
+				mock.EmptyTokenSource{},
+			),
+		},
+		reqs: []*mock.Request{
+			// There should only be two API requests
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+	})
+
+	_, err := d.EngineVersion(context.Background(), inst.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testSuccessfulDial(
+		context.Background(), t, d,
+		inst.String(),
+	)
+}
+
 func TestDialerUserAgent(t *testing.T) {
 	data, err := os.ReadFile("version.txt")
 	if err != nil {
@@ -420,7 +452,7 @@ func TestWarmup(t *testing.T) {
 		expectedCalls []*mock.Request
 	}{
 		{
-			desc:       "warmup and dial are the same",
+			desc:       "Warmup and Dial both use IAM AuthN",
 			warmupOpts: []DialOption{WithDialIAMAuthN(true)},
 			dialOpts:   []DialOption{WithDialIAMAuthN(true)},
 			expectedCalls: []*mock.Request{
@@ -429,7 +461,7 @@ func TestWarmup(t *testing.T) {
 			},
 		},
 		{
-			desc:       "warmup and dial are different",
+			desc:       "Warmup uses IAM Authn, Dial does not",
 			warmupOpts: []DialOption{WithDialIAMAuthN(true)},
 			dialOpts:   []DialOption{WithDialIAMAuthN(false)},
 			expectedCalls: []*mock.Request{
@@ -438,12 +470,12 @@ func TestWarmup(t *testing.T) {
 			},
 		},
 		{
-			desc:       "warmup and default dial are different",
+			desc:       "Warmup uses IAM AuthN, Dial uses global setting",
 			warmupOpts: []DialOption{WithDialIAMAuthN(true)},
 			dialOpts:   []DialOption{},
 			expectedCalls: []*mock.Request{
-				mock.InstanceGetSuccess(inst, 2),
-				mock.CreateEphemeralSuccess(inst, 2),
+				mock.InstanceGetSuccess(inst, 1),
+				mock.CreateEphemeralSuccess(inst, 1),
 			},
 		},
 	}
@@ -451,6 +483,13 @@ func TestWarmup(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
 			d := setupDialer(t, setupConfig{
+				dialerOptions: []Option{
+					WithIAMAuthN(),
+					WithIAMAuthNTokenSources(
+						mock.EmptyTokenSource{},
+						mock.EmptyTokenSource{},
+					),
+				},
 				testInstance: inst,
 				reqs:         test.expectedCalls,
 			})
