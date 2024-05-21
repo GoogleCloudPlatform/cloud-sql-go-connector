@@ -96,6 +96,41 @@ func TestRefresh(t *testing.T) {
 		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, rr.Expiration)
 	}
 }
+
+// If a caller has provided a static token source that cannot be refreshed
+// (e.g., when the Cloud SQL Proxy is invokved with --token), then the
+// refresher cannot determine the token's expiration (without additional API
+// calls), and so the refresher should use the certificate's expiration instead
+// of the token's expiration which is otherwise unset.
+func TestRefreshWithStaticTokenSource(t *testing.T) {
+	cn := testInstanceConnName()
+	inst := mock.NewFakeCSQLInstance(
+		cn.Project(), cn.Region(), cn.Name(),
+	)
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	if err != nil {
+		t.Fatalf("failed to create test SQL admin service: %s", err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "myaccestoken"})
+	r := newRefresher(nullLogger{}, client, ts, testDialerID)
+	ci, err := r.ConnectionInfo(context.Background(), cn, RSAKey, true)
+	if err != nil {
+		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
+	}
+	if !ci.Expiration.After(time.Now()) {
+		t.Fatalf(
+			"Connection info expiration should be in the future, got = %v",
+			ci.Expiration,
+		)
+	}
+}
+
 func TestRefreshRetries50xResponses(t *testing.T) {
 	cn := testInstanceConnName()
 	inst := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name(),

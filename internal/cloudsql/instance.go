@@ -393,8 +393,13 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 				nil,
 			)
 		} else {
+			var useIAMAuthN bool
+			i.mu.Lock()
+			useIAMAuthN = i.useIAMAuthNDial
+			i.mu.Unlock()
 			r.result, r.err = i.r.ConnectionInfo(
-				ctx, i.connName, i.key, i.useIAMAuthNDial)
+				ctx, i.connName, i.key, useIAMAuthN,
+			)
 		}
 		switch r.err {
 		case nil:
