@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.10.0...v1.10.1) (2024-05-22)
+
+
+### Bug Fixes
+
+* remove duplicate refresh operations ([#806](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/806)) ([beb3605](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/beb36052af2221d7ff238edc4c98c733cac2999d)), closes [#771](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/771)
+
 ## [1.10.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.9.0...v1.10.0) (2024-05-14)
 
 
