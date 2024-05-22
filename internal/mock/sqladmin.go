@@ -47,7 +47,7 @@ func httpClient(requests ...*Request) (*http.Client, string, func() error) {
 				}
 			}
 			// Unexpected requests should throw an error
-			resp.WriteHeader(http.StatusNotImplemented)
+			resp.WriteHeader(http.StatusBadRequest)
 			// TODO: follow error format better?
 			resp.Write([]byte(fmt.Sprintf("unexpected request sent to mock client: %v", req)))
 		},
