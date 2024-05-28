@@ -275,12 +275,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	c := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
 	ci, err := c.ConnectionInfo(ctx)
 	if err != nil {
-		d.lock.Lock()
-		defer d.lock.Unlock()
-		d.logger.Debugf(ctx, "[%v] Removing connection info from cache", cn.String())
-		// Stop all background refreshes
-		c.Close()
-		delete(d.cache, cn)
+		d.removeCached(ctx, cn, c, err)
 		endInfo(err)
 		return nil, err
 	}
@@ -297,12 +292,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		// Block on refreshed connection info
 		ci, err = c.ConnectionInfo(ctx)
 		if err != nil {
-			d.lock.Lock()
-			defer d.lock.Unlock()
-			d.logger.Debugf(ctx, "[%v] Removing connection info from cache", cn.String())
-			// Stop all background refreshes
-			c.Close()
-			delete(d.cache, cn)
+			d.removeCached(ctx, cn, c, err)
 			return nil, err
 		}
 	}
@@ -312,6 +302,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	defer func() { connectEnd(err) }()
 	addr, err := ci.Addr(cfg.ipType)
 	if err != nil {
+		d.removeCached(ctx, cn, c, err)
 		return nil, err
 	}
 	addr = net.JoinHostPort(addr, serverProxyPort)
@@ -359,10 +350,31 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	}), nil
 }
 
+// removeCached stops all background refreshes and deletes the connection
+// info cache from the map of caches.
+func (d *Dialer) removeCached(
+	ctx context.Context,
+	i instance.ConnName, c connectionInfoCache, err error,
+) {
+	d.logger.Debugf(
+		ctx,
+		"[%v] Removing connection info from cache: %v",
+		i.String(),
+		err,
+	)
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	c.Close()
+	delete(d.cache, i)
+}
+
 // validClientCert checks that the ephemeral client certificate retrieved from
 // the cache is unexpired. The time comparisons strip the monotonic clock value
 // to ensure an accurate result, even after laptop sleep.
-func validClientCert(ctx context.Context, cn instance.ConnName, l debug.ContextLogger, expiration time.Time) bool {
+func validClientCert(
+	ctx context.Context, cn instance.ConnName,
+	l debug.ContextLogger, expiration time.Time,
+) bool {
 	// Use UTC() to strip monotonic clock value to guard against inaccurate
 	// comparisons, especially after laptop sleep.
 	// See the comments on the monotonic clock in the Go documentation for

@@ -340,14 +340,9 @@ func (r refresher) ConnectionInfo(
 		return ConnectionInfo{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
-	return ConnectionInfo{
-		addrs:             md.ipAddrs,
-		ServerCaCert:      md.serverCaCert,
-		ClientCertificate: ec,
-		Expiration:        ec.Leaf.NotAfter,
-		DBVersion:         md.version,
-		ConnectionName:    cn,
-	}, nil
+	return NewConnectionInfo(
+		cn, md.version, md.ipAddrs, md.serverCaCert, ec,
+	), nil
 }
 
 // supportsAutoIAMAuthN checks that the engine support automatic IAM authn. If

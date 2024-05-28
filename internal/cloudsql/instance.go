@@ -178,6 +178,24 @@ type ConnectionInfo struct {
 	addrs map[string]string
 }
 
+// NewConnectionInfo initializes a ConnectionInfo struct.
+func NewConnectionInfo(
+	cn instance.ConnName,
+	version string,
+	ipAddrs map[string]string,
+	serverCaCert *x509.Certificate,
+	clientCert tls.Certificate,
+) ConnectionInfo {
+	return ConnectionInfo{
+		addrs:             ipAddrs,
+		ServerCaCert:      serverCaCert,
+		ClientCertificate: clientCert,
+		Expiration:        clientCert.Leaf.NotAfter,
+		DBVersion:         version,
+		ConnectionName:    cn,
+	}
+}
+
 // Addr returns the IP address or DNS name for the given IP type.
 func (c ConnectionInfo) Addr(ipType string) (string, error) {
 	var (
