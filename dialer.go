@@ -401,9 +401,10 @@ func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	i := d.connectionInfoCache(ctx, cn, &d.defaultDialConfig.useIAMAuthN)
-	ci, err := i.ConnectionInfo(ctx)
+	c := d.connectionInfoCache(ctx, cn, nil)
+	ci, err := c.ConnectionInfo(ctx)
 	if err != nil {
+		d.removeCached(ctx, cn, c, err)
 		return "", err
 	}
 	return ci.DBVersion, nil
@@ -421,7 +422,12 @@ func (d *Dialer) Warmup(ctx context.Context, icn string, opts ...DialOption) err
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	_ = d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	c := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	_, err = c.ConnectionInfo(ctx)
+	if err != nil {
+		d.removeCached(ctx, cn, c, err)
+		return err
+	}
 	return nil
 }
 
