@@ -93,14 +93,13 @@ type RefreshAheadCache struct {
 
 	connName instance.ConnName
 	logger   debug.ContextLogger
-	key      *rsa.PrivateKey
 
 	// refreshTimeout sets the maximum duration a refresh cycle can run
 	// for.
 	refreshTimeout time.Duration
 	// l controls the rate at which refresh cycles are run.
 	l *rate.Limiter
-	r refresher
+	r adminAPIClient
 
 	mu              sync.RWMutex
 	useIAMAuthNDial bool
@@ -133,11 +132,11 @@ func NewRefreshAheadCache(
 	i := &RefreshAheadCache{
 		connName: cn,
 		logger:   l,
-		key:      key,
 		l:        rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
-		r: newRefresher(
+		r: newAdminAPIClient(
 			l,
 			client,
+			key,
 			ts,
 			dialerID,
 		),
@@ -416,7 +415,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			useIAMAuthN = i.useIAMAuthNDial
 			i.mu.Unlock()
 			r.result, r.err = i.r.ConnectionInfo(
-				ctx, i.connName, i.key, useIAMAuthN,
+				ctx, i.connName, useIAMAuthN,
 			)
 		}
 		switch r.err {

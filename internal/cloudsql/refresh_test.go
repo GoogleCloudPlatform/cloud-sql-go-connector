@@ -59,8 +59,8 @@ func TestRefresh(t *testing.T) {
 		}
 	}()
 
-	r := newRefresher(nullLogger{}, client, nil, testDialerID)
-	rr, err := r.ConnectionInfo(context.Background(), cn, RSAKey, false)
+	r := newAdminAPIClient(nullLogger{}, client, RSAKey, nil, testDialerID)
+	rr, err := r.ConnectionInfo(context.Background(), cn, false)
 	if err != nil {
 		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
 	}
@@ -118,8 +118,8 @@ func TestRefreshWithStaticTokenSource(t *testing.T) {
 	t.Cleanup(func() { _ = cleanup() })
 
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "myaccestoken"})
-	r := newRefresher(nullLogger{}, client, ts, testDialerID)
-	ci, err := r.ConnectionInfo(context.Background(), cn, RSAKey, true)
+	r := newAdminAPIClient(nullLogger{}, client, RSAKey, ts, testDialerID)
+	ci, err := r.ConnectionInfo(context.Background(), cn, true)
 	if err != nil {
 		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
 	}
@@ -154,8 +154,8 @@ func TestRefreshRetries50xResponses(t *testing.T) {
 		}
 	}()
 
-	r := newRefresher(nullLogger{}, client, nil, testDialerID)
-	rr, err := r.ConnectionInfo(context.Background(), cn, RSAKey, false)
+	r := newAdminAPIClient(nullLogger{}, client, RSAKey, nil, testDialerID)
+	rr, err := r.ConnectionInfo(context.Background(), cn, false)
 	if err != nil {
 		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
 	}
@@ -179,8 +179,8 @@ func TestRefreshFailsFast(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := newRefresher(nullLogger{}, client, nil, testDialerID)
-	_, err = r.ConnectionInfo(context.Background(), cn, RSAKey, false)
+	r := newAdminAPIClient(nullLogger{}, client, RSAKey, nil, testDialerID)
+	_, err = r.ConnectionInfo(context.Background(), cn, false)
 	if err != nil {
 		t.Fatalf("expected no error, got = %v", err)
 	}
@@ -188,7 +188,7 @@ func TestRefreshFailsFast(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	// context is canceled
-	_, err = r.ConnectionInfo(ctx, cn, RSAKey, false)
+	_, err = r.ConnectionInfo(ctx, cn, false)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled error, got = %v", err)
 	}
@@ -261,8 +261,8 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ts := &fakeTokenSource{responses: tc.resps}
-			r := newRefresher(nullLogger{}, client, ts, testDialerID)
-			rr, err := r.ConnectionInfo(context.Background(), cn, RSAKey, true)
+			r := newAdminAPIClient(nullLogger{}, client, RSAKey, ts, testDialerID)
+			rr, err := r.ConnectionInfo(context.Background(), cn, true)
 			if err != nil {
 				t.Fatalf("want no error, got = %v", err)
 			}
@@ -307,8 +307,8 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ts := &fakeTokenSource{responses: tc.resps}
-			r := newRefresher(nullLogger{}, client, ts, testDialerID)
-			_, err := r.ConnectionInfo(context.Background(), cn, RSAKey, true)
+			r := newAdminAPIClient(nullLogger{}, client, RSAKey, ts, testDialerID)
+			_, err := r.ConnectionInfo(context.Background(), cn, true)
 			if err == nil {
 				t.Fatalf("expected get failed error, got = %v", err)
 			}
@@ -367,8 +367,8 @@ func TestRefreshMetadataConfigError(t *testing.T) {
 			}
 			defer cleanup()
 
-			r := newRefresher(nullLogger{}, client, nil, testDialerID)
-			_, err = r.ConnectionInfo(context.Background(), cn, RSAKey, false)
+			r := newAdminAPIClient(nullLogger{}, client, RSAKey, nil, testDialerID)
+			_, err = r.ConnectionInfo(context.Background(), cn, false)
 			if !errors.As(err, &tc.wantErr) {
 				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 			}
@@ -432,8 +432,8 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 			}
 			defer cleanup()
 
-			r := newRefresher(nullLogger{}, client, nil, testDialerID)
-			_, err = r.ConnectionInfo(context.Background(), cn, RSAKey, false)
+			r := newAdminAPIClient(nullLogger{}, client, RSAKey, nil, testDialerID)
+			_, err = r.ConnectionInfo(context.Background(), cn, false)
 			if !errors.As(err, &tc.wantErr) {
 				t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 			}
@@ -497,8 +497,8 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		}
 		defer cleanup()
 
-		r := newRefresher(nullLogger{}, client, nil, testDialerID)
-		_, err = r.ConnectionInfo(context.Background(), cn, RSAKey, false)
+		r := newAdminAPIClient(nullLogger{}, client, RSAKey, nil, testDialerID)
+		_, err = r.ConnectionInfo(context.Background(), cn, false)
 
 		if !errors.As(err, &tc.wantErr) {
 			t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
