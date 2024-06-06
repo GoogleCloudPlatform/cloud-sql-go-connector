@@ -31,8 +31,7 @@ import (
 type LazyRefreshCache struct {
 	connName        instance.ConnName
 	logger          debug.ContextLogger
-	key             *rsa.PrivateKey
-	r               refresher
+	r               adminAPIClient
 	mu              sync.Mutex
 	useIAMAuthNDial bool
 	needsRefresh    bool
@@ -53,10 +52,10 @@ func NewLazyRefreshCache(
 	return &LazyRefreshCache{
 		connName: cn,
 		logger:   l,
-		key:      key,
-		r: newRefresher(
+		r: newAdminAPIClient(
 			l,
 			client,
+			key,
 			ts,
 			dialerID,
 		),
@@ -92,7 +91,7 @@ func (c *LazyRefreshCache) ConnectionInfo(
 		"[%v] Connection info refresh operation started",
 		c.connName.String(),
 	)
-	ci, err := c.r.ConnectionInfo(ctx, c.connName, c.key, c.useIAMAuthNDial)
+	ci, err := c.r.ConnectionInfo(ctx, c.connName, c.useIAMAuthNDial)
 	if err != nil {
 		c.logger.Debugf(
 			ctx,

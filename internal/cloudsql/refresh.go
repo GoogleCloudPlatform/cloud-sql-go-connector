@@ -243,36 +243,40 @@ func fetchEphemeralCert(
 	return c, nil
 }
 
-// newRefresher creates a Refresher.
-func newRefresher(
+// newAdminAPIClient creates a Refresher.
+func newAdminAPIClient(
 	l debug.ContextLogger,
 	svc *sqladmin.Service,
+	key *rsa.PrivateKey,
 	ts oauth2.TokenSource,
 	dialerID string,
-) refresher {
-	return refresher{
+) adminAPIClient {
+	return adminAPIClient{
 		dialerID: dialerID,
 		logger:   l,
+		key:      key,
 		client:   svc,
 		ts:       ts,
 	}
 }
 
-// refresher manages the SQL Admin API access to instance metadata and to
+// adminAPIClient manages the SQL Admin API access to instance metadata and to
 // ephemeral certificates.
-type refresher struct {
+type adminAPIClient struct {
 	// dialerID is the unique ID of the associated dialer.
 	dialerID string
 	logger   debug.ContextLogger
-	client   *sqladmin.Service
+	// key is used to generate the client certificate
+	key    *rsa.PrivateKey
+	client *sqladmin.Service
 	// ts is the TokenSource used for IAM DB AuthN.
 	ts oauth2.TokenSource
 }
 
 // ConnectionInfo immediately performs a full refresh operation using the Cloud
 // SQL Admin API.
-func (r refresher) ConnectionInfo(
-	ctx context.Context, cn instance.ConnName, k *rsa.PrivateKey, iamAuthNDial bool,
+func (c adminAPIClient) ConnectionInfo(
+	ctx context.Context, cn instance.ConnName, iamAuthNDial bool,
 ) (ci ConnectionInfo, err error) {
 
 	var refreshEnd trace.EndSpanFunc
@@ -280,7 +284,7 @@ func (r refresher) ConnectionInfo(
 		trace.AddInstanceName(cn.String()),
 	)
 	defer func() {
-		go trace.RecordRefreshResult(context.Background(), cn.String(), r.dialerID, err)
+		go trace.RecordRefreshResult(context.Background(), cn.String(), c.dialerID, err)
 		refreshEnd(err)
 	}()
 
@@ -292,7 +296,7 @@ func (r refresher) ConnectionInfo(
 	mdC := make(chan mdRes, 1)
 	go func() {
 		defer close(mdC)
-		md, err := fetchMetadata(ctx, r.client, cn)
+		md, err := fetchMetadata(ctx, c.client, cn)
 		mdC <- mdRes{md, err}
 	}()
 
@@ -306,9 +310,9 @@ func (r refresher) ConnectionInfo(
 		defer close(ecC)
 		var iamTS oauth2.TokenSource
 		if iamAuthNDial {
-			iamTS = r.ts
+			iamTS = c.ts
 		}
-		ec, err := fetchEphemeralCert(ctx, r.client, cn, k, iamTS)
+		ec, err := fetchEphemeralCert(ctx, c.client, cn, c.key, iamTS)
 		ecC <- ecRes{ec, err}
 	}()
 
