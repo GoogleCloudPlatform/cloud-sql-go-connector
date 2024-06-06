@@ -60,18 +60,47 @@ var (
 	//go:embed version.txt
 	versionString string
 	userAgent     = "cloud-sql-go-connector/" + strings.TrimSpace(versionString)
-
-	// defaultKey is the default RSA public/private keypair used by the clients.
-	defaultKey    *rsa.PrivateKey
-	defaultKeyErr error
-	keyOnce       sync.Once
 )
 
-func getDefaultKeys() (*rsa.PrivateKey, error) {
-	keyOnce.Do(func() {
-		defaultKey, defaultKeyErr = rsa.GenerateKey(rand.Reader, 2048)
-	})
-	return defaultKey, defaultKeyErr
+// keyGenerator encapsulates the details of RSA key generation to provide lazy
+// generation, custom keys, or a default RSA generator.
+type keyGenerator struct {
+	once    sync.Once
+	key     *rsa.PrivateKey
+	err     error
+	genFunc func() (*rsa.PrivateKey, error)
+}
+
+// newKeyGenerator initializes a keyGenerator that will (in order):
+// - always return the RSA key if one is provided, or
+// - generate an RSA key lazily when it's requested, or
+// - (default) immediately generate an RSA key as part of the initializer.
+func newKeyGenerator(
+	k *rsa.PrivateKey, lazy bool, genFunc func() (*rsa.PrivateKey, error),
+) (*keyGenerator, error) {
+	g := &keyGenerator{genFunc: genFunc}
+	switch {
+	case k != nil:
+		// If the caller has provided a key, initialize the key and consume the
+		// sync.Once now.
+		g.once.Do(func() { g.key, g.err = k, nil })
+	case lazy:
+		// If lazy refresh is enabled, do nothing and wait for the call to
+		// rsaKey.
+	default:
+		// If no key has been provided and lazy refresh isn't enabled, generate
+		// the key and consume the sync.Once now.
+		g.once.Do(func() { g.key, g.err = g.genFunc() })
+	}
+	return g, g.err
+}
+
+// rsaKey will generate an RSA key if one is not already cached. Otherwise, it
+// will return the cached key.
+func (g *keyGenerator) rsaKey() (*rsa.PrivateKey, error) {
+	g.once.Do(func() { g.key, g.err = g.genFunc() })
+
+	return g.key, g.err
 }
 
 type connectionInfoCache interface {
@@ -95,7 +124,7 @@ type monitoredCache struct {
 type Dialer struct {
 	lock           sync.RWMutex
 	cache          map[instance.ConnName]monitoredCache
-	key            *rsa.PrivateKey
+	keyGenerator   *keyGenerator
 	refreshTimeout time.Duration
 	// closed reports if the dialer has been closed.
 	closed chan struct{}
@@ -184,14 +213,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		cfg.iamLoginTokenSource = scoped
 	}
 
-	if cfg.rsaKey == nil {
-		key, err := getDefaultKeys()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate RSA keys: %v", err)
-		}
-		cfg.rsaKey = key
-	}
-
 	if cfg.setUniverseDomain && cfg.setAdminAPIEndpoint {
 		return nil, errors.New(
 			"can not use WithAdminAPIEndpoint and WithUniverseDomain Options together, " +
@@ -225,11 +246,18 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	if err := trace.InitMetrics(); err != nil {
 		return nil, err
 	}
+	g, err := newKeyGenerator(cfg.rsaKey, cfg.lazyRefresh,
+		func() (*rsa.PrivateKey, error) {
+			return rsa.GenerateKey(rand.Reader, 2048)
+		})
+	if err != nil {
+		return nil, err
+	}
 	d := &Dialer{
 		closed:            make(chan struct{}),
 		cache:             make(map[instance.ConnName]monitoredCache),
 		lazyRefresh:       cfg.lazyRefresh,
-		key:               cfg.rsaKey,
+		keyGenerator:      g,
 		refreshTimeout:    cfg.refreshTimeout,
 		sqladmin:          client,
 		logger:            cfg.logger,
@@ -272,7 +300,11 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	c := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	c, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	if err != nil {
+		endInfo(err)
+		return nil, err
+	}
 	ci, err := c.ConnectionInfo(ctx)
 	if err != nil {
 		d.removeCached(ctx, cn, c, err)
@@ -401,7 +433,10 @@ func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	i := d.connectionInfoCache(ctx, cn, &d.defaultDialConfig.useIAMAuthN)
+	i, err := d.connectionInfoCache(ctx, cn, &d.defaultDialConfig.useIAMAuthN)
+	if err != nil {
+		return "", err
+	}
 	ci, err := i.ConnectionInfo(ctx)
 	if err != nil {
 		return "", err
@@ -421,8 +456,8 @@ func (d *Dialer) Warmup(ctx context.Context, icn string, opts ...DialOption) err
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	_ = d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
-	return nil
+	_, err = d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	return err
 }
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
@@ -475,7 +510,7 @@ func (d *Dialer) Close() error {
 // modify the existing one, or leave it unchanged as needed.
 func (d *Dialer) connectionInfoCache(
 	ctx context.Context, cn instance.ConnName, useIAMAuthN *bool,
-) monitoredCache {
+) (monitoredCache, error) {
 	d.lock.RLock()
 	c, ok := d.cache[cn]
 	d.lock.RUnlock()
@@ -490,12 +525,16 @@ func (d *Dialer) connectionInfoCache(
 				useIAMAuthNDial = *useIAMAuthN
 			}
 			d.logger.Debugf(ctx, "[%v] Connection info added to cache", cn.String())
+			k, err := d.keyGenerator.rsaKey()
+			if err != nil {
+				return monitoredCache{}, err
+			}
 			var cache connectionInfoCache
 			if d.lazyRefresh {
 				cache = cloudsql.NewLazyRefreshCache(
 					cn,
 					d.logger,
-					d.sqladmin, d.key,
+					d.sqladmin, k,
 					d.refreshTimeout, d.iamTokenSource,
 					d.dialerID, useIAMAuthNDial,
 				)
@@ -503,7 +542,7 @@ func (d *Dialer) connectionInfoCache(
 				cache = cloudsql.NewRefreshAheadCache(
 					cn,
 					d.logger,
-					d.sqladmin, d.key,
+					d.sqladmin, k,
 					d.refreshTimeout, d.iamTokenSource,
 					d.dialerID, useIAMAuthNDial,
 				)
@@ -516,5 +555,5 @@ func (d *Dialer) connectionInfoCache(
 
 	c.UpdateRefresh(useIAMAuthN)
 
-	return c
+	return c, nil
 }
