@@ -459,6 +459,10 @@ func (d *Dialer) Warmup(ctx context.Context, icn string, opts ...DialOption) err
 	}
 	c, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
 	if err != nil {
+		return err
+	}
+	_, err = c.ConnectionInfo(ctx)
+	if err != nil {
 		d.removeCached(ctx, cn, c, err)
 	}
 	return err

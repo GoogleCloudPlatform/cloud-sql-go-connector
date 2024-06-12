@@ -453,7 +453,7 @@ func TestEngineVersionRemovesInvalidInstancesFromCache(t *testing.T) {
 		opts []DialOption
 	}{
 		{
-			desc: "dialing a bad instance URI",
+			desc: "EngineVersion on a bad instance URI",
 			icn:  badInstanceConnectionName,
 			resp: connectionInfoResp{
 				err: errors.New("connect info failed"),
@@ -578,6 +578,70 @@ func TestWarmup(t *testing.T) {
 			)
 		})
 	}
+}
+
+func TestWarmupRemovesInvalidInstancesFromCache(t *testing.T) {
+	// When a dialer attempts to Warmup for a non-existent instance,
+	// it should delete the instance from the cache and ensure no background
+	// refresh happens (which would be wasted cycles).
+	d, err := NewDialer(
+		context.Background(),
+		WithTokenSource(mock.EmptyTokenSource{}),
+	)
+	if err != nil {
+		t.Fatalf("expected NewDialer to succeed, but got error: %v", err)
+	}
+
+	// Populate instance map with connection info cache that will always fail
+	// This allows the test to verify the error case path invoking close.
+	badInstanceConnectionName := "doesntexist:us-central1:doesntexist"
+	tcs := []struct {
+		desc string
+		icn  string
+		resp connectionInfoResp
+		opts []DialOption
+	}{
+		{
+			desc: "warmup a bad instance URI",
+			icn:  badInstanceConnectionName,
+			resp: connectionInfoResp{
+				err: errors.New("connect info failed"),
+			},
+			opts: []DialOption{WithDialIAMAuthN(true)},
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			// Manually populate the internal cache with a spy
+			inst, _ := instance.ParseConnName(tc.icn)
+			spy := &spyConnectionInfoCache{
+				connectInfoCalls: []connectionInfoResp{tc.resp},
+			}
+			d.cache[inst] = monitoredCache{
+				connectionInfoCache: spy,
+			}
+
+			err = d.Warmup(context.Background(), tc.icn, tc.opts...)
+			if err == nil {
+				t.Fatal("expected Warmup to return error")
+			}
+			// Verify that the connection info cache was closed (to prevent
+			// further failed refresh operations)
+			if got, want := spy.closeWasCalled(), true; got != want {
+				t.Fatal("Close was not called")
+			}
+
+			// Now verify that bad connection name has been deleted from map.
+			d.lock.RLock()
+			_, ok := d.cache[inst]
+			d.lock.RUnlock()
+			if ok {
+				t.Fatal("connection info was not removed from cache")
+			}
+		})
+	}
+
 }
 
 func TestDialDialerOptsConflicts(t *testing.T) {
