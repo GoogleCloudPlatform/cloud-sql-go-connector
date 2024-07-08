@@ -29,7 +29,7 @@ import (
 //
 //	base * multi^(attempt + 1 + random)
 //
-// With base = 200ms and multi = 1.1618, and random = [0.0, 1.0),
+// With base = 200ms and multi = 1.618, and random = [0.0, 1.0),
 // the backoff values would fall between the following low and high ends:
 //
 // Attempt  Low (ms)  High (ms)
