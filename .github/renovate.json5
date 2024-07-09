@@ -1,4 +1,7 @@
 {
+  "constraints": {
+    "go": "1.20",
+  },
   "extends": [
     "config:recommended"
   ],
