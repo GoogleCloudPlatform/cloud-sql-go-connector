@@ -25,6 +25,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +41,14 @@ import (
 func testSuccessfulDial(
 	ctx context.Context, t *testing.T, d *Dialer, icn string, opts ...DialOption,
 ) {
+	testSucessfulDialWithInstanceName(ctx, t, d, icn, "my-instance", opts...)
+}
+
+// testSuccessfulDial uses the provided dialer to dial the specified instance
+// and verifies the connection works end to end.
+func testSucessfulDialWithInstanceName(
+	ctx context.Context, t *testing.T, d *Dialer, icn string, instanceName string, opts ...DialOption,
+) {
 	conn, err := d.Dial(ctx, icn, opts...)
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
@@ -50,7 +59,7 @@ func testSuccessfulDial(
 	if err != nil {
 		t.Fatalf("expected ReadAll to succeed, got error %v", err)
 	}
-	if string(data) != "my-instance" {
+	if string(data) != instanceName {
 		t.Fatalf(
 			"expected known response from the server, but got %v",
 			string(data),
@@ -1078,4 +1087,77 @@ func TestDialerFailsDnsTxtRecordMissing(t *testing.T) {
 	if !strings.Contains(err.Error(), wantMsg) {
 		t.Fatalf("want = %v, got = %v", wantMsg, err)
 	}
+}
+
+type changingResolver struct {
+	stage *int32
+}
+
+func (r *changingResolver) Resolve(_ context.Context, name string) (instance.ConnName, error) {
+	// For TestDialerFailoverOnInstanceChange
+	if name == "update.example.com" {
+		if atomic.LoadInt32(r.stage) == 0 {
+			return instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "update.example.com")
+		}
+		return instance.ParseConnNameWithDomainName("my-project:my-region:my-instance2", "update.example.com")
+	}
+	// TestDialerFailsDnsSrvRecordMissing
+	return instance.ConnName{}, fmt.Errorf("no resolution for %q", name)
+}
+
+func TestDialerUpdatesOnDialAfterDnsChange(t *testing.T) {
+	// At first, the resolver will resolve
+	// update.example.com to "my-instance"
+	// Then, the resolver will resolve the same domain name to
+	// "my-instance2".
+	// This shows that on every call to Dial(), the dialer will resolve the
+	// SRV record and connect to the correct instance.
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+	)
+	inst2 := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance2",
+	)
+	r := &changingResolver{
+		stage: new(int32),
+	}
+
+	d := setupDialer(t, setupConfig{
+		skipServer: true,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+			mock.InstanceGetSuccess(inst2, 1),
+			mock.CreateEphemeralSuccess(inst2, 1),
+		},
+		dialerOptions: []Option{
+			WithResolver(r),
+			WithTokenSource(mock.EmptyTokenSource{}),
+		},
+	})
+
+	// Start the proxy for instance 1
+	stop1 := mock.StartServerProxy(t, inst)
+	t.Cleanup(func() {
+		stop1()
+	})
+
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"update.example.com",
+	)
+	stop1()
+
+	atomic.StoreInt32(r.stage, 1)
+
+	// Start the proxy for instance 2
+	stop2 := mock.StartServerProxy(t, inst2)
+	t.Cleanup(func() {
+		stop2()
+	})
+
+	testSucessfulDialWithInstanceName(
+		context.Background(), t, d,
+		"update.example.com", "my-instance2",
+	)
 }
