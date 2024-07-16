@@ -165,6 +165,11 @@ func (i *RefreshAheadCache) Close() error {
 	return nil
 }
 
+// UseIAMAuthN returns true if this dialer is using IAM AuthN
+func (i *RefreshAheadCache) UseIAMAuthN() bool {
+	return i.useIAMAuthNDial
+}
+
 // ConnectionInfo contains all necessary information to connect securely to the
 // server-side Proxy running on a Cloud SQL instance.
 type ConnectionInfo struct {

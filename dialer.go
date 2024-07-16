@@ -107,6 +107,7 @@ type connectionInfoCache interface {
 	ConnectionInfo(context.Context) (cloudsql.ConnectionInfo, error)
 	UpdateRefresh(*bool)
 	ForceRefresh()
+	UseIAMAuthN() bool
 	io.Closer
 }
 
