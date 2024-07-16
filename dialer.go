@@ -107,39 +107,8 @@ type connectionInfoCache interface {
 	ConnectionInfo(context.Context) (cloudsql.ConnectionInfo, error)
 	UpdateRefresh(*bool)
 	ForceRefresh()
+	UseIAMAuthN() bool
 	io.Closer
-}
-
-// monitoredCache is a wrapper around a connectionInfoCache that tracks the
-// number of connections to the associated instance.
-type monitoredCache struct {
-	openConnsCount *uint64
-
-	connectionInfoCache
-}
-
-func (c *monitoredCache) Close() error {
-	return c.connectionInfoCache.Close()
-}
-
-func (c *monitoredCache) ForceRefresh() {
-	if c == nil || c.connectionInfoCache == nil {
-		return
-	}
-	c.connectionInfoCache.ForceRefresh()
-}
-
-func (c *monitoredCache) UpdateRefresh(b *bool) {
-	if c == nil || c.connectionInfoCache == nil {
-		return
-	}
-	c.connectionInfoCache.UpdateRefresh(b)
-}
-func (c *monitoredCache) ConnectionInfo(ctx context.Context) (cloudsql.ConnectionInfo, error) {
-	if c == nil || c.connectionInfoCache == nil {
-		return cloudsql.ConnectionInfo{}, nil
-	}
-	return c.connectionInfoCache.ConnectionInfo(ctx)
 }
 
 // A Dialer is used to create connections to Cloud SQL instances.
@@ -178,7 +147,8 @@ type Dialer struct {
 	iamTokenSource oauth2.TokenSource
 
 	// resolver converts instance names into DNS names.
-	resolver instance.ConnectionNameResolver
+	resolver       instance.ConnectionNameResolver
+	failoverPeriod time.Duration
 }
 
 var (
@@ -202,6 +172,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		logger:          nullLogger{},
 		useragents:      []string{userAgent},
 		serviceUniverse: "googleapis.com",
+		failoverPeriod:  cloudsql.FailoverPeriod,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -215,6 +186,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	if cfg.setIAMAuthNTokenSource && !cfg.useIAMAuthN {
 		return nil, errUseTokenSource
 	}
+
 	// Add this to the end to make sure it's not overridden
 	cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
 
@@ -297,7 +269,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		iamTokenSource:    cfg.iamLoginTokenSource,
 		dialFunc:          cfg.dialFunc,
 		resolver:          r,
+		failoverPeriod:    cfg.failoverPeriod,
 	}
+
 	return d, nil
 }
 
@@ -413,6 +387,13 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
 	}, d.dialerID, cn.String())
 
+	// If this connection was opened using a Domain Name, then store it for later
+	// in case it needs to be forcibly closed.
+	if cn.DomainName() != "" {
+		c.mu.Lock()
+		c.openConns = append(c.openConns, iConn)
+		c.mu.Unlock()
+	}
 	return iConn, nil
 }
 
@@ -514,6 +495,7 @@ func newInstrumentedConn(conn net.Conn, closeFunc func(), dialerID, connName str
 type instrumentedConn struct {
 	net.Conn
 	closeFunc func()
+	mu        sync.RWMutex
 	closed    bool
 	dialerID  string
 	connName  string
@@ -539,9 +521,18 @@ func (i *instrumentedConn) Write(b []byte) (int, error) {
 	return bytesWritten, err
 }
 
+// isClosed returns true if this connection is closing or is already closed.
+func (i *instrumentedConn) isClosed() bool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.closed
+}
+
 // Close delegates to the underlying net.Conn interface and reports the close
 // to the provided closeFunc only when Close returns no error.
 func (i *instrumentedConn) Close() error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	i.closed = true
 	err := i.Conn.Close()
 	if err != nil {
@@ -582,6 +573,8 @@ func (d *Dialer) connectionInfoCache(
 	})
 
 	if old != nil {
+		// ensure that the old cache entry is closed.
+		// monitoredCache.Close() may be called safely, even if old is closed.
 		old.Close()
 	}
 
@@ -621,10 +614,7 @@ func (d *Dialer) createConnectionInfoCache(
 			d.dialerID, useIAMAuthNDial,
 		)
 	}
-	c := &monitoredCache{
-		openConnsCount:      new(uint64),
-		connectionInfoCache: cache,
-	}
+	c := newMonitoredCache(ctx, cache, cn, d.failoverPeriod, d.resolver, d.logger)
 
 	c.UpdateRefresh(useIAMAuthN)
 

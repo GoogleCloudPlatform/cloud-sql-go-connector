@@ -54,6 +54,7 @@ type dialerConfig struct {
 	setTokenSource         bool
 	setIAMAuthNTokenSource bool
 	resolver               instance.ConnectionNameResolver
+	failoverPeriod         time.Duration
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -268,6 +269,16 @@ func WithResolver(r instance.ConnectionNameResolver) Option {
 func WithDNSResolver() Option {
 	return func(d *dialerConfig) {
 		d.resolver = cloudsql.DNSResolver
+	}
+}
+
+// WithFailoverPeriod will cause the connector to periodically check the SRV DNS
+// records of instance configured using DNS names. By default, this is 30
+// seconds. If this is set to 0, the connector will only check for domain name
+// changes when establishing a new connection.
+func WithFailoverPeriod(f time.Duration) Option {
+	return func(d *dialerConfig) {
+		d.failoverPeriod = f
 	}
 }
 

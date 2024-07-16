@@ -89,7 +89,7 @@ func (d *dialerCache) getOrAdd(cn instance.ConnName, f func() (*monitoredCache, 
 	d.mu.RLock()
 	c, ok := d.cache[cn]
 	d.mu.RUnlock()
-	if ok {
+	if ok && !c.isClosed() {
 		return c, oldC, nil
 	}
 
@@ -100,7 +100,12 @@ func (d *dialerCache) getOrAdd(cn instance.ConnName, f func() (*monitoredCache, 
 	// Look up in the map by CN again
 	c, ok = d.cache[cn]
 	if ok {
-		return c, nil, nil
+		if !c.isClosed() {
+			return c, nil, nil
+		}
+		// c is closed, therefore remove it from the cache.
+		oldC = c
+		delete(d.cache, cn)
 	}
 
 	// Try to get an instance with the same domain name but different instance

@@ -141,3 +141,8 @@ func (c *LazyRefreshCache) ForceRefresh() {
 func (c *LazyRefreshCache) Close() error {
 	return nil
 }
+
+// UseIAMAuthN returns true if this dialer is using IAM AuthN
+func (c *LazyRefreshCache) UseIAMAuthN() bool {
+	return c.useIAMAuthNDial
+}

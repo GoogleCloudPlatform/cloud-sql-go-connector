@@ -76,6 +76,46 @@ func TestDialerCache_Get_UsesExistingInstance(t *testing.T) {
 
 }
 
+func TestDialerCache_Get_ReplacesClosedInstance(t *testing.T) {
+	cache := newDialerCache(&testLog{t: t})
+	var wantOpenConns uint64 = 10
+	var wantOpenConns2 uint64 = 20
+	wantCn, _ := instance.ParseConnNameWithDomainName("project:region:instance", "d1.example.com")
+
+	// First, put  d1.example.com = project:region:instance
+	c, _, err := cache.getOrAdd(wantCn, func() (*monitoredCache, error) {
+		return &monitoredCache{openConnsCount: &wantOpenConns}, nil
+	})
+	if err != nil {
+		t.Error("Got error, want no error", err)
+	}
+	if *c.openConnsCount != wantOpenConns {
+		t.Fatal("Got wrong cache instance")
+	}
+
+	// Close the instance.
+	c.closed = true
+
+	// Attempt to get the instance again after it closed. This will create
+	// a new cache entry.
+	c2, oldC, err := cache.getOrAdd(wantCn, func() (*monitoredCache, error) {
+		return &monitoredCache{openConnsCount: &wantOpenConns2}, nil
+	})
+	if err != nil {
+		t.Error("Got error, want no error", err)
+	}
+	if *oldC.openConnsCount != wantOpenConns {
+		t.Fatal("Got wrong cache instance")
+	}
+	if *c2.openConnsCount != wantOpenConns2 {
+		t.Fatal("Got wrong value for cache")
+	}
+	if len(cache.cache) != 1 {
+		t.Fatal("Got wrong number of cache entries: want 1, got ", len(cache.cache))
+	}
+
+}
+
 func TestDialerCache_Get_ErrorOnInstanceCreate(t *testing.T) {
 	cache := newDialerCache(&testLog{t: t})
 	wantCn, _ := instance.ParseConnName("myproject:region:instance")
