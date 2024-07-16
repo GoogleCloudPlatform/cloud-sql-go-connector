@@ -23,11 +23,11 @@ func TestParseConnName(t *testing.T) {
 	}{
 		{
 			"project:region:instance",
-			ConnName{"project", "region", "instance"},
+			ConnName{project: "project", region: "region", name: "instance"},
 		},
 		{
 			"google.com:project:region:instance",
-			ConnName{"google.com:project", "region", "instance"},
+			ConnName{project: "google.com:project", region: "region", name: "instance"},
 		},
 		{
 			"project:instance", // missing region

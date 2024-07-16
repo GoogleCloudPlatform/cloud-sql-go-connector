@@ -1045,12 +1045,14 @@ func TestDialerSuccessfullyDialsDnsTxtRecord(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance(
 		"my-project", "my-region", "my-instance",
 	)
-	wantName, _ := instance.ParseConnName("my-project:my-region:my-instance")
+	// This will create 2 separate connectionInfoCache entries, one for
+	// each DNS name.
+	wantName, _ := instance.ParseConnName("my-project:my-region:my-instance", "db.example.com")
 	d := setupDialer(t, setupConfig{
 		testInstance: inst,
 		reqs: []*mock.Request{
-			mock.InstanceGetSuccess(inst, 1),
-			mock.CreateEphemeralSuccess(inst, 1),
+			mock.InstanceGetSuccess(inst, 2),
+			mock.CreateEphemeralSuccess(inst, 2),
 		},
 		dialerOptions: []Option{
 			WithTokenSource(mock.EmptyTokenSource{}),
