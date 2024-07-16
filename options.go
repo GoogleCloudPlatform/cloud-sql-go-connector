@@ -24,6 +24,7 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -52,6 +53,7 @@ type dialerConfig struct {
 	setCredentials         bool
 	setTokenSource         bool
 	setIAMAuthNTokenSource bool
+	resolver               InstanceConnectionNameResolver
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -231,6 +233,21 @@ func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn
 func WithIAMAuthN() Option {
 	return func(d *dialerConfig) {
 		d.useIAMAuthN = true
+	}
+}
+
+// InstanceConnectionNameResolver resolves  This allows an application to replace the default
+// DNSInstanceConnectionNameResolver with a custom implementation.
+type InstanceConnectionNameResolver interface {
+	Lookup(ctx context.Context, name string) (instanceName instance.ConnName, err error)
+}
+
+// WithResolver replaces the default DNS resolver with an alternate
+// implementation to use when resolving SRV records containing the
+// instance name. By default, the dialer will use net.DefaultResolver.
+func WithResolver(r InstanceConnectionNameResolver) Option {
+	return func(d *dialerConfig) {
+		d.resolver = r
 	}
 }
 

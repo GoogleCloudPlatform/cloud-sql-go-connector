@@ -234,6 +234,63 @@ func connect() {
     // ... etc
 }
 ```
+### Using DNS to identify an instance
+
+The connector can be configured to use DNS to look up an instance. This would
+allow you to configure your application to connect to a database instance, and
+centrally configure which instance in your DNS zone.
+
+#### Configure your DNS Records
+
+Add a DNS SRV record for the Cloud SQL instance to a **private** DNS server 
+or a private Google Cloud DNS Zone used by your application. 
+
+**Note:** You are strongly discouraged from adding DNS records for your 
+Cloud SQL instances to a public DNS server. This would allow anyone on the
+internet to discover the Cloud SQL instance name. 
+
+For example: suppose you wanted to use the domain name 
+`prod-db.mycompany.example.com` to connect to your database instance 
+`my-project:region:my-instance`. 
+
+- Record type: `SRV` 
+- Name: `prod-db.mycompany.example.com` – This is the domain name used by the application
+- Target: `my-project:region:my-instance` – This is the instance name
+- Port: `3307` – always use port 3307
+- Priority: `0` – always use priority 0 
+- Weight: `1` - always use weight 1
+
+#### Configure the connector
+
+Configure the connector as described above, replacing the conenctor ID with
+the DNS name. 
+
+Adapting the MySQL + database/sql example above:
+
+```go
+import (
+    "database/sql"
+
+    "cloud.google.com/go/cloudsqlconn"
+    "cloud.google.com/go/cloudsqlconn/mysql/mysql"
+)
+
+func connect() {
+    cleanup, err := mysql.RegisterDriver("cloudsql-mysql", cloudsqlconn.WithCredentialsFile("key.json"))
+    if err != nil {
+        // ... handle error
+    }
+    // call cleanup when you're done with the database connection
+    defer cleanup()
+
+    db, err := sql.Open(
+        "cloudsql-mysql",
+        "myuser:mypass@cloudsql-mysql(prod-db.mycompany.example.com)/mydb",
+    )
+    // ... etc
+}
+```
+
 
 ### Using Options
 

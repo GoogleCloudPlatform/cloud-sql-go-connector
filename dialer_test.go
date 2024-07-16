@@ -1016,3 +1016,64 @@ func TestDialerInitializesLazyCache(t *testing.T) {
 		t.Fatalf("dialer was initialized with non-lazy type: %T", tt)
 	}
 }
+
+type fakeResolver struct{}
+
+func (r *fakeResolver) Lookup(_ context.Context, name string) (instance.ConnName, error) {
+	// For TestDialerSuccessfullyDialsDnsSrvRecord
+	if name == "db.example.com" {
+		return instance.ParseConnName("my-project:my-region:my-instance")
+	}
+	if name == "db2.example.com" {
+		return instance.ParseConnName("my-project:my-region:my-instance")
+	}
+	// TestDialerFailsDnsSrvRecordMissing
+	return instance.ConnName{}, fmt.Errorf("no resolution for %q", name)
+}
+
+func TestDialerSuccessfullyDialsDnsSrvRecord(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+	)
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithResolver(&fakeResolver{}),
+		},
+	})
+
+	// Target has a trailing '.'
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"db.example.com",
+	)
+	// Target does not have a trailing '.'
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"db2.example.com",
+	)
+}
+
+func TestDialerFailsDnsSrvRecordMissing(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+	)
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs:         []*mock.Request{},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithResolver(&fakeResolver{}),
+		},
+	})
+	_, err := d.Dial(context.Background(), "doesnt-exist.example.com")
+	wantMsg := "no resolution for \"doesnt-exist.example.com\""
+	if !strings.Contains(err.Error(), wantMsg) {
+		t.Fatalf("want = %v, got = %v", wantMsg, err)
+	}
+}
