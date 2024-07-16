@@ -116,6 +116,9 @@ type connectionInfoCache interface {
 type monitoredCache struct {
 	openConns *uint64
 
+	lock        sync.Mutex
+	openSockets []*instrumentedConn
+
 	connectionInfoCache
 }
 
@@ -386,10 +389,19 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
 	}()
 
-	return newInstrumentedConn(tlsConn, func() {
+	iConn := newInstrumentedConn(tlsConn, func() {
 		n := atomic.AddUint64(c.openConns, ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
-	}), nil
+	})
+
+	// If this connection was opened using a Domain Name, then store it for later
+	// in case it needs to be forcibly closed.
+	if cn.DomainName() != "" {
+		c.lock.Lock()
+		c.openSockets = append(c.openSockets, iConn)
+		c.lock.Unlock()
+	}
+	return iConn, nil
 }
 
 // removeCached stops all background refreshes and deletes the connection
@@ -492,11 +504,13 @@ func newInstrumentedConn(conn net.Conn, closeFunc func()) *instrumentedConn {
 type instrumentedConn struct {
 	net.Conn
 	closeFunc func()
+	closed    bool
 }
 
 // Close delegates to the underlying net.Conn interface and reports the close
 // to the provided closeFunc only when Close returns no error.
 func (i *instrumentedConn) Close() error {
+	i.closed = true
 	err := i.Conn.Close()
 	if err != nil {
 		return err
@@ -523,6 +537,29 @@ func (d *Dialer) Close() error {
 	return nil
 }
 
+func (d *Dialer) closeDomainNameChanged(ctx context.Context, cn instance.ConnName, cache monitoredCache, err error) {
+	d.removeCached(ctx, cn, cache, err)
+	if atomic.LoadUint64(cache.openConns) > 0 {
+		for _, socket := range cache.openSockets {
+			if !socket.closed {
+				socket.Close()
+			}
+		}
+	}
+}
+
+func (d *Dialer) findByDomainName(dn string) (instance.ConnName, monitoredCache, bool) {
+
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	for cn, cache := range d.cache {
+		if cn.DomainName() == dn {
+			return cn, cache, true
+		}
+	}
+	return instance.ConnName{}, monitoredCache{}, false
+}
+
 // connectionInfoCache is a helper function for returning the appropriate
 // connection info Cache in a threadsafe way. It will create a new cache,
 // modify the existing one, or leave it unchanged as needed.
@@ -532,7 +569,20 @@ func (d *Dialer) connectionInfoCache(
 	d.lock.RLock()
 	c, ok := d.cache[cn]
 	d.lock.RUnlock()
+
 	if !ok {
+		// Check if the domain name was previously associated with a different
+		// instance, and if so, close that cache.
+		if cn.DomainName() != "" {
+			oldCn, c, ok := d.findByDomainName(cn.DomainName())
+			if ok {
+				d.closeDomainNameChanged(ctx, oldCn, c, fmt.Errorf(
+					"domain name %s changed from old instance %s to new instance %s",
+					cn.DomainName(), oldCn.String(), cn.String()))
+			}
+		}
+
+		// Create a new connectionInfoCache
 		d.lock.Lock()
 		defer d.lock.Unlock()
 		// Recheck to ensure instance wasn't created or changed between locks
