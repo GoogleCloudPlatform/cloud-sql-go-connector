@@ -1161,3 +1161,46 @@ func TestDialerUpdatesOnDialAfterDnsChange(t *testing.T) {
 		"update.example.com", "my-instance2",
 	)
 }
+
+func TestDialerUpdatesAutomaticallyAfterDnsChange(t *testing.T) {
+	// At first, the resolver will resolve
+	// update.example.com to "my-instance"
+	// Then, the resolver will resolve the same domain name to
+	// "my-instance2".
+	// This shows that on every call to Dial(), the dialer will resolve the
+	// SRV record and connect to the correct instance.
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+	)
+	inst2 := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance2",
+	)
+	r := &changingResolver{stage: new(int32)}
+
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+			mock.InstanceGetSuccess(inst2, 1),
+			mock.CreateEphemeralSuccess(inst2, 1),
+		},
+		dialerOptions: []Option{
+			WithResolver(r),
+			WithFailoverPeriod(10 * time.Millisecond),
+			WithTokenSource(mock.EmptyTokenSource{}),
+		},
+	})
+
+	// Start the proxy for instance 1
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"update.example.com",
+	)
+
+	atomic.StoreInt32(r.stage, 1)
+	time.Sleep(1 * time.Second)
+	// The dialer should preload details for inst2. If it doesn't, then
+	// this test will fail because it didn't make enough API calls as
+	// defined in the setupConfig{}
+}
