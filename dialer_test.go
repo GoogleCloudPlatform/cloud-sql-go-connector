@@ -1022,10 +1022,10 @@ type fakeResolver struct{}
 func (r *fakeResolver) Resolve(_ context.Context, name string) (instance.ConnName, error) {
 	// For TestDialerSuccessfullyDialsDnsTxtRecord
 	if name == "db.example.com" {
-		return instance.ParseConnName("my-project:my-region:my-instance")
+		return instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
 	}
 	if name == "db2.example.com" {
-		return instance.ParseConnName("my-project:my-region:my-instance")
+		return instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db2.example.com")
 	}
 	// TestDialerFailsDnsTxtRecordMissing
 	return instance.ConnName{}, fmt.Errorf("no resolution for %q", name)
@@ -1035,11 +1035,13 @@ func TestDialerSuccessfullyDialsDnsTxtRecord(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance(
 		"my-project", "my-region", "my-instance",
 	)
+	// This will create 2 separate connectionInfoCache entries, one for
+	// each DNS name.
 	d := setupDialer(t, setupConfig{
 		testInstance: inst,
 		reqs: []*mock.Request{
-			mock.InstanceGetSuccess(inst, 1),
-			mock.CreateEphemeralSuccess(inst, 1),
+			mock.InstanceGetSuccess(inst, 2),
+			mock.CreateEphemeralSuccess(inst, 2),
 		},
 		dialerOptions: []Option{
 			WithTokenSource(mock.EmptyTokenSource{}),
