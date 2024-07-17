@@ -15,12 +15,15 @@
 package cloudsqlconn_test
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
+	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/mysql/mysql"
 	gomysql "github.com/go-sql-driver/mysql"
 )
@@ -54,25 +57,52 @@ func requireMySQLVars(t *testing.T) {
 	}
 }
 
+type mockResolver struct {
+}
+
+func (r *mockResolver) Resolve(_ context.Context, name string) (instanceName instance.ConnName, err error) {
+	if name == "mysql.example.com" {
+		return instance.ParseConnNameWithDomainName(mysqlConnName, "mysql.example.com")
+	}
+	return instance.ConnName{}, fmt.Errorf("no resolution for %v", name)
+}
+
 func TestMySQLDriver(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping MySQL integration tests")
 	}
 
 	tcs := []struct {
-		desc       string
-		driverName string
-		opts       []cloudsqlconn.Option
+		desc         string
+		driverName   string
+		instanceName string
+		user         string
+		password     string
+		opts         []cloudsqlconn.Option
 	}{
 		{
-			desc:       "default options",
-			driverName: "cloudsql-mysql",
-			opts:       nil,
+			desc:         "default options",
+			driverName:   "cloudsql-mysql",
+			opts:         nil,
+			instanceName: mysqlConnName,
+			user:         mysqlUser,
+			password:     mysqlPass,
 		},
 		{
-			desc:       "auto IAM authn",
-			driverName: "cloudsql-mysql-iam",
-			opts:       []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN()},
+			desc:         "auto IAM authn",
+			driverName:   "cloudsql-mysql-iam",
+			opts:         []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN()},
+			instanceName: mysqlIAMConnName,
+			user:         mysqlIAMUser,
+			password:     "password",
+		},
+		{
+			desc:         "with dns",
+			driverName:   "cloudsql-mysql-dns",
+			opts:         []cloudsqlconn.Option{cloudsqlconn.WithResolver(&mockResolver{})},
+			instanceName: "mysql.example.com",
+			user:         mysqlUser,
+			password:     mysqlPass,
 		},
 	}
 
@@ -85,18 +115,18 @@ func TestMySQLDriver(t *testing.T) {
 				}
 				t.Log(now)
 			}
-			cleanup, err := mysql.RegisterDriver(tc.driverName)
+			cleanup, err := mysql.RegisterDriver(tc.driverName, tc.opts...)
 			if err != nil {
 				t.Fatalf("failed to register driver: %v", err)
 			}
 			defer cleanup()
 			cfg := gomysql.NewConfig()
 			cfg.CheckConnLiveness = true
-			cfg.User = mysqlUser
-			cfg.Passwd = mysqlPass
+			cfg.User = tc.user
+			cfg.Passwd = tc.password
 			cfg.DBName = mysqlDB
 			cfg.Net = tc.driverName
-			cfg.Addr = mysqlConnName
+			cfg.Addr = tc.instanceName
 			cfg.Params = map[string]string{"parseTime": "true"}
 
 			db, err := sql.Open("mysql", cfg.FormatDSN())

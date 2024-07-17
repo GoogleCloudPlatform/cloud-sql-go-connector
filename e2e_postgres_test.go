@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
+	"cloud.google.com/go/cloudsqlconn/instance"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -161,6 +162,62 @@ func TestPostgresCASConnect(t *testing.T) {
 	t.Log(now)
 }
 
+type pgMockResolver struct {
+}
+
+func (r *pgMockResolver) Resolve(_ context.Context, name string) (instanceName instance.ConnName, err error) {
+	if name == "pg.example.com" {
+		return instance.ParseConnNameWithDomainName(postgresConnName, "pg.example.com")
+	}
+	return instance.ConnName{}, fmt.Errorf("no resolution for %v", name)
+}
+
+func TestPostgresPgxPoolConnectDomainName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
+	requirePostgresVars(t)
+	pgxv5.RegisterDriver("pgxpool-connect")
+
+	ctx := context.Background()
+
+	// Configure the driver to connect to the database
+	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDB)
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("failed to parse pgx config: %v", err)
+	}
+
+	// Create a new dialer with any options
+	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithResolver(&pgMockResolver{}))
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+
+	// call cleanup when you're done with the database connection to close dialer
+	cleanup := func() { d.Close() }
+	t.Cleanup(cleanup)
+
+	// Tell the driver to use the Cloud SQL Go Connector to create connections
+	// postgresConnName takes the form of 'project:region:instance'.
+	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+		return d.Dial(ctx, "pg.example.com")
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("failed to create pool: %s", err)
+	}
+	defer pool.Close()
+
+	var now time.Time
+	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+	if err != nil {
+		t.Fatalf("QueryRow failed: %s", err)
+	}
+	t.Log(now)
+}
+
 func TestPostgresConnectWithIAMUser(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
@@ -264,6 +321,7 @@ func TestPostgresV5Hook(t *testing.T) {
 		driver   string
 		source   string
 		IAMAuthN bool
+		resolver bool
 	}{
 		{
 			driver: "cloudsql-postgres-v5",
@@ -276,6 +334,13 @@ func TestPostgresV5Hook(t *testing.T) {
 			source: fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUserIAM, postgresDB),
 			IAMAuthN: true,
+		},
+		{
+			driver: "cloudsql-postgres-v5-dns",
+			source: fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
+				"pg.example.com", postgresUser, postgresPass, postgresDB),
+			IAMAuthN: false,
+			resolver: true,
 		},
 	}
 
@@ -293,6 +358,8 @@ func TestPostgresV5Hook(t *testing.T) {
 	for _, tc := range tests {
 		if tc.IAMAuthN {
 			pgxv5.RegisterDriver(tc.driver, cloudsqlconn.WithIAMAuthN())
+		} else if tc.resolver {
+			pgxv5.RegisterDriver(tc.driver, cloudsqlconn.WithResolver(&pgMockResolver{}))
 		} else {
 			pgxv5.RegisterDriver(tc.driver)
 		}
