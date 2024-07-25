@@ -40,6 +40,14 @@ import (
 func testSuccessfulDial(
 	ctx context.Context, t *testing.T, d *Dialer, icn string, opts ...DialOption,
 ) {
+	testSucessfulDialWithInstanceName(ctx, t, d, icn, "my-instance", opts...)
+}
+
+// testSuccessfulDial uses the provided dialer to dial the specified instance
+// and verifies the connection works end to end.
+func testSucessfulDialWithInstanceName(
+	ctx context.Context, t *testing.T, d *Dialer, icn string, instanceName string, opts ...DialOption,
+) {
 	conn, err := d.Dial(ctx, icn, opts...)
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
@@ -50,7 +58,7 @@ func testSuccessfulDial(
 	if err != nil {
 		t.Fatalf("expected ReadAll to succeed, got error %v", err)
 	}
-	if string(data) != "my-instance" {
+	if string(data) != instanceName {
 		t.Fatalf(
 			"expected known response from the server, but got %v",
 			string(data),
@@ -1017,14 +1025,12 @@ func TestDialerInitializesLazyCache(t *testing.T) {
 	}
 }
 
-type fakeResolver struct{}
+type fakeResolver struct {
+}
 
 func (r *fakeResolver) Resolve(_ context.Context, name string) (instance.ConnName, error) {
 	// For TestDialerSuccessfullyDialsDnsTxtRecord
 	if name == "db.example.com" {
-		return instance.ParseConnName("my-project:my-region:my-instance")
-	}
-	if name == "db2.example.com" {
 		return instance.ParseConnName("my-project:my-region:my-instance")
 	}
 	// TestDialerFailsDnsTxtRecordMissing
@@ -1047,15 +1053,9 @@ func TestDialerSuccessfullyDialsDnsTxtRecord(t *testing.T) {
 		},
 	})
 
-	// Target has a trailing '.'
 	testSuccessfulDial(
 		context.Background(), t, d,
 		"db.example.com",
-	)
-	// Target does not have a trailing '.'
-	testSuccessfulDial(
-		context.Background(), t, d,
-		"db2.example.com",
 	)
 }
 

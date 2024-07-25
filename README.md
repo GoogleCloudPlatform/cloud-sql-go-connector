@@ -265,28 +265,30 @@ the DNS name.
 Adapting the MySQL + database/sql example above:
 
 ```go
-import (
-    "database/sql"
+package main
 
-    "cloud.google.com/go/cloudsqlconn"
-    "cloud.google.com/go/cloudsqlconn/mysql/mysql"
+import (
+	"database/sql"
+
+	"cloud.google.com/go/cloudsqlconn"
+	"cloud.google.com/go/cloudsqlconn/mysql/mysql"
 )
 
 func connect() {
-    cleanup, err := mysql.RegisterDriver("cloudsql-mysql",
-			cloudsqlconn.WithDnsResolver(),
-			cloudsqlconn.WithCredentialsFile("key.json"))
-    if err != nil {
-        // ... handle error
-    }
-    // call cleanup when you're done with the database connection
-    defer cleanup()
+	cleanup, err := mysql.RegisterDriver("cloudsql-mysql",
+		cloudsqlconn.WithDNSResolver(),
+		cloudsqlconn.WithCredentialsFile("key.json"))
+	if err != nil {
+		// ... handle error
+	}
+	// call cleanup when you're done with the database connection
+	defer cleanup()
 
-    db, err := sql.Open(
-        "cloudsql-mysql",
-        "myuser:mypass@cloudsql-mysql(prod-db.mycompany.example.com)/mydb",
-    )
-    // ... etc
+	db, err := sql.Open(
+		"cloudsql-mysql",
+		"myuser:mypass@cloudsql-mysql(prod-db.mycompany.example.com)/mydb",
+	)
+	// ... etc
 }
 ```
 

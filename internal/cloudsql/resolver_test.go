@@ -23,16 +23,14 @@ import (
 	"cloud.google.com/go/cloudsqlconn/instance"
 )
 
-type fakeResolver struct{}
+type fakeResolver struct {
+	name  string
+	value string
+}
 
 func (r *fakeResolver) LookupTXT(_ context.Context, name string) (addrs []string, err error) {
-	// For TestDialerSuccessfullyDialsDnsTXTRecord
-	if name == "db.example.com" {
-		return []string{"my-project:my-region:my-instance"}, nil
-	}
-	// For TestDialerFailsDnsTXTRecordMalformed
-	if name == "malformed.example.com" {
-		return []string{"invalid-instance-name"}, nil
+	if name == r.name {
+		return []string{r.value}, nil
 	}
 	return nil, fmt.Errorf("no resolution for %v", name)
 }
@@ -41,7 +39,10 @@ func TestDNSInstanceNameResolver_Lookup_Success_TxtRecord(t *testing.T) {
 	want, _ := instance.ParseConnName("my-project:my-region:my-instance")
 
 	r := DNSInstanceConnectionNameResolver{
-		dnsResolver: &fakeResolver{},
+		dnsResolver: &fakeResolver{
+			name:  "db.example.com",
+			value: "my-project:my-region:my-instance",
+		},
 	}
 	got, err := r.Resolve(context.Background(), "db.example.com")
 	if err != nil {
@@ -67,7 +68,10 @@ func TestDNSInstanceNameResolver_Lookup_Fails_TxtRecordMissing(t *testing.T) {
 
 func TestDNSInstanceNameResolver_Lookup_Fails_TxtRecordMalformed(t *testing.T) {
 	r := DNSInstanceConnectionNameResolver{
-		dnsResolver: &fakeResolver{},
+		dnsResolver: &fakeResolver{
+			name:  "malformed.example.com",
+			value: "invalid-instance-name",
+		},
 	}
 	_, err := r.Resolve(context.Background(), "malformed.example.com")
 	wantMsg := "unable to parse TXT for \"malformed.example.com\""
