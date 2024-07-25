@@ -19,15 +19,21 @@ import (
 	"fmt"
 	"net"
 	"sort"
-	"strings"
 
 	"cloud.google.com/go/cloudsqlconn/instance"
 )
 
-// DefaultResolver simply parses the instance name string.
+// DNSResolver uses the default net.Resolver to find
+// TXT records containing an instance name for a DNS record.
+var DNSResolver = &DNSInstanceConnectionNameResolver{
+	dnsResolver: net.DefaultResolver,
+}
+
+// DefaultResolver simply parses instance names.
 var DefaultResolver = &ConnNameResolver{}
 
-// ConnNameResolver simply parses instance names.
+// ConnNameResolver simply parses instance names. Implements
+// InstanceConnectionNameResolver
 type ConnNameResolver struct {
 }
 
@@ -37,23 +43,17 @@ func (r *ConnNameResolver) Resolve(_ context.Context, icn string) (instanceName 
 	return instance.ParseConnName(icn)
 }
 
-// DefaultInstanceConnectionNameResolver uses the default net.Resolver to find
-// SRV records containing an instance name for a DNS record.
-var DefaultInstanceConnectionNameResolver = &DNSInstanceConnectionNameResolver{
-	dnsResolver: net.DefaultResolver,
-}
-
 // netResolver groups the methods on net.Resolver that are used by the DNS
 // resolver implementation. This allows an application to replace the default
 // net.DefaultResolver with a custom implementation. For example: the
 // application may need to connect to a specific DNS server using a specially
 // configured instance of net.Resolver.
 type netResolver interface {
-	LookupSRV(ctx context.Context, service, proto, name string) (cname string, addrs []*net.SRV, err error)
+	LookupTXT(ctx context.Context, name string) ([]string, error)
 }
 
 // DNSInstanceConnectionNameResolver can resolve domain names into instance names using
-// SRV records in DNS. Implements InstanceConnectionNameResolver
+// TXT records in DNS. Implements InstanceConnectionNameResolver
 type DNSInstanceConnectionNameResolver struct {
 	dnsResolver netResolver
 }
@@ -64,7 +64,7 @@ func (r *DNSInstanceConnectionNameResolver) Resolve(ctx context.Context, icn str
 	cn, err := instance.ParseConnName(icn)
 	if err != nil {
 		// The connection name was not project:region:instance
-		// Attempt to query a SRV record and see if it works instead.
+		// Attempt to query a TXT record and see if it works instead.
 		cn, err = r.queryDNS(ctx, icn)
 		if err != nil {
 			return instance.ConnName{}, err
@@ -74,8 +74,8 @@ func (r *DNSInstanceConnectionNameResolver) Resolve(ctx context.Context, icn str
 	return cn, nil
 }
 
-// queryDNS attempts to resolve a SRV record for the domain name.
-// The DNS SRV record's target field is used as instance name.
+// queryDNS attempts to resolve a TXT record for the domain name.
+// The DNS TXT record's target field is used as instance name.
 //
 // This handles several conditions where the DNS records may be missing or
 // invalid:
@@ -86,39 +86,31 @@ func (r *DNSInstanceConnectionNameResolver) Resolve(ctx context.Context, icn str
 //     record when sorted by priority: lowest value first, then by target:
 //     alphabetically.
 func (r *DNSInstanceConnectionNameResolver) queryDNS(ctx context.Context, domainName string) (instance.ConnName, error) {
-	// Attempt to query the SRV records.
+	// Attempt to query the TXT records.
 	// This could return a partial error where both err != nil && len(records) > 0.
-	_, records, err := r.dnsResolver.LookupSRV(ctx, "", "", domainName)
+	records, err := r.dnsResolver.LookupTXT(ctx, domainName)
+	// If resolve failed and no records were found, return the error.
+	if err != nil {
+		return instance.ConnName{}, fmt.Errorf("unable to resolve TXT record for %q: %v", domainName, err)
+	}
 
-	// Process the records returning the first valid SRV record.
+	// Process the records returning the first valid TXT record.
 
-	// Sort the record slice so that lowest priority comes first, then
-	// alphabetically by instance name
+	// Sort the TXT record values alphabetically by instance name
 	sort.Slice(records, func(i, j int) bool {
-		if records[i].Priority == records[j].Priority {
-			return records[i].Target < records[j].Target
-		}
-		return records[i].Priority < records[j].Priority
+		return records[i] < records[j]
 	})
 
 	var perr error
 	// Attempt to parse records, returning the first valid record.
 	for _, record := range records {
-		// Remove trailing '.' from target value.
-		target := strings.TrimRight(record.Target, ".")
-
 		// Parse the target as a CN
-		cn, parseErr := instance.ParseConnName(target)
+		cn, parseErr := instance.ParseConnName(record)
 		if parseErr != nil {
-			perr = fmt.Errorf("unable to parse SRV for %q: %v", domainName, parseErr)
+			perr = fmt.Errorf("unable to parse TXT for %q -> %q : %v", domainName, record, parseErr)
 			continue
 		}
 		return cn, nil
-	}
-
-	// If resolve failed and no records were found, return the error.
-	if err != nil {
-		return instance.ConnName{}, fmt.Errorf("unable to resolve SRV record for %q: %v", domainName, err)
 	}
 
 	// If all the records failed to parse, return one of the parse errors
@@ -127,5 +119,5 @@ func (r *DNSInstanceConnectionNameResolver) queryDNS(ctx context.Context, domain
 	}
 
 	// No records were found, return an error.
-	return instance.ConnName{}, fmt.Errorf("no valid SRV records found for %q", domainName)
+	return instance.ConnName{}, fmt.Errorf("no valid TXT records found for %q", domainName)
 }

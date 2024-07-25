@@ -17,7 +17,6 @@ package cloudsql
 import (
 	"context"
 	"fmt"
-	"net"
 	"strings"
 	"testing"
 
@@ -26,28 +25,19 @@ import (
 
 type fakeResolver struct{}
 
-func (r *fakeResolver) LookupSRV(_ context.Context, _, _, name string) (cname string, addrs []*net.SRV, err error) {
-	// For TestDialerSuccessfullyDialsDnsSrvRecord
+func (r *fakeResolver) LookupTXT(_ context.Context, name string) (addrs []string, err error) {
+	// For TestDialerSuccessfullyDialsDnsTXTRecord
 	if name == "db.example.com" {
-		return "", []*net.SRV{
-			&net.SRV{Target: "my-project:my-region:my-instance."},
-		}, nil
+		return []string{"my-project:my-region:my-instance"}, nil
 	}
-	if name == "db2.example.com" {
-		return "", []*net.SRV{
-			&net.SRV{Target: "my-project:my-region:my-instance"},
-		}, nil
-	}
-	// For TestDialerFailsDnsSrvRecordMalformed
+	// For TestDialerFailsDnsTXTRecordMalformed
 	if name == "malformed.example.com" {
-		return "", []*net.SRV{
-			&net.SRV{Target: "an-invalid-instance-name"},
-		}, nil
+		return []string{"invalid-instance-name"}, nil
 	}
-	return "", nil, fmt.Errorf("no resolution for %v", name)
+	return nil, fmt.Errorf("no resolution for %v", name)
 }
 
-func TestDNSInstanceNameResolver_Lookup_Success_SrvRecord(t *testing.T) {
+func TestDNSInstanceNameResolver_Lookup_Success_TxtRecord(t *testing.T) {
 	want, _ := instance.ParseConnName("my-project:my-region:my-instance")
 
 	r := DNSInstanceConnectionNameResolver{
@@ -61,33 +51,26 @@ func TestDNSInstanceNameResolver_Lookup_Success_SrvRecord(t *testing.T) {
 		t.Fatal("Got", got, "Want", want)
 	}
 
-	got, err = r.Resolve(context.Background(), "db2.example.com")
-	if err != nil {
-		t.Fatal("got error", err)
-	}
-	if got != want {
-		t.Fatal("Got", got, "Want", want)
-	}
 }
 
-func TestDNSInstanceNameResolver_Lookup_Fails_SrvRecordMissing(t *testing.T) {
+func TestDNSInstanceNameResolver_Lookup_Fails_TxtRecordMissing(t *testing.T) {
 	r := DNSInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{},
 	}
 	_, err := r.Resolve(context.Background(), "doesnt-exist.example.com")
 
-	wantMsg := "unable to resolve SRV record for \"doesnt-exist.example.com\""
+	wantMsg := "unable to resolve TXT record for \"doesnt-exist.example.com\""
 	if !strings.Contains(err.Error(), wantMsg) {
 		t.Fatalf("want = %v, got = %v", wantMsg, err)
 	}
 }
 
-func TestDNSInstanceNameResolver_Lookup_Fails_SrvRecordMalformed(t *testing.T) {
+func TestDNSInstanceNameResolver_Lookup_Fails_TxtRecordMalformed(t *testing.T) {
 	r := DNSInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{},
 	}
 	_, err := r.Resolve(context.Background(), "malformed.example.com")
-	wantMsg := "unable to parse SRV for \"malformed.example.com\""
+	wantMsg := "unable to parse TXT for \"malformed.example.com\""
 	if !strings.Contains(err.Error(), wantMsg) {
 		t.Fatalf("want = %v, got = %v", wantMsg, err)
 	}

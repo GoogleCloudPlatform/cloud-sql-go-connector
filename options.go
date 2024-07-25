@@ -236,21 +236,21 @@ func WithIAMAuthN() Option {
 	}
 }
 
-// WithResolver replaces the default DNS resolver with an alternate
-// implementation to use when resolving SRV records containing the
-// instance name. By default, the dialer will use net.DefaultResolver.
+// WithResolver replaces the default resolver with an alternate
+// implementation to resolve the name in the database DSN to a Cloud SQL
+// instance.
 func WithResolver(r instance.ConnectionNameResolver) Option {
 	return func(d *dialerConfig) {
 		d.resolver = r
 	}
 }
 
-// WithDNSResolver will cause the connector resolve domain names into
-// instance names using a DNS TXT record. The connector will also accept
-// explicit instance names.
+// WithDNSResolver replaces the default resolver (which only resolves instance
+// names) with the DNSResolver, which will attempt to first parse the instance
+// name, and then will attempt to resolve the DNS TXT record.
 func WithDNSResolver() Option {
 	return func(d *dialerConfig) {
-		d.resolver = cloudsql.DefaultInstanceConnectionNameResolver
+		d.resolver = cloudsql.DNSResolver
 	}
 }
 
