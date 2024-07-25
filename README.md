@@ -242,7 +242,7 @@ centrally configure which instance in your DNS zone.
 
 #### Configure your DNS Records
 
-Add a DNS SRV record for the Cloud SQL instance to a **private** DNS server 
+Add a DNS TXT record for the Cloud SQL instance to a **private** DNS server 
 or a private Google Cloud DNS Zone used by your application. 
 
 **Note:** You are strongly discouraged from adding DNS records for your 
@@ -251,14 +251,11 @@ internet to discover the Cloud SQL instance name.
 
 For example: suppose you wanted to use the domain name 
 `prod-db.mycompany.example.com` to connect to your database instance 
-`my-project:region:my-instance`. 
+`my-project:region:my-instance`. You would create the following DNS record: 
 
-- Record type: `SRV` 
+- Record type: `TXT` 
 - Name: `prod-db.mycompany.example.com` – This is the domain name used by the application
-- Target: `my-project:region:my-instance` – This is the instance name
-- Port: `3307` – always use port 3307
-- Priority: `0` – always use priority 0 
-- Weight: `1` - always use weight 1
+- Value: `my-project:region:my-instance` – This is the instance name
 
 #### Configure the connector
 
@@ -276,7 +273,9 @@ import (
 )
 
 func connect() {
-    cleanup, err := mysql.RegisterDriver("cloudsql-mysql", cloudsqlconn.WithCredentialsFile("key.json"))
+    cleanup, err := mysql.RegisterDriver("cloudsql-mysql",
+			cloudsqlconn.WithDnsResolver(),
+			cloudsqlconn.WithCredentialsFile("key.json"))
     if err != nil {
         // ... handle error
     }
