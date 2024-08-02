@@ -81,12 +81,12 @@ func TestRefresh(t *testing.T) {
 	if wantPrivateIP != gotIP {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPrivateIP, gotIP)
 	}
-	gotDNS, ok := rr.addrs[PSC]
+	gotPSCDNS, ok := rr.addrs[PSC]
 	if !ok {
 		t.Fatal("metadata IP addresses did not include PSC endpoint")
 	}
-	if wantDNS != gotDNS {
-		t.Fatalf("metadata IP mismatch, want = %v. got = %v", wantDNS, gotDNS)
+	if wantDNS != gotPSCDNS {
+		t.Fatalf("metadata IP mismatch, want = %v. got = %v", wantDNS, gotPSCDNS)
 	}
 	if cn != rr.ConnectionName {
 		t.Fatalf(
@@ -103,7 +103,7 @@ func TestRefreshForCASInstances(t *testing.T) {
 	wantDNS := "abcde.12345.us-central1.sql.goog"
 	cn := testInstanceConnName()
 	inst := mock.NewFakeCSQLInstance(
-		cn.Project(), cn.Region(), "",
+		cn.Project(), cn.Region(), cn.Name(),
 		mock.WithPublicIP("127.0.0.1"),
 		mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
 		mock.WithDNS(wantDNS),
