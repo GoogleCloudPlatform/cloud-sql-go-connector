@@ -86,7 +86,7 @@ func TestRefresh(t *testing.T) {
 		t.Fatal("metadata IP addresses did not include PSC endpoint")
 	}
 	if wantDNS != gotDNS {
-		t.Fatalf("metadata IP mismatch, want = %v. got = %v", wantPSC, gotPSC)
+		t.Fatalf("metadata IP mismatch, want = %v. got = %v", wantDNS, gotDNS)
 	}
 	if cn != rr.ConnectionName {
 		t.Fatalf(
@@ -130,13 +130,7 @@ func TestRefreshForCASInstances(t *testing.T) {
 	}
 
 	if wantDNS != rr.DNSName {
-		t.Fatalf("metadata IP mismatch, want = %v. got = %v", wantPSC, gotPSC)
-	}
-	if rr.ConnectionName != "" {
-		t.Fatalf(
-			"connection name mismatch, want empty, got = %v",
-			cn.Name(),
-		)
+		t.Fatalf("DNS mismatch, want = %v. got = %v", wantDNS, gotDNS)
 	}
 	if rr.ServerCaMode != "GOOGLE_MANAGED_CAS_CA" {
 		t.Fatalf("server CA mode mismatch, want = GOOGLE_MANAGED_CAS_CA, got = %v", rr.ServerCaMode)

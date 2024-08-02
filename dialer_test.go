@@ -771,10 +771,13 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 				info: cloudsql.NewConnectionInfo(
 					instance.ConnName{},
 					"",
+					"GOOGLE_MANAGED_INTERNAL_CA",
+					"",
 					map[string]string{
 						// no public IP
 						cloudsql.PrivateIP: "10.0.0.1",
 					},
+					nil,
 					nil,
 					tls.Certificate{Leaf: &x509.Certificate{
 						NotAfter: time.Now().Add(time.Hour),
