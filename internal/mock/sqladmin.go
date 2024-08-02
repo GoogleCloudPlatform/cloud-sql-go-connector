@@ -124,6 +124,7 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 		Region:          i.region,
 		ServerCaCert:    &sqladmin.SslCert{Cert: string(certBytes)},
 		PscEnabled:      i.pscEnabled,
+		ServerCaMode:    i.serverCaMode,
 	}
 
 	r := &Request{
