@@ -262,7 +262,6 @@ func (c ConnectionInfo) TLSConfig() *tls.Config {
 		MinVersion:            tls.VersionTLS13,
 	}
 }
-}
 
 // verifyPeerCertificateFunc creates a VerifyPeerCertificate func that
 // verifies that the peer certificate is in the cert pool. We need to define
