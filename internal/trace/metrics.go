@@ -57,6 +57,16 @@ var (
 		"A failed certificate refresh operation",
 		stats.UnitDimensionless,
 	)
+	mBytesSent = stats.Int64(
+		"cloudsqlconn/bytes_sent",
+		"The bytes sent to Cloud SQL",
+		stats.UnitDimensionless,
+	)
+	mBytesReceived = stats.Int64(
+		"cloudsqlconn/bytes_received",
+		"The bytes received from Cloud SQL",
+		stats.UnitDimensionless,
+	)
 
 	latencyView = &view.View{
 		Name:        "cloudsqlconn/dial_latency",
