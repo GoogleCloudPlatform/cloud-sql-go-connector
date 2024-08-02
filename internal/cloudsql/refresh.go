@@ -47,12 +47,12 @@ const (
 // metadata contains information about a Cloud SQL instance needed to create
 // connections.
 type metadata struct {
-	ipAddrs      map[string]string
-	serverCaCert *x509.Certificate
-	serverCaCertPem []byte  // Only set for CAS instances.
-	serverCaMode    string  // Only set for CAS instances.
-	dnsName         string  // Only set for CAS instances.
-	version      string
+	ipAddrs         map[string]string
+	serverCaCert    *x509.Certificate
+	serverCaCertPem []byte // Only set for CAS instances.
+	serverCaMode    string // Only set for CAS instances.
+	dnsName         string // Only set for CAS instances.
+	version         string
 }
 
 // fetchMetadata uses the Cloud SQL Admin APIs get method to retrieve the

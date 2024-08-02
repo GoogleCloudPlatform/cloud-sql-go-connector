@@ -171,10 +171,10 @@ type ConnectionInfo struct {
 	ConnectionName    instance.ConnName
 	ClientCertificate tls.Certificate
 	ServerCaCert      *x509.Certificate
-	ServerCaCertPem   []byte  // Only set for CAS instances.
-	ServerCaMode      string  // Only set for CAS instances.
+	ServerCaCertPem   []byte // Only set for CAS instances.
+	ServerCaMode      string // Only set for CAS instances.
 	DBVersion         string
-	DNSName           string  // Only set for CAS instances.
+	DNSName           string // Only set for CAS instances.
 	Expiration        time.Time
 
 	addrs map[string]string

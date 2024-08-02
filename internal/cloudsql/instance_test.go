@@ -413,8 +413,8 @@ func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
 	serverCAPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: rootCACert.Raw})
 	serverCAPem = append(serverCAPem, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: subCACert.Raw})...)
 	wantRootCAs := x509.NewCertPool()
-	wantRootCAs.AddCert(rootCACert);
-	wantRootCAs.AddCert(subCACert);
+	wantRootCAs.AddCert(rootCACert)
+	wantRootCAs.AddCert(subCACert)
 	// Assemble a connection info with the raw and parsed client cert
 	// and the self-signed server certificate
 	wantServerName := "testing dns name"
@@ -425,10 +425,10 @@ func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
 			PrivateKey:  RSAKey,
 			Leaf:        clientCert,
 		},
-		ServerCaCertPem:  serverCAPem,
-		DBVersion:        "doesn't matter here",
-		Expiration:       clientCert.NotAfter,
-		ServerCaMode:     "GOOGLE_MANAGED_CAS_CA",
+		ServerCaCertPem: serverCAPem,
+		DBVersion:       "doesn't matter here",
+		Expiration:      clientCert.NotAfter,
+		ServerCaMode:    "GOOGLE_MANAGED_CAS_CA",
 	}
 
 	got := ci.TLSConfig()
