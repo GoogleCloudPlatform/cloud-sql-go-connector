@@ -49,6 +49,9 @@ const (
 type metadata struct {
 	ipAddrs      map[string]string
 	serverCaCert *x509.Certificate
+	serverCaCertPem []byte  // Only set for CAS instances.
+	serverCaMode    string  // Only set for CAS instances.
+	dnsName         string  // Only set for CAS instances.
 	version      string
 }
 
@@ -98,7 +101,8 @@ func fetchMetadata(
 	}
 
 	// resolve DnsName into IP address for PSC
-	if db.DnsName != "" {
+	// Note that we have to check for PSC enablement first because CAS instances also set the DnsName.
+	if db.PscEnabled && db.DnsName != "" {
 		ipAddrs[PSC] = db.DnsName
 	}
 
@@ -107,6 +111,18 @@ func fetchMetadata(
 			"cannot connect to instance - it has no supported IP addresses",
 			inst.String(),
 		)
+	}
+
+	// CAS instances have different way to parse the server CA certs.
+	if db.ServerCaMode == "GOOGLE_MANAGED_CAS_CA" {
+		m = metadata{
+			ipAddrs:         ipAddrs,
+			serverCaCertPem: []byte(db.ServerCaCert.Cert),
+			version:         db.DatabaseVersion,
+			dnsName:         db.DnsName,
+			serverCaMode:    db.ServerCaMode,
+		}
+		return m, nil
 	}
 
 	// parse the server-side CA certificate
@@ -345,7 +361,7 @@ func (c adminAPIClient) ConnectionInfo(
 	}
 
 	return NewConnectionInfo(
-		cn, md.version, md.ipAddrs, md.serverCaCert, ec,
+		cn, md.dnsName, md.serverCaMode, md.version, md.ipAddrs, md.serverCaCert, md.serverCaCertPem, ec,
 	), nil
 }
 

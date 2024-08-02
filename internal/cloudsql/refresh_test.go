@@ -35,7 +35,8 @@ const testDialerID = "some-dialer-id"
 func TestRefresh(t *testing.T) {
 	wantPublicIP := "127.0.0.1"
 	wantPrivateIP := "10.0.0.1"
-	wantPSC := "abcde.12345.us-central1.sql.goog"
+	wantPSC := true
+	wantDNS := "abcde.12345.us-central1.sql.goog"
 	wantExpiry := time.Now().Add(time.Hour).UTC().Round(time.Second)
 	cn := testInstanceConnName()
 	inst := mock.NewFakeCSQLInstance(
@@ -43,6 +44,7 @@ func TestRefresh(t *testing.T) {
 		mock.WithPublicIP(wantPublicIP),
 		mock.WithPrivateIP(wantPrivateIP),
 		mock.WithPSC(wantPSC),
+		mock.WithDNS(wantDNS),
 		mock.WithCertExpiry(wantExpiry),
 	)
 	client, cleanup, err := mock.NewSQLAdminService(
@@ -79,21 +81,68 @@ func TestRefresh(t *testing.T) {
 	if wantPrivateIP != gotIP {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPrivateIP, gotIP)
 	}
-	gotPSC, ok := rr.addrs[PSC]
+	gotDNS, ok := rr.addrs[PSC]
 	if !ok {
 		t.Fatal("metadata IP addresses did not include PSC endpoint")
 	}
-	if wantPSC != gotPSC {
+	if wantDNS != gotDNS {
 		t.Fatalf("metadata IP mismatch, want = %v. got = %v", wantPSC, gotPSC)
 	}
 	if cn != rr.ConnectionName {
 		t.Fatalf(
 			"connection name mismatch, want = %v, got = %v",
-			wantExpiry, rr.Expiration,
+			cn.Name(), rr.ConnectionName,
 		)
 	}
 	if wantExpiry != rr.Expiration {
 		t.Fatalf("expiry mismatch, want = %v, got = %v", wantExpiry, rr.Expiration)
+	}
+}
+
+func TestRefreshForCASInstances(t *testing.T) {
+	wantDNS := "abcde.12345.us-central1.sql.goog"
+	cn := testInstanceConnName()
+	inst := mock.NewFakeCSQLInstance(
+		cn.Project(), cn.Region(), "",
+		mock.WithPublicIP("127.0.0.1"),
+		mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
+		mock.WithDNS(wantDNS),
+		mock.WithCertExpiry(time.Now().Add(time.Hour).UTC().Round(time.Second)),
+	)
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	if err != nil {
+		t.Fatalf("failed to create test SQL admin service: %s", err)
+	}
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	r := newAdminAPIClient(nullLogger{}, client, RSAKey, nil, testDialerID)
+	rr, err := r.ConnectionInfo(context.Background(), cn, false)
+	if err != nil {
+		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
+	}
+
+	if wantDNS != rr.DNSName {
+		t.Fatalf("metadata IP mismatch, want = %v. got = %v", wantPSC, gotPSC)
+	}
+	if rr.ConnectionName != "" {
+		t.Fatalf(
+			"connection name mismatch, want empty, got = %v",
+			cn.Name(),
+		)
+	}
+	if rr.ServerCaMode != "GOOGLE_MANAGED_CAS_CA" {
+		t.Fatalf("server CA mode mismatch, want = GOOGLE_MANAGED_CAS_CA, got = %v", rr.ServerCaMode)
+	}
+	if len(rr.ServerCaCertPem) == 0 {
+		t.Fatalf("server cert pem mismatch, want not empty, got empty")
 	}
 }
 

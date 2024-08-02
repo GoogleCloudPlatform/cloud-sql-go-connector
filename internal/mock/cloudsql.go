@@ -51,6 +51,8 @@ type FakeCSQLInstance struct {
 	ipAddrs      map[string]string
 	backendType  string
 	DNSName      string
+	serverCaMode string
+	pscEnabled   bool
 	signer       SignFunc
 	clientSigner ClientSignFunc
 	// Key is the server's private key
@@ -92,8 +94,15 @@ func WithPrivateIP(addr string) FakeCSQLInstanceOption {
 	}
 }
 
-// WithPSC sets the PSC DnsName to addr.
-func WithPSC(dns string) FakeCSQLInstanceOption {
+// WithPSC sets the PSC enabled.
+func WithPSC(enabled bool) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.pscEnabled = enabled
+	}
+}
+
+// WithDNS sets the DnsName to addr.
+func WithDNS(dns string) FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
 		f.DNSName = dns
 	}
@@ -157,6 +166,13 @@ func WithClientCertSigner(s ClientSignFunc) FakeCSQLInstanceOption {
 func WithNoIPAddrs() FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
 		f.ipAddrs = map[string]string{}
+	}
+}
+
+// WithServerCAMode sets the ServerCaMode of the instance.
+func WithServerCAMode(serverCaMode string) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.serverCaMode = serverCaMode
 	}
 }
 

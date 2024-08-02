@@ -171,7 +171,10 @@ type ConnectionInfo struct {
 	ConnectionName    instance.ConnName
 	ClientCertificate tls.Certificate
 	ServerCaCert      *x509.Certificate
+	ServerCaCertPem   []byte  // Only set for CAS instances.
+	ServerCaMode      string  // Only set for CAS instances.
 	DBVersion         string
+	DNSName           string  // Only set for CAS instances.
 	Expiration        time.Time
 
 	addrs map[string]string
@@ -180,18 +183,24 @@ type ConnectionInfo struct {
 // NewConnectionInfo initializes a ConnectionInfo struct.
 func NewConnectionInfo(
 	cn instance.ConnName,
+	dnsName string,
+	serverCaMode string,
 	version string,
 	ipAddrs map[string]string,
 	serverCaCert *x509.Certificate,
+	serverCaCertPem []byte,
 	clientCert tls.Certificate,
 ) ConnectionInfo {
 	return ConnectionInfo{
 		addrs:             ipAddrs,
 		ServerCaCert:      serverCaCert,
+		ServerCaCertPem:   serverCaCertPem,
 		ClientCertificate: clientCert,
 		Expiration:        clientCert.Leaf.NotAfter,
 		DBVersion:         version,
 		ConnectionName:    cn,
+		DNSName:           dnsName,
+		ServerCaMode:      serverCaMode,
 	}
 }
 
@@ -225,6 +234,16 @@ func (c ConnectionInfo) Addr(ipType string) (string, error) {
 // TLSConfig constructs a TLS configuration for the given connection info.
 func (c ConnectionInfo) TLSConfig() *tls.Config {
 	pool := x509.NewCertPool()
+	if c.ServerCaMode == "GOOGLE_MANAGED_CAS_CA" {
+		pool.AppendCertsFromPEM(c.ServerCaCertPem)
+		return &tls.Config{
+			ServerName:         c.DNSName,
+			Certificates:       []tls.Certificate{c.ClientCertificate},
+			RootCAs:            pool,
+			InsecureSkipVerify: false,
+			MinVersion:         tls.VersionTLS13,
+		}
+	}
 	pool.AddCert(c.ServerCaCert)
 	return &tls.Config{
 		ServerName:   c.ConnectionName.String(),
@@ -242,6 +261,7 @@ func (c ConnectionInfo) TLSConfig() *tls.Config {
 		VerifyPeerCertificate: verifyPeerCertificateFunc(c.ConnectionName, pool),
 		MinVersion:            tls.VersionTLS13,
 	}
+}
 }
 
 // verifyPeerCertificateFunc creates a VerifyPeerCertificate func that
