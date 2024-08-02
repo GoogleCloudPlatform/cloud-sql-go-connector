@@ -1019,7 +1019,7 @@ func TestDialerInitializesLazyCache(t *testing.T) {
 
 type fakeResolver struct{}
 
-func (r *fakeResolver) Lookup(_ context.Context, name string) (instance.ConnName, error) {
+func (r *fakeResolver) Resolve(_ context.Context, name string) (instance.ConnName, error) {
 	// For TestDialerSuccessfullyDialsDnsSrvRecord
 	if name == "db.example.com" {
 		return instance.ParseConnName("my-project:my-region:my-instance")

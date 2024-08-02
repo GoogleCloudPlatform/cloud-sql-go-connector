@@ -155,7 +155,7 @@ type Dialer struct {
 	iamTokenSource oauth2.TokenSource
 
 	// resolver converts instance names into DNS names.
-	resolver InstanceConnectionNameResolver
+	resolver instance.ConnectionNameResolver
 }
 
 var (
@@ -256,7 +256,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	if err != nil {
 		return nil, err
 	}
-	var r InstanceConnectionNameResolver = cloudsql.DefaultInstanceConnectionNameResolver
+	var r instance.ConnectionNameResolver = cloudsql.DefaultResolver
 	if cfg.resolver != nil {
 		r = cfg.resolver
 	}
@@ -297,7 +297,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		go trace.RecordDialError(context.Background(), icn, d.dialerID, err)
 		endDial(err)
 	}()
-	cn, err := d.resolver.Lookup(ctx, icn)
+	cn, err := d.resolver.Resolve(ctx, icn)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +438,7 @@ func validClientCert(
 // the instance:
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/SqlDatabaseVersion
 func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) {
-	cn, err := d.resolver.Lookup(ctx, icn)
+	cn, err := d.resolver.Resolve(ctx, icn)
 	if err != nil {
 		return "", err
 	}
@@ -458,7 +458,7 @@ func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) 
 // Use Warmup to start the refresh process early if you don't know when you'll
 // need to call "Dial".
 func (d *Dialer) Warmup(ctx context.Context, icn string, opts ...DialOption) error {
-	cn, err := d.resolver.Lookup(ctx, icn)
+	cn, err := d.resolver.Resolve(ctx, icn)
 	if err != nil {
 		return err
 	}

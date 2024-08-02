@@ -15,6 +15,7 @@
 package instance
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 
@@ -73,4 +74,10 @@ func ParseConnName(cn string) (ConnName, error) {
 		name:    string(m[4]),
 	}
 	return c, nil
+}
+
+// ConnectionNameResolver resolves  This allows an application to replace the default
+// DNSInstanceConnectionNameResolver with a custom implementation.
+type ConnectionNameResolver interface {
+	Resolve(ctx context.Context, name string) (instanceName ConnName, err error)
 }

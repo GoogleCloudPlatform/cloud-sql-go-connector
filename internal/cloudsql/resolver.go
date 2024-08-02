@@ -24,6 +24,19 @@ import (
 	"cloud.google.com/go/cloudsqlconn/instance"
 )
 
+// DefaultResolver simply parses the instance name string.
+var DefaultResolver = &ConnNameResolver{}
+
+// ConnNameResolver simply parses instance names.
+type ConnNameResolver struct {
+}
+
+// Resolve returns the instance name, possibly using DNS. This will return an
+// instance.ConnName or an error if it was unable to resolve an instance name.
+func (r *ConnNameResolver) Resolve(_ context.Context, icn string) (instanceName instance.ConnName, err error) {
+	return instance.ParseConnName(icn)
+}
+
 // DefaultInstanceConnectionNameResolver uses the default net.Resolver to find
 // SRV records containing an instance name for a DNS record.
 var DefaultInstanceConnectionNameResolver = &DNSInstanceConnectionNameResolver{
@@ -45,9 +58,9 @@ type DNSInstanceConnectionNameResolver struct {
 	dnsResolver netResolver
 }
 
-// Lookup returns the instance name, possibly using DNS. This will return an
+// Resolve returns the instance name, possibly using DNS. This will return an
 // instance.ConnName or an error if it was unable to resolve an instance name.
-func (r *DNSInstanceConnectionNameResolver) Lookup(ctx context.Context, icn string) (instanceName instance.ConnName, err error) {
+func (r *DNSInstanceConnectionNameResolver) Resolve(ctx context.Context, icn string) (instanceName instance.ConnName, err error) {
 	cn, err := instance.ParseConnName(icn)
 	if err != nil {
 		// The connection name was not project:region:instance

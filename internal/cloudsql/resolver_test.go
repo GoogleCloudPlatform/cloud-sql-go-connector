@@ -53,7 +53,7 @@ func TestDNSInstanceNameResolver_Lookup_Success_SrvRecord(t *testing.T) {
 	r := DNSInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{},
 	}
-	got, err := r.Lookup(context.Background(), "db.example.com")
+	got, err := r.Resolve(context.Background(), "db.example.com")
 	if err != nil {
 		t.Fatal("got error", err)
 	}
@@ -61,7 +61,7 @@ func TestDNSInstanceNameResolver_Lookup_Success_SrvRecord(t *testing.T) {
 		t.Fatal("Got", got, "Want", want)
 	}
 
-	got, err = r.Lookup(context.Background(), "db2.example.com")
+	got, err = r.Resolve(context.Background(), "db2.example.com")
 	if err != nil {
 		t.Fatal("got error", err)
 	}
@@ -74,7 +74,7 @@ func TestDNSInstanceNameResolver_Lookup_Fails_SrvRecordMissing(t *testing.T) {
 	r := DNSInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{},
 	}
-	_, err := r.Lookup(context.Background(), "doesnt-exist.example.com")
+	_, err := r.Resolve(context.Background(), "doesnt-exist.example.com")
 
 	wantMsg := "unable to resolve SRV record for \"doesnt-exist.example.com\""
 	if !strings.Contains(err.Error(), wantMsg) {
@@ -86,7 +86,7 @@ func TestDNSInstanceNameResolver_Lookup_Fails_SrvRecordMalformed(t *testing.T) {
 	r := DNSInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{},
 	}
-	_, err := r.Lookup(context.Background(), "malformed.example.com")
+	_, err := r.Resolve(context.Background(), "malformed.example.com")
 	wantMsg := "unable to parse SRV for \"malformed.example.com\""
 	if !strings.Contains(err.Error(), wantMsg) {
 		t.Fatalf("want = %v, got = %v", wantMsg, err)

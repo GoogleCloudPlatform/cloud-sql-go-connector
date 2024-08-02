@@ -53,7 +53,7 @@ type dialerConfig struct {
 	setCredentials         bool
 	setTokenSource         bool
 	setIAMAuthNTokenSource bool
-	resolver               InstanceConnectionNameResolver
+	resolver               instance.ConnectionNameResolver
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -236,18 +236,21 @@ func WithIAMAuthN() Option {
 	}
 }
 
-// InstanceConnectionNameResolver resolves  This allows an application to replace the default
-// DNSInstanceConnectionNameResolver with a custom implementation.
-type InstanceConnectionNameResolver interface {
-	Lookup(ctx context.Context, name string) (instanceName instance.ConnName, err error)
-}
-
 // WithResolver replaces the default DNS resolver with an alternate
 // implementation to use when resolving SRV records containing the
 // instance name. By default, the dialer will use net.DefaultResolver.
-func WithResolver(r InstanceConnectionNameResolver) Option {
+func WithResolver(r instance.ConnectionNameResolver) Option {
 	return func(d *dialerConfig) {
 		d.resolver = r
+	}
+}
+
+// WithDNSResolver will cause the connector resolve domain names into
+// instance names using a DNS TXT record. The connector will also accept
+// explicit instance names.
+func WithDNSResolver() Option {
+	return func(d *dialerConfig) {
+		d.resolver = cloudsql.DefaultInstanceConnectionNameResolver
 	}
 }
 
