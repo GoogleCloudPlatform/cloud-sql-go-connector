@@ -130,7 +130,7 @@ func TestRefreshForCASInstances(t *testing.T) {
 	}
 
 	if wantDNS != rr.DNSName {
-		t.Fatalf("DNS mismatch, want = %v. got = %v", wantDNS, gotDNS)
+		t.Fatalf("DNS mismatch, want = %v. got = %v", wantDNS, rr.DNSName)
 	}
 	if rr.ServerCaMode != "GOOGLE_MANAGED_CAS_CA" {
 		t.Fatalf("server CA mode mismatch, want = GOOGLE_MANAGED_CAS_CA, got = %v", rr.ServerCaMode)
