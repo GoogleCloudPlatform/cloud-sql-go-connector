@@ -51,7 +51,7 @@ type FakeCSQLInstance struct {
 	ipAddrs      map[string]string
 	backendType  string
 	DNSName      string
-	serverCaMode string
+	serverCAMode string
 	pscEnabled   bool
 	signer       SignFunc
 	clientSigner ClientSignFunc
@@ -170,9 +170,9 @@ func WithNoIPAddrs() FakeCSQLInstanceOption {
 }
 
 // WithServerCAMode sets the ServerCaMode of the instance.
-func WithServerCAMode(serverCaMode string) FakeCSQLInstanceOption {
+func WithServerCAMode(serverCAMode string) FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
-		f.serverCaMode = serverCaMode
+		f.serverCAMode = serverCAMode
 	}
 }
 

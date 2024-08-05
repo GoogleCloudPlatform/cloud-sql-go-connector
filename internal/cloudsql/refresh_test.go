@@ -132,11 +132,11 @@ func TestRefreshForCASInstances(t *testing.T) {
 	if wantDNS != rr.DNSName {
 		t.Fatalf("DNS mismatch, want = %v. got = %v", wantDNS, rr.DNSName)
 	}
-	if rr.ServerCaMode != "GOOGLE_MANAGED_CAS_CA" {
-		t.Fatalf("server CA mode mismatch, want = GOOGLE_MANAGED_CAS_CA, got = %v", rr.ServerCaMode)
+	if rr.ServerCAMode != "GOOGLE_MANAGED_CAS_CA" {
+		t.Fatalf("server CA mode mismatch, want = GOOGLE_MANAGED_CAS_CA, got = %v", rr.ServerCAMode)
 	}
-	if len(rr.ServerCaCertPem) == 0 {
-		t.Fatalf("server cert pem mismatch, want not empty, got empty")
+	if len(rr.ServerCACert) < 2 {
+		t.Fatalf("number of server cert mismatch, want 2, got %d", len(rr.ServerCACert))
 	}
 }
 

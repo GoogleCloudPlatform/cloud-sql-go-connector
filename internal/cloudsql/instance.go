@@ -170,11 +170,10 @@ func (i *RefreshAheadCache) Close() error {
 type ConnectionInfo struct {
 	ConnectionName    instance.ConnName
 	ClientCertificate tls.Certificate
-	ServerCaCert      *x509.Certificate
-	ServerCaCertPem   []byte // Only set for CAS instances.
-	ServerCaMode      string // Only set for CAS instances.
+	ServerCACert      []*x509.Certificate
+	ServerCAMode      string
 	DBVersion         string
-	DNSName           string // Only set for CAS instances.
+	DNSName           string
 	Expiration        time.Time
 
 	addrs map[string]string
@@ -184,23 +183,21 @@ type ConnectionInfo struct {
 func NewConnectionInfo(
 	cn instance.ConnName,
 	dnsName string,
-	serverCaMode string,
+	serverCAMode string,
 	version string,
 	ipAddrs map[string]string,
-	serverCaCert *x509.Certificate,
-	serverCaCertPem []byte,
+	serverCACert []*x509.Certificate,
 	clientCert tls.Certificate,
 ) ConnectionInfo {
 	return ConnectionInfo{
 		addrs:             ipAddrs,
-		ServerCaCert:      serverCaCert,
-		ServerCaCertPem:   serverCaCertPem,
 		ClientCertificate: clientCert,
+		ServerCACert:      serverCACert,
+		ServerCAMode:      serverCAMode,
 		Expiration:        clientCert.Leaf.NotAfter,
 		DBVersion:         version,
 		ConnectionName:    cn,
 		DNSName:           dnsName,
-		ServerCaMode:      serverCaMode,
 	}
 }
 
@@ -234,17 +231,18 @@ func (c ConnectionInfo) Addr(ipType string) (string, error) {
 // TLSConfig constructs a TLS configuration for the given connection info.
 func (c ConnectionInfo) TLSConfig() *tls.Config {
 	pool := x509.NewCertPool()
-	if c.ServerCaMode == "GOOGLE_MANAGED_CAS_CA" {
-		pool.AppendCertsFromPEM(c.ServerCaCertPem)
+	for _, caCert := range c.ServerCACert {
+		pool.AddCert(caCert)
+	}
+	if c.ServerCAMode == "GOOGLE_MANAGED_CAS_CA" {
+		// For CAS instances, we can rely on the DNS name to verify the server identity.
 		return &tls.Config{
-			ServerName:         c.DNSName,
-			Certificates:       []tls.Certificate{c.ClientCertificate},
-			RootCAs:            pool,
-			InsecureSkipVerify: false,
-			MinVersion:         tls.VersionTLS13,
+			ServerName:   c.DNSName,
+			Certificates: []tls.Certificate{c.ClientCertificate},
+			RootCAs:      pool,
+			MinVersion:   tls.VersionTLS13,
 		}
 	}
-	pool.AddCert(c.ServerCaCert)
 	return &tls.Config{
 		ServerName:   c.ConnectionName.String(),
 		Certificates: []tls.Certificate{c.ClientCertificate},

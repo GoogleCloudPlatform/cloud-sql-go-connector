@@ -47,12 +47,11 @@ const (
 // metadata contains information about a Cloud SQL instance needed to create
 // connections.
 type metadata struct {
-	ipAddrs         map[string]string
-	serverCaCert    *x509.Certificate
-	serverCaCertPem []byte // Only set for CAS instances.
-	serverCaMode    string // Only set for CAS instances.
-	dnsName         string // Only set for CAS instances.
-	version         string
+	ipAddrs      map[string]string
+	serverCACert []*x509.Certificate
+	serverCAMode string
+	dnsName      string
+	version      string
 }
 
 // fetchMetadata uses the Cloud SQL Admin APIs get method to retrieve the
@@ -113,36 +112,29 @@ func fetchMetadata(
 		)
 	}
 
-	// CAS instances have different way to parse the server CA certs.
-	if db.ServerCaMode == "GOOGLE_MANAGED_CAS_CA" {
-		m = metadata{
-			ipAddrs:         ipAddrs,
-			serverCaCertPem: []byte(db.ServerCaCert.Cert),
-			version:         db.DatabaseVersion,
-			dnsName:         db.DnsName,
-			serverCaMode:    db.ServerCaMode,
-		}
-		return m, nil
-	}
-
 	// parse the server-side CA certificate
-	b, _ := pem.Decode([]byte(db.ServerCaCert.Cert))
-	if b == nil {
-		return metadata{}, errtype.NewRefreshError("failed to decode valid PEM cert", inst.String(), nil)
-	}
-	cert, err := x509.ParseCertificate(b.Bytes)
-	if err != nil {
-		return metadata{}, errtype.NewRefreshError(
-			fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
-			inst.String(),
-			nil,
-		)
+	caCerts := []*x509.Certificate{}
+	for b, rest := pem.Decode([]byte(db.ServerCaCert.Cert)); b != nil; b, rest = pem.Decode(rest) {
+		if b == nil {
+			return metadata{}, errtype.NewRefreshError("failed to decode valid PEM cert", inst.String(), nil)
+		}
+		caCert, err := x509.ParseCertificate(b.Bytes)
+		if err != nil {
+			return metadata{}, errtype.NewRefreshError(
+				fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
+				inst.String(),
+				nil,
+			)
+		}
+		caCerts = append(caCerts, caCert)
 	}
 
 	m = metadata{
 		ipAddrs:      ipAddrs,
-		serverCaCert: cert,
+		serverCACert: caCerts,
 		version:      db.DatabaseVersion,
+		dnsName:      db.DnsName,
+		serverCAMode: db.ServerCaMode,
 	}
 
 	return m, nil
@@ -361,7 +353,7 @@ func (c adminAPIClient) ConnectionInfo(
 	}
 
 	return NewConnectionInfo(
-		cn, md.dnsName, md.serverCaMode, md.version, md.ipAddrs, md.serverCaCert, md.serverCaCertPem, ec,
+		cn, md.dnsName, md.serverCAMode, md.version, md.ipAddrs, md.serverCACert, ec,
 	), nil
 }
 

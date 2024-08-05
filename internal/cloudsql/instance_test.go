@@ -158,7 +158,7 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ = pem.Decode(certBytes)
-	serverCert, err := x509.ParseCertificate(b.Bytes)
+	serverCACert, err := x509.ParseCertificate(b.Bytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 			PrivateKey:  RSAKey,
 			Leaf:        clientCert,
 		},
-		ServerCaCert: serverCert,
+		ServerCACert: []*x509.Certificate{serverCACert},
 		DBVersion:    "doesn't matter here",
 		Expiration:   clientCert.NotAfter,
 	}
@@ -198,7 +198,7 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 	}
 
 	verifyPeerCert := got.VerifyPeerCertificate
-	err = verifyPeerCert([][]byte{serverCert.Raw}, nil)
+	err = verifyPeerCert([][]byte{serverCACert.Raw}, nil)
 	if err != nil {
 		t.Fatalf("expected to verify peer cert, got error: %v", err)
 	}
@@ -410,8 +410,7 @@ func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverCAPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: rootCACert.Raw})
-	serverCAPem = append(serverCAPem, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: subCACert.Raw})...)
+	caCerts := []*x509.Certificate{rootCACert, subCACert}
 	wantRootCAs := x509.NewCertPool()
 	wantRootCAs.AddCert(rootCACert)
 	wantRootCAs.AddCert(subCACert)
@@ -425,10 +424,10 @@ func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
 			PrivateKey:  RSAKey,
 			Leaf:        clientCert,
 		},
-		ServerCaCertPem: serverCAPem,
-		DBVersion:       "doesn't matter here",
-		Expiration:      clientCert.NotAfter,
-		ServerCaMode:    "GOOGLE_MANAGED_CAS_CA",
+		ServerCACert: caCerts,
+		DBVersion:    "doesn't matter here",
+		Expiration:   clientCert.NotAfter,
+		ServerCAMode: "GOOGLE_MANAGED_CAS_CA",
 	}
 
 	got := ci.TLSConfig()

@@ -778,7 +778,6 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 						cloudsql.PrivateIP: "10.0.0.1",
 					},
 					nil,
-					nil,
 					tls.Certificate{Leaf: &x509.Certificate{
 						NotAfter: time.Now().Add(time.Hour),
 					}},
