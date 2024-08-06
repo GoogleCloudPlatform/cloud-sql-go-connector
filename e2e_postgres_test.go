@@ -408,14 +408,14 @@ func TestPostgresAuthentication(t *testing.T) {
 			}
 			defer d.Close()
 
-			dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, password, postgresDB)
+			dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, tc.password, postgresDB)
 			config, err := pgxpool.ParseConfig(dsn)
 			if err != nil {
 				t.Fatalf("failed to parse pgx config: %v", err)
 			}
 
 			config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
-				return d.Dial(ctx, connName)
+				return d.Dial(ctx, tc.connName)
 			}
 
 			pool, err := pgxpool.NewWithConfig(ctx, config)
