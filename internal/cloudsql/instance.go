@@ -174,7 +174,7 @@ type ConnectionInfo struct {
 	ServerCAMode      string
 	DBVersion         string
 	// The DNSName is from the ConnectSettings API.
-	// It is used validate the server identity for CAS instances.
+	// It is used to validate the server identity of the CAS instances.
 	DNSName    string
 	Expiration time.Time
 
