@@ -378,7 +378,7 @@ func TestPostgresAuthentication(t *testing.T) {
 			password: postgresPass,
 		},
 		{
-			desc: "with token",
+			desc: "with token for CAS instances",
 			opts: []cloudsqlconn.Option{cloudsqlconn.WithTokenSource(
 				oauth2.StaticTokenSource(tok),
 			)},
@@ -386,13 +386,13 @@ func TestPostgresAuthentication(t *testing.T) {
 			password: postgresCASPass,
 		},
 		{
-			desc:     "with credentials file",
+			desc:     "with credentials file for CAS instances",
 			opts:     []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
 			connName: postgresCASConnName,
 			password: postgresCASPass,
 		},
 		{
-			desc:     "with credentials JSON",
+			desc:     "with credentials JSON for CAS instances",
 			opts:     []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
 			connName: postgresCASConnName,
 			password: postgresCASPass,
