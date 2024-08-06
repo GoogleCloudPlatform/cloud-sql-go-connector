@@ -158,7 +158,7 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ = pem.Decode(certBytes)
-	serverCert, err := x509.ParseCertificate(b.Bytes)
+	serverCACert, err := x509.ParseCertificate(b.Bytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 			PrivateKey:  RSAKey,
 			Leaf:        clientCert,
 		},
-		ServerCaCert: serverCert,
+		ServerCACert: []*x509.Certificate{serverCACert},
 		DBVersion:    "doesn't matter here",
 		Expiration:   clientCert.NotAfter,
 	}
@@ -198,7 +198,7 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 	}
 
 	verifyPeerCert := got.VerifyPeerCertificate
-	err = verifyPeerCert([][]byte{serverCert.Raw}, nil)
+	err = verifyPeerCert([][]byte{serverCACert.Raw}, nil)
 	if err != nil {
 		t.Fatalf("expected to verify peer cert, got error: %v", err)
 	}
@@ -373,5 +373,84 @@ func TestRefreshDuration(t *testing.T) {
 				t.Fatalf("time until refresh: want = %v, got = %v", tc.want, got)
 			}
 		})
+	}
+}
+
+func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
+	cn := testInstanceConnName()
+	i := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name())
+	// Generate a client certificate with the client's public key and signed by
+	// the server's private key
+	cert, err := i.ClientCert(&RSAKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Now parse the bytes back out as structured data
+	b, _ := pem.Decode(cert)
+	clientCert, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Create a PEM with two certificates to pretend the sub CA and root CA.
+	rootCABytes, err := mock.SelfSign(i.Cert, i.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = pem.Decode(rootCABytes)
+	rootCACert, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subCABytes, err := mock.SelfSign(i.Cert, i.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = pem.Decode(subCABytes)
+	subCACert, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCerts := []*x509.Certificate{rootCACert, subCACert}
+	wantRootCAs := x509.NewCertPool()
+	wantRootCAs.AddCert(rootCACert)
+	wantRootCAs.AddCert(subCACert)
+	// Assemble a connection info with the raw and parsed client cert
+	// and the self-signed server certificate
+	wantServerName := "testing dns name"
+	ci := ConnectionInfo{
+		DNSName: wantServerName,
+		ClientCertificate: tls.Certificate{
+			Certificate: [][]byte{clientCert.Raw},
+			PrivateKey:  RSAKey,
+			Leaf:        clientCert,
+		},
+		ServerCACert: caCerts,
+		DBVersion:    "doesn't matter here",
+		Expiration:   clientCert.NotAfter,
+		ServerCAMode: "GOOGLE_MANAGED_CAS_CA",
+	}
+
+	got := ci.TLSConfig()
+
+	if got.ServerName != wantServerName {
+		t.Fatalf(
+			"ConnectInfo return unexpected server name in TLS Config, "+
+				"want = %v, got = %v",
+			wantServerName, got.ServerName,
+		)
+	}
+	if got.MinVersion != tls.VersionTLS13 {
+		t.Fatalf(
+			"want TLS 1.3, got = %v", got.MinVersion,
+		)
+	}
+	if got.Certificates[0].Leaf != ci.ClientCertificate.Leaf {
+		t.Fatal("leaf certificates do not match")
+	}
+	if got.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify is true, expected false")
+	}
+	if !got.RootCAs.Equal(wantRootCAs) {
+		t.Fatalf("unexpected root CAs, got %v, want %v", got.RootCAs, wantRootCAs)
 	}
 }

@@ -48,7 +48,9 @@ const (
 // connections.
 type metadata struct {
 	ipAddrs      map[string]string
-	serverCaCert *x509.Certificate
+	serverCACert []*x509.Certificate
+	serverCAMode string
+	dnsName      string
 	version      string
 }
 
@@ -98,7 +100,8 @@ func fetchMetadata(
 	}
 
 	// resolve DnsName into IP address for PSC
-	if db.DnsName != "" {
+	// Note that we have to check for PSC enablement first because CAS instances also set the DnsName.
+	if db.PscEnabled && db.DnsName != "" {
 		ipAddrs[PSC] = db.DnsName
 	}
 
@@ -110,23 +113,28 @@ func fetchMetadata(
 	}
 
 	// parse the server-side CA certificate
-	b, _ := pem.Decode([]byte(db.ServerCaCert.Cert))
-	if b == nil {
-		return metadata{}, errtype.NewRefreshError("failed to decode valid PEM cert", inst.String(), nil)
-	}
-	cert, err := x509.ParseCertificate(b.Bytes)
-	if err != nil {
-		return metadata{}, errtype.NewRefreshError(
-			fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
-			inst.String(),
-			nil,
-		)
+	caCerts := []*x509.Certificate{}
+	for b, rest := pem.Decode([]byte(db.ServerCaCert.Cert)); b != nil; b, rest = pem.Decode(rest) {
+		if b == nil {
+			return metadata{}, errtype.NewRefreshError("failed to decode valid PEM cert", inst.String(), nil)
+		}
+		caCert, err := x509.ParseCertificate(b.Bytes)
+		if err != nil {
+			return metadata{}, errtype.NewRefreshError(
+				fmt.Sprintf("failed to parse as X.509 certificate: %v", err),
+				inst.String(),
+				nil,
+			)
+		}
+		caCerts = append(caCerts, caCert)
 	}
 
 	m = metadata{
 		ipAddrs:      ipAddrs,
-		serverCaCert: cert,
+		serverCACert: caCerts,
 		version:      db.DatabaseVersion,
+		dnsName:      db.DnsName,
+		serverCAMode: db.ServerCaMode,
 	}
 
 	return m, nil
@@ -345,7 +353,7 @@ func (c adminAPIClient) ConnectionInfo(
 	}
 
 	return NewConnectionInfo(
-		cn, md.version, md.ipAddrs, md.serverCaCert, ec,
+		cn, md.dnsName, md.serverCAMode, md.version, md.ipAddrs, md.serverCACert, ec,
 	), nil
 }
 

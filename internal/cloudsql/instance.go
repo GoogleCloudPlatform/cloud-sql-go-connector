@@ -170,9 +170,13 @@ func (i *RefreshAheadCache) Close() error {
 type ConnectionInfo struct {
 	ConnectionName    instance.ConnName
 	ClientCertificate tls.Certificate
-	ServerCaCert      *x509.Certificate
+	ServerCACert      []*x509.Certificate
+	ServerCAMode      string
 	DBVersion         string
-	Expiration        time.Time
+	// The DNSName is from the ConnectSettings API.
+	// It is used to validate the server identity of the CAS instances.
+	DNSName    string
+	Expiration time.Time
 
 	addrs map[string]string
 }
@@ -180,18 +184,22 @@ type ConnectionInfo struct {
 // NewConnectionInfo initializes a ConnectionInfo struct.
 func NewConnectionInfo(
 	cn instance.ConnName,
+	dnsName string,
+	serverCAMode string,
 	version string,
 	ipAddrs map[string]string,
-	serverCaCert *x509.Certificate,
+	serverCACert []*x509.Certificate,
 	clientCert tls.Certificate,
 ) ConnectionInfo {
 	return ConnectionInfo{
 		addrs:             ipAddrs,
-		ServerCaCert:      serverCaCert,
 		ClientCertificate: clientCert,
+		ServerCACert:      serverCACert,
+		ServerCAMode:      serverCAMode,
 		Expiration:        clientCert.Leaf.NotAfter,
 		DBVersion:         version,
 		ConnectionName:    cn,
+		DNSName:           dnsName,
 	}
 }
 
@@ -225,7 +233,18 @@ func (c ConnectionInfo) Addr(ipType string) (string, error) {
 // TLSConfig constructs a TLS configuration for the given connection info.
 func (c ConnectionInfo) TLSConfig() *tls.Config {
 	pool := x509.NewCertPool()
-	pool.AddCert(c.ServerCaCert)
+	for _, caCert := range c.ServerCACert {
+		pool.AddCert(caCert)
+	}
+	if c.ServerCAMode == "GOOGLE_MANAGED_CAS_CA" {
+		// For CAS instances, we can rely on the DNS name to verify the server identity.
+		return &tls.Config{
+			ServerName:   c.DNSName,
+			Certificates: []tls.Certificate{c.ClientCertificate},
+			RootCAs:      pool,
+			MinVersion:   tls.VersionTLS13,
+		}
+	}
 	return &tls.Config{
 		ServerName:   c.ConnectionName.String(),
 		Certificates: []tls.Certificate{c.ClientCertificate},
