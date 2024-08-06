@@ -173,8 +173,10 @@ type ConnectionInfo struct {
 	ServerCACert      []*x509.Certificate
 	ServerCAMode      string
 	DBVersion         string
-	DNSName           string
-	Expiration        time.Time
+	// The DNSName is from the ConnectSettings API.
+	// It is used validate the server identity for CAS instances.
+	DNSName    string
+	Expiration time.Time
 
 	addrs map[string]string
 }
