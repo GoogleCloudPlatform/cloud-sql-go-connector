@@ -113,6 +113,53 @@ func TestPostgresPgxPoolConnect(t *testing.T) {
 	t.Log(now)
 }
 
+func TestPostgresCASConnect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
+	requirePostgresVars(t)
+
+	ctx := context.Background()
+
+	// Configure the driver to connect to the database
+	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresCASPass, postgresDB)
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("failed to parse pgx config: %v", err)
+	}
+
+	// Create a new dialer with any options
+	d, err := cloudsqlconn.NewDialer(ctx)
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+
+	// call cleanup when you're done with the database connection to close dialer
+	cleanup := func() error { return d.Close() }
+
+	// Tell the driver to use the Cloud SQL Go Connector to create connections
+	// postgresConnName takes the form of 'project:region:instance'.
+	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+		return d.Dial(ctx, postgresCASConnName)
+	}
+
+	// Interact with the driver directly as you normally would
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("failed to create pool: %s", err)
+	}
+	// ... etc
+
+	defer cleanup()
+	defer pool.Close()
+
+	var now time.Time
+	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+	if err != nil {
+		t.Fatalf("QueryRow failed: %s", err)
+	}
+	t.Log(now)
+}
 func TestPostgresConnectWithIAMUser(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
@@ -352,50 +399,22 @@ func TestPostgresAuthentication(t *testing.T) {
 	defer cleanup()
 
 	tcs := []struct {
-		desc     string
-		opts     []cloudsqlconn.Option
-		connName string
-		password string
+		desc string
+		opts []cloudsqlconn.Option
 	}{
 		{
 			desc: "with token",
 			opts: []cloudsqlconn.Option{cloudsqlconn.WithTokenSource(
 				oauth2.StaticTokenSource(tok),
 			)},
-			connName: postgresConnName,
-			password: postgresPass,
 		},
 		{
-			desc:     "with credentials file",
-			opts:     []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
-			connName: postgresConnName,
-			password: postgresPass,
+			desc: "with credentials file",
+			opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
 		},
 		{
 			desc:     "with credentials JSON",
 			opts:     []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
-			connName: postgresConnName,
-			password: postgresPass,
-		},
-		{
-			desc: "with token",
-			opts: []cloudsqlconn.Option{cloudsqlconn.WithTokenSource(
-				oauth2.StaticTokenSource(tok),
-			)},
-			connName: postgresCASConnName,
-			password: postgresCASPass,
-		},
-		{
-			desc:     "with credentials file",
-			opts:     []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
-			connName: postgresCASConnName,
-			password: postgresCASPass,
-		},
-		{
-			desc:     "with credentials JSON",
-			opts:     []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
-			connName: postgresCASConnName,
-			password: postgresCASPass,
 		},
 	}
 	for _, tc := range tcs {
@@ -408,14 +427,14 @@ func TestPostgresAuthentication(t *testing.T) {
 			}
 			defer d.Close()
 
-			dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, tc.password, postgresDB)
+			dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDB)
 			config, err := pgxpool.ParseConfig(dsn)
 			if err != nil {
 				t.Fatalf("failed to parse pgx config: %v", err)
 			}
 
 			config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
-				return d.Dial(ctx, tc.connName)
+				return d.Dial(ctx, postgresConnName)
 			}
 
 			pool, err := pgxpool.NewWithConfig(ctx, config)
