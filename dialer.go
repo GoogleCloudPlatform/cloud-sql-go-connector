@@ -481,7 +481,35 @@ func newInstrumentedConn(conn net.Conn, closeFunc func()) *instrumentedConn {
 // is closed.
 type instrumentedConn struct {
 	net.Conn
-	closeFunc func()
+	closeFunc    func()
+	bytesRead    int
+	bytesWritten int
+}
+
+// BytesRead returns the number of bytes read through the connection.
+func (i *instrumentedConn) BytesRead() int {
+	return i.bytesRead
+}
+
+// BytesWritten returns the number of bytes written through the connection.
+func (i *instrumentedConn) BytesWritten() int {
+	return i.bytesWritten
+}
+
+// Read delegates to the underlying net.Conn interface and counts number of
+// bytes read
+func (i *instrumentedConn) Read(b []byte) (n int, err error) {
+	n, err = i.Conn.Read(b)
+	i.bytesRead += n
+	return n, err
+}
+
+// Write delegates to the underlying net.Conn interface and counts number of
+// bytes written
+func (i *instrumentedConn) Write(b []byte) (n int, err error) {
+	n, err = i.Conn.Write(b)
+	i.bytesWritten += n
+	return n, err
 }
 
 // Close delegates to the underlying net.Conn interface and reports the close
