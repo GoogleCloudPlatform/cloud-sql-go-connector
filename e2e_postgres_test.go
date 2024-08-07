@@ -160,6 +160,7 @@ func TestPostgresCASConnect(t *testing.T) {
 	}
 	t.Log(now)
 }
+
 func TestPostgresConnectWithIAMUser(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Postgres integration tests")
