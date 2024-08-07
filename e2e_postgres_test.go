@@ -414,8 +414,8 @@ func TestPostgresAuthentication(t *testing.T) {
 			opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
 		},
 		{
-			desc:     "with credentials JSON",
-			opts:     []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
+			desc: "with credentials JSON",
+			opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
 		},
 	}
 	for _, tc := range tcs {
