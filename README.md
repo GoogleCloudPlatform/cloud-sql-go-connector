@@ -234,7 +234,8 @@ func connect() {
     // ... etc
 }
 ```
-### Using DNS to identify an instance
+
+### Using DNS domain names to identify instances
 
 The connector can be configured to use DNS to look up an instance. This would
 allow you to configure your application to connect to a database instance, and
@@ -291,6 +292,40 @@ func connect() {
 	// ... etc
 }
 ```
+
+### Automatic Fail-over Using DNS domain names
+
+When you configure the connector using a domain name, the connector will 
+periodically check if the DNS record for an instance changes. When connector 
+detects that the domain name refers to a different instance, the connector will
+close all open connections to the old instance. Subsequent connection attempts
+will be directed to the new instance. 
+
+For example: suppose your application is configured to connect using the
+domain name `prod-db.mycompany.example.com`. Initially your corporate DNS 
+zone has a SRV record with the target `my-project:region:my-instance`. Your
+application establishes connections to the `my-project:region:my-instance` 
+Cloud SQL instance. 
+
+Then, you decide to reconfigure your application using a different database
+instance: `my-project:other-region:my-instance-2`. You update the DNS record
+for `prod-db.mycompany.example.com` with the target 
+`my-project:other-region:my-instance-2`
+
+The connector inside your application detects the change to this
+DNS entry. Now, when your application connects to its database using the 
+domain name `prod-db.mycompany.example.com`, it will connect to the
+`my-project:other-region:my-instance-2` Cloud SQL instance. 
+
+The connector will automatically close all existing connections to
+`my-project:region:my-instance`. This may cause errors in your application as
+database queries in progress will fail.
+
+The connector will poll for changes to the DNS name every 30 seconds by default.
+You may configure the frequency of the connections using the option 
+`WithFailoverPeriod(d time.Duration)`. When this is set to 0, the connector will
+disable polling and only check if the DNS record changed when it is
+creating a new connection. 
 
 
 ### Using Options

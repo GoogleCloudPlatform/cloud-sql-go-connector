@@ -325,7 +325,7 @@ func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 	if err != nil {
 		t.Fatalf("failed to create X.509 Key Pair: %v", err)
 	}
-	ln, err := tls.Listen("tcp", ":3307", &tls.Config{
+	ln, err := tls.Listen("tcp", fmt.Sprintf(":3307"), &tls.Config{
 		Certificates: []tls.Certificate{serverCert},
 	})
 	if err != nil {

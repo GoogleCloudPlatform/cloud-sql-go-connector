@@ -107,6 +107,7 @@ type connectionInfoCache interface {
 	ConnectionInfo(context.Context) (cloudsql.ConnectionInfo, error)
 	UpdateRefresh(*bool)
 	ForceRefresh()
+	UseIAMAuthN() bool
 	io.Closer
 }
 
@@ -114,6 +115,9 @@ type connectionInfoCache interface {
 // number of connections to the associated instance.
 type monitoredCache struct {
 	openConns *uint64
+
+	lock        sync.Mutex
+	openSockets []*instrumentedConn
 
 	connectionInfoCache
 }
@@ -156,6 +160,10 @@ type Dialer struct {
 
 	// resolver converts instance names into DNS names.
 	resolver instance.ConnectionNameResolver
+
+	// domainNameTicker periodically checks any domain names to see if they
+	// changed.
+	domainNameTicker *time.Ticker
 }
 
 var (
@@ -179,6 +187,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		logger:          nullLogger{},
 		useragents:      []string{userAgent},
 		serviceUniverse: "googleapis.com",
+		failoverPeriod:  cloudsql.FailoverPeriod,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -275,7 +284,22 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		dialFunc:          cfg.dialFunc,
 		resolver:          r,
 	}
+
+	// If the failover period is set, start a goroutine to periodically
+	// check for DNS changes.
+	if cfg.failoverPeriod > 0 {
+		d.initFailoverRoutine(ctx, cfg.failoverPeriod)
+	}
+
 	return d, nil
+}
+func (d *Dialer) initFailoverRoutine(ctx context.Context, p time.Duration) {
+	d.domainNameTicker = time.NewTicker(p)
+	go func() {
+		for range d.domainNameTicker.C {
+			d.pollDomainNames(ctx)
+		}
+	}()
 }
 
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The
@@ -385,10 +409,19 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
 	}()
 
-	return newInstrumentedConn(tlsConn, func() {
+	iConn := newInstrumentedConn(tlsConn, func() {
 		n := atomic.AddUint64(c.openConns, ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
-	}), nil
+	})
+
+	// If this connection was opened using a Domain Name, then store it for later
+	// in case it needs to be forcibly closed.
+	if cn.DomainName() != "" {
+		c.lock.Lock()
+		c.openSockets = append(c.openSockets, iConn)
+		c.lock.Unlock()
+	}
+	return iConn, nil
 }
 
 // removeCached stops all background refreshes and deletes the connection
@@ -491,11 +524,13 @@ func newInstrumentedConn(conn net.Conn, closeFunc func()) *instrumentedConn {
 type instrumentedConn struct {
 	net.Conn
 	closeFunc func()
+	closed    bool
 }
 
 // Close delegates to the underlying net.Conn interface and reports the close
 // to the provided closeFunc only when Close returns no error.
 func (i *instrumentedConn) Close() error {
+	i.closed = true
 	err := i.Conn.Close()
 	if err != nil {
 		return err
@@ -516,10 +551,89 @@ func (d *Dialer) Close() error {
 	close(d.closed)
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	if d.domainNameTicker != nil {
+		d.domainNameTicker.Stop()
+	}
 	for _, i := range d.cache {
 		i.Close()
 	}
 	return nil
+}
+
+func (d *Dialer) pollDomainNames(ctx context.Context) {
+	type cacheEntry struct {
+		cn    instance.ConnName
+		cache monitoredCache
+	}
+
+	d.lock.RLock()
+	caches := make([]cacheEntry, 0, len(d.cache))
+	for cn, cache := range d.cache {
+
+		// Ignore cache entries that were not opened by domain name.
+		if cn.DomainName() == "" {
+			continue
+		}
+
+		caches = append(caches, cacheEntry{cn: cn, cache: cache})
+
+		// Clean up the list of openSockets - remove closed sockets
+		cache.lock.Lock()
+		var newOpenSockets []*instrumentedConn
+		for _, s := range cache.openSockets {
+			if !s.closed {
+				newOpenSockets = append(newOpenSockets, s)
+			}
+		}
+		cache.openSockets = newOpenSockets
+		cache.lock.Unlock()
+	}
+	d.lock.RUnlock()
+
+	for _, entry := range caches {
+		newCn, err := d.resolver.Resolve(ctx, entry.cn.DomainName())
+		// the domain name no longer resolves to a valid instance
+		if err != nil {
+			d.logger.Debugf(ctx, "[failover] unable to resolve DNS for instance %s: %v", entry.cn.DomainName(), err)
+		}
+
+		// The domain name points to a different instance.
+		if newCn != entry.cn {
+			d.logger.Debugf(ctx, "domain name %s changed from old instance %s to new instance %s",
+				entry.cn.DomainName(), entry.cn.String(), newCn.String())
+
+			d.closeDomainNameChanged(ctx, entry.cn, entry.cache,
+				fmt.Errorf("domain name %s changed from old instance %s to new instance %s",
+					entry.cn.DomainName(), entry.cn.String(), newCn.String()))
+			// preload the new cache entry
+			b := entry.cache.UseIAMAuthN()
+			d.connectionInfoCache(ctx, newCn, &b)
+		}
+	}
+
+}
+
+func (d *Dialer) closeDomainNameChanged(ctx context.Context, cn instance.ConnName, cache monitoredCache, err error) {
+	d.removeCached(ctx, cn, cache, err)
+	if atomic.LoadUint64(cache.openConns) > 0 {
+		for _, socket := range cache.openSockets {
+			if !socket.closed {
+				socket.Close()
+			}
+		}
+	}
+}
+
+func (d *Dialer) findByDomainName(dn string) (instance.ConnName, monitoredCache, bool) {
+
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	for cn, cache := range d.cache {
+		if cn.DomainName() == dn {
+			return cn, cache, true
+		}
+	}
+	return instance.ConnName{}, monitoredCache{}, false
 }
 
 // connectionInfoCache is a helper function for returning the appropriate
@@ -531,7 +645,20 @@ func (d *Dialer) connectionInfoCache(
 	d.lock.RLock()
 	c, ok := d.cache[cn]
 	d.lock.RUnlock()
+
 	if !ok {
+		// Check if the domain name was previously associated with a different
+		// instance, and if so, close that cache.
+		if cn.DomainName() != "" {
+			oldCn, c, ok := d.findByDomainName(cn.DomainName())
+			if ok {
+				d.closeDomainNameChanged(ctx, oldCn, c, fmt.Errorf(
+					"domain name %s changed from old instance %s to new instance %s",
+					cn.DomainName(), oldCn.String(), cn.String()))
+			}
+		}
+
+		// Create a new connectionInfoCache
 		d.lock.Lock()
 		defer d.lock.Unlock()
 		// Recheck to ensure instance wasn't created or changed between locks

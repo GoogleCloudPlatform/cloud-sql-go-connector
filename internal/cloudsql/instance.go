@@ -45,6 +45,11 @@ const (
 	// refreshInterval.
 	RefreshTimeout = 60 * time.Second
 
+	// FailoverPeriod is the frequency with which the dialer will check
+	// if the DNS record has changed for connections configured using
+	// a DNS name.
+	FailoverPeriod = 30 * time.Second
+
 	// refreshBurst is the initial burst allowed by the rate limiter.
 	refreshBurst = 2
 )
@@ -163,6 +168,11 @@ func (i *RefreshAheadCache) Close() error {
 	i.cur.cancel()
 	i.next.cancel()
 	return nil
+}
+
+// UseIAMAuthN returns true if this dialer is using IAM AuthN
+func (i *RefreshAheadCache) UseIAMAuthN() bool {
+	return i.useIAMAuthNDial
 }
 
 // ConnectionInfo contains all necessary information to connect securely to the
