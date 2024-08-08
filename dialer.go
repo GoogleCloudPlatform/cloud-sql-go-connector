@@ -379,7 +379,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	return newInstrumentedConn(tlsConn, func() {
 		n := atomic.AddUint64(c.openConns, ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
-	}), nil
+	}, d.dialerID, cn.String()), nil
 }
 
 // removeCached stops all background refreshes and deletes the connection
@@ -470,10 +470,12 @@ func (d *Dialer) Warmup(ctx context.Context, icn string, opts ...DialOption) err
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
 // decrement the number of open connects and record the result.
-func newInstrumentedConn(conn net.Conn, closeFunc func()) *instrumentedConn {
+func newInstrumentedConn(conn net.Conn, closeFunc func(), dialerID, connName string) *instrumentedConn {
 	return &instrumentedConn{
 		Conn:      conn,
 		closeFunc: closeFunc,
+		dialerID:  dialerID,
+		connName:  connName,
 	}
 }
 
@@ -482,18 +484,10 @@ func newInstrumentedConn(conn net.Conn, closeFunc func()) *instrumentedConn {
 type instrumentedConn struct {
 	net.Conn
 	closeFunc    func()
+	dialerID     string
+	connName     string
 	bytesRead    int
 	bytesWritten int
-}
-
-// BytesRead returns the number of bytes read through the connection.
-func (i *instrumentedConn) BytesRead() int {
-	return i.bytesRead
-}
-
-// BytesWritten returns the number of bytes written through the connection.
-func (i *instrumentedConn) BytesWritten() int {
-	return i.bytesWritten
 }
 
 // Read delegates to the underlying net.Conn interface and counts number of
@@ -501,6 +495,7 @@ func (i *instrumentedConn) BytesWritten() int {
 func (i *instrumentedConn) Read(b []byte) (n int, err error) {
 	n, err = i.Conn.Read(b)
 	i.bytesRead += n
+	trace.RecordBytesReceived(context.Background(), int64(i.bytesRead), i.connName, i.dialerID)
 	return n, err
 }
 
@@ -509,6 +504,7 @@ func (i *instrumentedConn) Read(b []byte) (n int, err error) {
 func (i *instrumentedConn) Write(b []byte) (n int, err error) {
 	n, err = i.Conn.Write(b)
 	i.bytesWritten += n
+	trace.RecordBytesSent(context.Background(), int64(i.bytesWritten), i.connName, i.dialerID)
 	return n, err
 }
 
