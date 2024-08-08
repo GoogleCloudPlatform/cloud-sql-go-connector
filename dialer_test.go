@@ -40,6 +40,14 @@ import (
 func testSuccessfulDial(
 	ctx context.Context, t *testing.T, d *Dialer, icn string, opts ...DialOption,
 ) {
+	testSucessfulDialWithInstanceName(ctx, t, d, icn, "my-instance", opts...)
+}
+
+// testSuccessfulDial uses the provided dialer to dial the specified instance
+// and verifies the connection works end to end.
+func testSucessfulDialWithInstanceName(
+	ctx context.Context, t *testing.T, d *Dialer, icn string, instanceName string, opts ...DialOption,
+) {
 	conn, err := d.Dial(ctx, icn, opts...)
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
@@ -50,7 +58,7 @@ func testSuccessfulDial(
 	if err != nil {
 		t.Fatalf("expected ReadAll to succeed, got error %v", err)
 	}
-	if string(data) != "my-instance" {
+	if string(data) != instanceName {
 		t.Fatalf(
 			"expected known response from the server, but got %v",
 			string(data),
@@ -1016,5 +1024,64 @@ func TestDialerInitializesLazyCache(t *testing.T) {
 		// Pass -- the cache was initialized with the correct type
 	default:
 		t.Fatalf("dialer was initialized with non-lazy type: %T", tt)
+	}
+}
+
+type fakeResolver struct {
+	domainName   string
+	instanceName instance.ConnName
+}
+
+func (r *fakeResolver) Resolve(_ context.Context, name string) (instance.ConnName, error) {
+	// For TestDialerSuccessfullyDialsDnsTxtRecord
+	if name == r.domainName {
+		return r.instanceName, nil
+	}
+	// TestDialerFailsDnsTxtRecordMissing
+	return instance.ConnName{}, fmt.Errorf("no resolution for %q", name)
+}
+
+func TestDialerSuccessfullyDialsDnsTxtRecord(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+	)
+	wantName, _ := instance.ParseConnName("my-project:my-region:my-instance")
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithResolver(&fakeResolver{
+				domainName:   "db.example.com",
+				instanceName: wantName,
+			}),
+		},
+	})
+
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"db.example.com",
+	)
+}
+
+func TestDialerFailsDnsTxtRecordMissing(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+	)
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs:         []*mock.Request{},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithResolver(&fakeResolver{}),
+		},
+	})
+	_, err := d.Dial(context.Background(), "doesnt-exist.example.com")
+	wantMsg := "no resolution for \"doesnt-exist.example.com\""
+	if !strings.Contains(err.Error(), wantMsg) {
+		t.Fatalf("want = %v, got = %v", wantMsg, err)
 	}
 }

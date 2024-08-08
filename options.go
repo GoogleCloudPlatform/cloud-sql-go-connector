@@ -24,6 +24,7 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -52,6 +53,7 @@ type dialerConfig struct {
 	setCredentials         bool
 	setTokenSource         bool
 	setIAMAuthNTokenSource bool
+	resolver               instance.ConnectionNameResolver
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -231,6 +233,41 @@ func WithDialFunc(dial func(ctx context.Context, network, addr string) (net.Conn
 func WithIAMAuthN() Option {
 	return func(d *dialerConfig) {
 		d.useIAMAuthN = true
+	}
+}
+
+// WithResolver replaces the default resolver with an alternate
+// implementation to resolve the name in the database DSN to a Cloud SQL
+// instance.
+func WithResolver(r instance.ConnectionNameResolver) Option {
+	return func(d *dialerConfig) {
+		d.resolver = r
+	}
+}
+
+// WithDNSResolver replaces the default resolver (which only resolves instance
+// names) with the DNSResolver, which will attempt to first parse the instance
+// name, and then will attempt to resolve the DNS TXT record to determine
+// the instance name.
+//
+// First, add a record for your Cloud SQL instance to a **private** DNS server
+// or a private Google Cloud DNS Zone used by your application.
+//
+// **Note:** You are strongly discouraged from adding DNS records for your
+// Cloud SQL instances to a public DNS server. This would allow anyone on the
+// internet to discover the Cloud SQL instance name.
+//
+// For example: suppose you wanted to use the domain name
+// `prod-db.mycompany.example.com` to connect to your database instance
+// `my-project:region:my-instance`. You would create the following DNS record:
+//
+//   - Record type: `TXT`
+//   - Name: `prod-db.mycompany.example.com` – This is the domain name used by
+//     the application
+//   - Value: `my-project:region:my-instance` – This is the instance name
+func WithDNSResolver() Option {
+	return func(d *dialerConfig) {
+		d.resolver = cloudsql.DNSResolver
 	}
 }
 
