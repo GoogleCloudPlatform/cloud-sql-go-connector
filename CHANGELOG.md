@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.11.1...v1.12.0) (2024-08-08)
+
+
+### Features
+
+* Configure connections using DNS domain names ([#843](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/843)) ([ec6b3a0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/ec6b3a09bdfd1e13df30786e973ccecd48e9b3a6))
+* support Cloud SQL CAS instances. ([#850](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/850)) ([511fae4](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/511fae491ed1101c2ce0998120291e0cb8180d40))
+
 ## [1.11.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.11.0...v1.11.1) (2024-07-10)
 
 
