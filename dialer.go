@@ -488,20 +488,24 @@ type instrumentedConn struct {
 	connName  string
 }
 
-// Read delegates to the underlying net.Conn interface and counts number of
+// Read delegates to the underlying net.Conn interface and records number of
 // bytes read
-func (i *instrumentedConn) Read(b []byte) (n int, err error) {
-	n, err = i.Conn.Read(b)
-	trace.RecordBytesReceived(context.Background(), int64(n), i.connName, i.dialerID)
-	return n, err
+func (i *instrumentedConn) Read(b []byte) (int, error) {
+	bytesRead, err := i.Conn.Read(b)
+	if err == nil {
+		go trace.RecordBytesReceived(context.Background(), int64(bytesRead), i.connName, i.dialerID)
+	}
+	return bytesRead, err
 }
 
-// Write delegates to the underlying net.Conn interface and counts number of
+// Write delegates to the underlying net.Conn interface and records number of
 // bytes written
-func (i *instrumentedConn) Write(b []byte) (n int, err error) {
-	n, err = i.Conn.Write(b)
-	trace.RecordBytesSent(context.Background(), int64(n), i.connName, i.dialerID)
-	return n, err
+func (i *instrumentedConn) Write(b []byte) (int, error) {
+	bytesWritten, err := i.Conn.Write(b)
+	if err == nil {
+		go trace.RecordBytesSent(context.Background(), int64(bytesWritten), i.connName, i.dialerID)
+	}
+	return bytesWritten, err
 }
 
 // Close delegates to the underlying net.Conn interface and reports the close
