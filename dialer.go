@@ -483,19 +483,16 @@ func newInstrumentedConn(conn net.Conn, closeFunc func(), dialerID, connName str
 // is closed.
 type instrumentedConn struct {
 	net.Conn
-	closeFunc    func()
-	dialerID     string
-	connName     string
-	bytesRead    int
-	bytesWritten int
+	closeFunc func()
+	dialerID  string
+	connName  string
 }
 
 // Read delegates to the underlying net.Conn interface and counts number of
 // bytes read
 func (i *instrumentedConn) Read(b []byte) (n int, err error) {
 	n, err = i.Conn.Read(b)
-	i.bytesRead += n
-	trace.RecordBytesReceived(context.Background(), int64(i.bytesRead), i.connName, i.dialerID)
+	trace.RecordBytesReceived(context.Background(), int64(n), i.connName, i.dialerID)
 	return n, err
 }
 
@@ -503,8 +500,7 @@ func (i *instrumentedConn) Read(b []byte) (n int, err error) {
 // bytes written
 func (i *instrumentedConn) Write(b []byte) (n int, err error) {
 	n, err = i.Conn.Write(b)
-	i.bytesWritten += n
-	trace.RecordBytesSent(context.Background(), int64(i.bytesWritten), i.connName, i.dialerID)
+	trace.RecordBytesSent(context.Background(), int64(n), i.connName, i.dialerID)
 	return n, err
 }
 
