@@ -14,7 +14,9 @@
 package cloudsqlconn
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -159,6 +161,21 @@ func TestDialerWithMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
 	}
+	// write to conn to test bytes_sent and bytes_received
+	buf := new(bytes.Buffer)
+	var num uint64 = 1234
+	err = binary.Write(buf, binary.LittleEndian, num)
+	if err != nil {
+		t.Fatalf("binary.Write failed: %v", err)
+	}
+	_, err = conn2.Write(buf.Bytes())
+	if err != nil {
+		t.Fatalf("conn.Write failed: %v", err)
+	}
+	_, err = conn2.Read(buf.Bytes())
+	if err != nil {
+		t.Fatalf("conn.Read failed: %v", err)
+	}
 	defer conn2.Close()
 	// dial a bogus instance
 	_, err = d.Dial(context.Background(), "my-project:my-region:notaninstance")
@@ -172,6 +189,8 @@ func TestDialerWithMetrics(t *testing.T) {
 	wantLastValueMetric(t, "cloudsqlconn/open_connections", spy.data(), 2)
 	wantDistributionMetric(t, "cloudsqlconn/dial_latency", spy.data())
 	wantCountMetric(t, "cloudsqlconn/refresh_success_count", spy.data())
+	wantLastValueMetric(t, "cloudsqlconn/bytes_sent", spy.data(), 8)
+	wantLastValueMetric(t, "cloudsqlconn/bytes_received", spy.data(), 8)
 
 	// failure metrics from dialing bogus instance
 	wantCountMetric(t, "cloudsqlconn/dial_failure_count", spy.data())
