@@ -105,14 +105,14 @@ var (
 		TagKeys:     []tag.Key{keyInstance, keyDialerID, keyErrorCode},
 	}
 	bytesSentView = &view.View{
-		Name:        "cloudsqlconn//bytes_sent_count",
+		Name:        "cloudsqlconn//bytes_sent",
 		Measure:     mBytesSent,
 		Description: "The number of bytes sent to Cloud SQL",
 		Aggregation: view.LastValue(),
 		TagKeys:     []tag.Key{keyInstance, keyDialerID},
 	}
 	bytesReceivedView = &view.View{
-		Name:        "cloudsqlconn//bytes_received_count",
+		Name:        "cloudsqlconn//bytes_received",
 		Measure:     mBytesReceived,
 		Description: "The number of bytes received from Cloud SQL",
 		Aggregation: view.LastValue(),
