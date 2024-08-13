@@ -399,7 +399,9 @@ Supported metrics include:
 - `cloudsqlconn/refresh_success_count`: The number of successful certificate
   refresh operations
 - `cloudsqlconn/refresh_failure_count`: The number of failed refresh
-  operations.
+  operations
+- `cloudsqlconn/bytes_sent`: The number of bytes sent to Cloud SQL
+- `cloudsqlconn/bytes_received`: The number of bytes received from Cloud SQL
 
 Supported traces include:
 
