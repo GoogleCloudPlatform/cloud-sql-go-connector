@@ -118,12 +118,38 @@ type monitoredCache struct {
 	connectionInfoCache
 }
 
+func (c *monitoredCache) Close() error {
+	if c == nil || c.connectionInfoCache == nil {
+		return nil
+	}
+	return c.connectionInfoCache.Close()
+}
+
+func (c *monitoredCache) ForceRefresh() {
+	if c == nil || c.connectionInfoCache == nil {
+		return
+	}
+	c.connectionInfoCache.ForceRefresh()
+}
+
+func (c *monitoredCache) UpdateRefresh(b *bool) {
+	if c == nil || c.connectionInfoCache == nil {
+		return
+	}
+	c.connectionInfoCache.UpdateRefresh(b)
+}
+func (c *monitoredCache) ConnectionInfo(ctx context.Context) (cloudsql.ConnectionInfo, error) {
+	if c == nil || c.connectionInfoCache == nil {
+		return cloudsql.ConnectionInfo{}, nil
+	}
+	return c.connectionInfoCache.ConnectionInfo(ctx)
+}
+
 // A Dialer is used to create connections to Cloud SQL instances.
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
-	lock           sync.RWMutex
-	cache          map[instance.ConnName]monitoredCache
+	cache          *dialerCache
 	keyGenerator   *keyGenerator
 	refreshTimeout time.Duration
 	// closed reports if the dialer has been closed.
@@ -205,7 +231,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		}
 		ud, err := c.GetUniverseDomain()
 		if err != nil {
-			return nil, fmt.Errorf("failed to get universe domain: %v", err)
+			return nil, fmt.Errorf("failed to getOrAdd universe domain: %v", err)
 		}
 		cfg.credentialsUniverse = ud
 		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithTokenSource(c.TokenSource))
@@ -263,7 +289,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 
 	d := &Dialer{
 		closed:            make(chan struct{}),
-		cache:             make(map[instance.ConnName]monitoredCache),
+		cache:             newDialerCache(cfg.logger),
 		lazyRefresh:       cfg.lazyRefresh,
 		keyGenerator:      g,
 		refreshTimeout:    cfg.refreshTimeout,
@@ -385,10 +411,12 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
 	}()
 
-	return newInstrumentedConn(tlsConn, func() {
+	iConn := newInstrumentedConn(tlsConn, func() {
 		n := atomic.AddUint64(c.openConns, ^uint64(0))
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
-	}, d.dialerID, cn.String()), nil
+	}, d.dialerID, cn.String())
+
+	return iConn, nil
 }
 
 // removeCached stops all background refreshes and deletes the connection
@@ -397,16 +425,14 @@ func (d *Dialer) removeCached(
 	ctx context.Context,
 	i instance.ConnName, c connectionInfoCache, err error,
 ) {
+	mc := d.cache.remove(i)
+	mc.Close()
 	d.logger.Debugf(
 		ctx,
 		"[%v] Removing connection info from cache: %v",
 		i.String(),
 		err,
 	)
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	c.Close()
-	delete(d.cache, i)
 }
 
 // validClientCert checks that the ephemeral client certificate retrieved from
@@ -442,6 +468,7 @@ func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) 
 	if err != nil {
 		return "", err
 	}
+
 	c, err := d.connectionInfoCache(ctx, cn, &d.defaultDialConfig.useIAMAuthN)
 	if err != nil {
 		return "", err
@@ -493,6 +520,7 @@ func newInstrumentedConn(conn net.Conn, closeFunc func(), dialerID, connName str
 type instrumentedConn struct {
 	net.Conn
 	closeFunc func()
+	closed    bool
 	dialerID  string
 	connName  string
 }
@@ -520,6 +548,7 @@ func (i *instrumentedConn) Write(b []byte) (int, error) {
 // Close delegates to the underlying net.Conn interface and reports the close
 // to the provided closeFunc only when Close returns no error.
 func (i *instrumentedConn) Close() error {
+	i.closed = true
 	err := i.Conn.Close()
 	if err != nil {
 		return err
@@ -538,11 +567,11 @@ func (d *Dialer) Close() error {
 	default:
 	}
 	close(d.closed)
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	for _, i := range d.cache {
-		i.Close()
-	}
+
+	d.cache.replaceAll(func(cn instance.ConnName, c monitoredCache) (instance.ConnName, monitoredCache) {
+		c.Close()                                    // close the monitoredCache
+		return instance.ConnName{}, monitoredCache{} // Remove from cache
+	})
 	return nil
 }
 
@@ -551,47 +580,52 @@ func (d *Dialer) Close() error {
 // modify the existing one, or leave it unchanged as needed.
 func (d *Dialer) connectionInfoCache(
 	ctx context.Context, cn instance.ConnName, useIAMAuthN *bool,
-) (monitoredCache, error) {
-	d.lock.RLock()
-	c, ok := d.cache[cn]
-	d.lock.RUnlock()
-	if !ok {
-		d.lock.Lock()
-		defer d.lock.Unlock()
-		// Recheck to ensure instance wasn't created or changed between locks
-		c, ok = d.cache[cn]
-		if !ok {
-			var useIAMAuthNDial bool
-			if useIAMAuthN != nil {
-				useIAMAuthNDial = *useIAMAuthN
-			}
-			d.logger.Debugf(ctx, "[%v] Connection info added to cache", cn.String())
-			k, err := d.keyGenerator.rsaKey()
-			if err != nil {
-				return monitoredCache{}, err
-			}
-			var cache connectionInfoCache
-			if d.lazyRefresh {
-				cache = cloudsql.NewLazyRefreshCache(
-					cn,
-					d.logger,
-					d.sqladmin, k,
-					d.refreshTimeout, d.iamTokenSource,
-					d.dialerID, useIAMAuthNDial,
-				)
-			} else {
-				cache = cloudsql.NewRefreshAheadCache(
-					cn,
-					d.logger,
-					d.sqladmin, k,
-					d.refreshTimeout, d.iamTokenSource,
-					d.dialerID, useIAMAuthNDial,
-				)
-			}
-			var count uint64
-			c = monitoredCache{openConns: &count, connectionInfoCache: cache}
-			d.cache[cn] = c
-		}
+) (*monitoredCache, error) {
+
+	c, oldC, err := d.cache.getOrAdd(cn, func() (*monitoredCache, error) {
+		return d.createConnectionInfoCache(ctx, cn, useIAMAuthN)
+	})
+
+	oldC.Close()
+	c.UpdateRefresh(useIAMAuthN)
+
+	return c, err
+}
+
+func (d *Dialer) createConnectionInfoCache(
+	ctx context.Context, cn instance.ConnName, useIAMAuthN *bool,
+) (*monitoredCache, error) {
+
+	var useIAMAuthNDial bool
+	if useIAMAuthN != nil {
+		useIAMAuthNDial = *useIAMAuthN
+	}
+	d.logger.Debugf(ctx, "[%v] Connection info created", cn.String())
+	k, err := d.keyGenerator.rsaKey()
+	if err != nil {
+		return nil, err
+	}
+	var cache connectionInfoCache
+	if d.lazyRefresh {
+		cache = cloudsql.NewLazyRefreshCache(
+			cn,
+			d.logger,
+			d.sqladmin, k,
+			d.refreshTimeout, d.iamTokenSource,
+			d.dialerID, useIAMAuthNDial,
+		)
+	} else {
+		cache = cloudsql.NewRefreshAheadCache(
+			cn,
+			d.logger,
+			d.sqladmin, k,
+			d.refreshTimeout, d.iamTokenSource,
+			d.dialerID, useIAMAuthNDial,
+		)
+	}
+	c := &monitoredCache{
+		openConns:           new(uint64),
+		connectionInfoCache: cache,
 	}
 
 	c.UpdateRefresh(useIAMAuthN)

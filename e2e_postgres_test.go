@@ -363,7 +363,7 @@ func removeAuthEnvVar(t *testing.T) (*oauth2.Token, string, func()) {
 	}
 	tok, err := ts.Token()
 	if err != nil {
-		t.Errorf("failed to get token: %v", err)
+		t.Errorf("failed to getOrAdd token: %v", err)
 	}
 	path, ok := os.LookupEnv("GOOGLE_APPLICATION_CREDENTIALS")
 	if !ok {
