@@ -32,9 +32,10 @@ var (
 // ConnName represents the "instance connection name", in the format
 // "project:region:name".
 type ConnName struct {
-	project string
-	region  string
-	name    string
+	project    string
+	region     string
+	name       string
+	domainName string
 }
 
 func (c *ConnName) String() string {
@@ -56,8 +57,24 @@ func (c *ConnName) Name() string {
 	return c.name
 }
 
+// DomainName returns the domain name used to look up this instance
+func (c *ConnName) DomainName() string {
+	return c.domainName
+}
+
+// HasDomainName returns true if the domain name has a value
+func (c *ConnName) HasDomainName() bool {
+	return c.domainName != ""
+}
+
 // ParseConnName initializes a new ConnName struct.
 func ParseConnName(cn string) (ConnName, error) {
+	return ParseConnNameWithDomainName(cn, "")
+}
+
+// ParseConnNameWithDomainName initializes a new ConnName struct, including the
+// domain name
+func ParseConnNameWithDomainName(cn string, domainName string) (ConnName, error) {
 	b := []byte(cn)
 	m := connNameRegex.FindSubmatch(b)
 	if m == nil {
@@ -69,9 +86,10 @@ func ParseConnName(cn string) (ConnName, error) {
 	}
 
 	c := ConnName{
-		project: string(m[1]),
-		region:  string(m[3]),
-		name:    string(m[4]),
+		project:    string(m[1]),
+		region:     string(m[3]),
+		name:       string(m[4]),
+		domainName: domainName,
 	}
 	return c, nil
 }

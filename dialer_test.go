@@ -476,7 +476,8 @@ func TestEngineVersionRemovesInvalidInstancesFromCache(t *testing.T) {
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[inst] = monitoredCache{
+			d.cache.cache[inst] = &monitoredCache{
+				openConnsCount:      new(uint64),
 				connectionInfoCache: spy,
 			}
 
@@ -491,9 +492,7 @@ func TestEngineVersionRemovesInvalidInstancesFromCache(t *testing.T) {
 			}
 
 			// Now verify that bad connection name has been deleted from map.
-			d.lock.RLock()
-			_, ok := d.cache[inst]
-			d.lock.RUnlock()
+			_, ok := d.cache.get(inst)
 			if ok {
 				t.Fatal("connection info was not removed from cache")
 			}
@@ -626,7 +625,8 @@ func TestWarmupRemovesInvalidInstancesFromCache(t *testing.T) {
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[inst] = monitoredCache{
+			d.cache.cache[inst] = &monitoredCache{
+				openConnsCount:      new(uint64),
 				connectionInfoCache: spy,
 			}
 
@@ -641,9 +641,7 @@ func TestWarmupRemovesInvalidInstancesFromCache(t *testing.T) {
 			}
 
 			// Now verify that bad connection name has been deleted from map.
-			d.lock.RLock()
-			_, ok := d.cache[inst]
-			d.lock.RUnlock()
+			_, ok := d.cache.get(inst)
 			if ok {
 				t.Fatal("connection info was not removed from cache")
 			}
@@ -802,7 +800,8 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[inst] = monitoredCache{
+			d.cache.cache[inst] = &monitoredCache{
+				openConnsCount:      new(uint64),
 				connectionInfoCache: spy,
 			}
 
@@ -817,9 +816,7 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 			}
 
 			// Now verify that bad connection name has been deleted from map.
-			d.lock.RLock()
-			_, ok := d.cache[inst]
-			d.lock.RUnlock()
+			_, ok := d.cache.get(inst)
 			if ok {
 				t.Fatal("connection info was not removed from cache")
 			}
@@ -854,7 +851,9 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 			},
 		},
 	}
-	d.cache[cn] = monitoredCache{connectionInfoCache: spy}
+	d.cache.cache[cn] = &monitoredCache{
+		openConnsCount:      new(uint64),
+		connectionInfoCache: spy}
 
 	_, err = d.Dial(context.Background(), icn)
 	if !errors.Is(err, sentinel) {
@@ -873,9 +872,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 	}
 
 	// Now verify that bad connection name has been deleted from map.
-	d.lock.RLock()
-	_, ok := d.cache[cn]
-	d.lock.RUnlock()
+	_, ok := d.cache.get(cn)
 	if ok {
 		t.Fatal("bad instance was not removed from the cache")
 	}
@@ -1015,7 +1012,7 @@ func TestDialerInitializesLazyCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, ok := d.cache[cn]
+	c, ok := d.cache.get(cn)
 	if !ok {
 		t.Fatal("cache was not populated")
 	}
