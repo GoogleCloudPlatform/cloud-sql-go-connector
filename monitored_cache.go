@@ -22,7 +22,6 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/instance"
-	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 )
 
 // monitoredCache is a wrapper around a connectionInfoCache that tracks the
@@ -45,7 +44,14 @@ type monitoredCache struct {
 	connectionInfoCache
 }
 
-func newMonitoredCache(ctx context.Context, cache connectionInfoCache, cn instance.ConnName, failoverPeriod time.Duration, resolver instance.ConnectionNameResolver, logger debug.ContextLogger) *monitoredCache {
+func newMonitoredCache(
+	ctx context.Context,
+	cache connectionInfoCache,
+	cn instance.ConnName,
+	failoverPeriod time.Duration,
+	resolver instance.ConnectionNameResolver,
+	logger debug.ContextLogger) *monitoredCache {
+
 	c := &monitoredCache{
 		openConnsCount:      new(uint64),
 		closedCh:            make(chan struct{}),
@@ -102,17 +108,6 @@ func (c *monitoredCache) Close() error {
 	}
 
 	return c.connectionInfoCache.Close()
-}
-
-func (c *monitoredCache) ForceRefresh() {
-	c.connectionInfoCache.ForceRefresh()
-}
-
-func (c *monitoredCache) UpdateRefresh(b *bool) {
-	c.connectionInfoCache.UpdateRefresh(b)
-}
-func (c *monitoredCache) ConnectionInfo(ctx context.Context) (cloudsql.ConnectionInfo, error) {
-	return c.connectionInfoCache.ConnectionInfo(ctx)
 }
 
 func (c *monitoredCache) purgeClosedConns() {

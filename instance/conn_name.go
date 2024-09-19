@@ -39,6 +39,9 @@ type ConnName struct {
 }
 
 func (c *ConnName) String() string {
+	if c.domainName != "" {
+		return fmt.Sprintf("%s -> %s:%s:%s", c.domainName, c.project, c.region, c.name)
+	}
 	return fmt.Sprintf("%s:%s:%s", c.project, c.region, c.name)
 }
 

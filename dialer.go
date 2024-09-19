@@ -110,12 +110,19 @@ type connectionInfoCache interface {
 	io.Closer
 }
 
+type cacheKey struct {
+	domainName string
+	project    string
+	region     string
+	name       string
+}
+
 // A Dialer is used to create connections to Cloud SQL instances.
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
 	lock           sync.RWMutex
-	cache          map[instance.ConnName]*monitoredCache
+	cache          map[cacheKey]*monitoredCache
 	keyGenerator   *keyGenerator
 	refreshTimeout time.Duration
 	// closed reports if the dialer has been closed.
@@ -258,7 +265,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 
 	d := &Dialer{
 		closed:            make(chan struct{}),
-		cache:             make(map[instance.ConnName]*monitoredCache),
+		cache:             make(map[cacheKey]*monitoredCache),
 		lazyRefresh:       cfg.lazyRefresh,
 		keyGenerator:      g,
 		refreshTimeout:    cfg.refreshTimeout,
@@ -297,6 +304,10 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	cn, err := d.resolver.Resolve(ctx, icn)
 	if err != nil {
 		return nil, err
+	}
+	// Log if resolver changed the instance name input string.
+	if cn.String() != icn {
+		d.logger.Debugf(ctx, "resolved instance %s to %s", icn, cn)
 	}
 
 	cfg := d.defaultDialConfig
@@ -389,7 +400,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 
 	// If this connection was opened using a Domain Name, then store it for later
 	// in case it needs to be forcibly closed.
-	if cn.DomainName() != "" {
+	if cn.HasDomainName() {
 		c.mu.Lock()
 		c.openConns = append(c.openConns, iConn)
 		c.mu.Unlock()
@@ -412,7 +423,7 @@ func (d *Dialer) removeCached(
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	c.Close()
-	delete(d.cache, i)
+	delete(d.cache, createKey(i))
 }
 
 // validClientCert checks that the ephemeral client certificate retrieved from
@@ -564,20 +575,33 @@ func (d *Dialer) Close() error {
 	return nil
 }
 
+// createKey creates a key for the cache from an instance.ConnName.
+// An instance.ConnName uniquely identifies a connection using
+// project:region:instance + domainName. However, in the dialer cache,
+// we want to to identify entries either by project:region:instance, or
+// by domainName, but not the combination of the two.
+func createKey(cn instance.ConnName) cacheKey {
+	if cn.HasDomainName() {
+		return cacheKey{domainName: cn.DomainName()}
+	}
+	return cacheKey{
+		name:    cn.Name(),
+		project: cn.Project(),
+		region:  cn.Region(),
+	}
+}
+
 // connectionInfoCache is a helper function for returning the appropriate
 // connection info Cache in a threadsafe way. It will create a new cache,
 // modify the existing one, or leave it unchanged as needed.
 func (d *Dialer) connectionInfoCache(
 	ctx context.Context, cn instance.ConnName, useIAMAuthN *bool,
 ) (*monitoredCache, error) {
-	d.lock.RLock()
-	c, ok := d.cache[cn]
-	d.lock.RUnlock()
+	k := createKey(cn)
 
-	// recheck the domain name, this may close the cache.
-	if ok {
-		c.checkDomainName(ctx)
-	}
+	d.lock.RLock()
+	c, ok := d.cache[k]
+	d.lock.RUnlock()
 
 	if ok && !c.isClosed() {
 		c.UpdateRefresh(useIAMAuthN)
@@ -588,26 +612,12 @@ func (d *Dialer) connectionInfoCache(
 	defer d.lock.Unlock()
 
 	// Recheck to ensure instance wasn't created or changed between locks
-	c, ok = d.cache[cn]
+	c, ok = d.cache[k]
 
 	// c exists and is not closed
 	if ok && !c.isClosed() {
 		c.UpdateRefresh(useIAMAuthN)
 		return c, nil
-	}
-
-	// c exists and is closed, remove it from the cache
-	if ok {
-		// remove it.
-		_ = c.Close()
-		delete(d.cache, cn)
-	}
-
-	// c does not exist, check for matching domain and close it
-	oldCn, old, ok := d.findByDn(cn)
-	if ok {
-		_ = old.Close()
-		delete(d.cache, oldCn)
 	}
 
 	// Create a new instance of monitoredCache
@@ -616,7 +626,7 @@ func (d *Dialer) connectionInfoCache(
 		useIAMAuthNDial = *useIAMAuthN
 	}
 	d.logger.Debugf(ctx, "[%v] Connection info added to cache", cn.String())
-	k, err := d.keyGenerator.rsaKey()
+	rsaKey, err := d.keyGenerator.rsaKey()
 	if err != nil {
 		return nil, err
 	}
@@ -625,7 +635,7 @@ func (d *Dialer) connectionInfoCache(
 		cache = cloudsql.NewLazyRefreshCache(
 			cn,
 			d.logger,
-			d.sqladmin, k,
+			d.sqladmin, rsaKey,
 			d.refreshTimeout, d.iamTokenSource,
 			d.dialerID, useIAMAuthNDial,
 		)
@@ -633,40 +643,13 @@ func (d *Dialer) connectionInfoCache(
 		cache = cloudsql.NewRefreshAheadCache(
 			cn,
 			d.logger,
-			d.sqladmin, k,
+			d.sqladmin, rsaKey,
 			d.refreshTimeout, d.iamTokenSource,
 			d.dialerID, useIAMAuthNDial,
 		)
 	}
 	c = newMonitoredCache(ctx, cache, cn, d.failoverPeriod, d.resolver, d.logger)
-	d.cache[cn] = c
+	d.cache[k] = c
 
 	return c, nil
-}
-
-// getOrAdd returns the cache entry, creating it if necessary. This will also
-// take care to remove entries with the same domain name.
-//
-// cn - the connection name to getOrAdd
-//
-// returns:
-//
-//		monitoredCache - the cached entry
-//	 bool ok - the instance exists
-//		instance.ConnName - the key to the old entry with the same domain name
-//
-// This method does not manage locks.
-func (d *Dialer) findByDn(cn instance.ConnName) (instance.ConnName, *monitoredCache, bool) {
-
-	// Try to get an instance with the same domain name but different instance
-	// Remove this instance from the cache, it will be replaced.
-	if cn.HasDomainName() {
-		for oldCn, oc := range d.cache {
-			if oldCn.DomainName() == cn.DomainName() && oldCn != cn {
-				return oldCn, oc, true
-			}
-		}
-	}
-
-	return instance.ConnName{}, nil, false
 }

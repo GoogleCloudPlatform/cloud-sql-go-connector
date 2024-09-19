@@ -477,7 +477,7 @@ func TestEngineVersionRemovesInvalidInstancesFromCache(t *testing.T) {
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[inst] = newMonitoredCache(nil, spy, inst, 0, nil, nil)
+			d.cache[createKey(inst)] = newMonitoredCache(nil, spy, inst, 0, nil, nil)
 
 			_, err = d.EngineVersion(context.Background(), tc.icn)
 			if err == nil {
@@ -491,7 +491,7 @@ func TestEngineVersionRemovesInvalidInstancesFromCache(t *testing.T) {
 
 			// Now verify that bad connection name has been deleted from map.
 			d.lock.RLock()
-			_, ok := d.cache[inst]
+			_, ok := d.cache[createKey(inst)]
 			d.lock.RUnlock()
 			if ok {
 				t.Fatal("connection info was not removed from cache")
@@ -625,7 +625,7 @@ func TestWarmupRemovesInvalidInstancesFromCache(t *testing.T) {
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[inst] = newMonitoredCache(nil, spy, inst, 0, nil, nil)
+			d.cache[createKey(inst)] = newMonitoredCache(nil, spy, inst, 0, nil, nil)
 
 			err = d.Warmup(context.Background(), tc.icn, tc.opts...)
 			if err == nil {
@@ -639,7 +639,7 @@ func TestWarmupRemovesInvalidInstancesFromCache(t *testing.T) {
 
 			// Now verify that bad connection name has been deleted from map.
 			d.lock.RLock()
-			_, ok := d.cache[inst]
+			_, ok := d.cache[createKey(inst)]
 			d.lock.RUnlock()
 			if ok {
 				t.Fatal("connection info was not removed from cache")
@@ -799,7 +799,7 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[inst] = newMonitoredCache(nil, spy, inst, 0, nil, nil)
+			d.cache[createKey(inst)] = newMonitoredCache(nil, spy, inst, 0, nil, nil)
 
 			_, err = d.Dial(context.Background(), tc.icn, tc.opts...)
 			if err == nil {
@@ -813,7 +813,7 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 
 			// Now verify that bad connection name has been deleted from map.
 			d.lock.RLock()
-			_, ok := d.cache[inst]
+			_, ok := d.cache[createKey(inst)]
 			d.lock.RUnlock()
 			if ok {
 				t.Fatal("connection info was not removed from cache")
@@ -849,7 +849,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 			},
 		},
 	}
-	d.cache[cn] = newMonitoredCache(nil, spy, cn, 0, nil, nil)
+	d.cache[createKey(cn)] = newMonitoredCache(nil, spy, cn, 0, nil, nil)
 
 	_, err = d.Dial(context.Background(), icn)
 	if !errors.Is(err, sentinel) {
@@ -869,7 +869,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 
 	// Now verify that bad connection name has been deleted from map.
 	d.lock.RLock()
-	_, ok := d.cache[cn]
+	_, ok := d.cache[createKey(cn)]
 	d.lock.RUnlock()
 	if ok {
 		t.Fatal("bad instance was not removed from the cache")
@@ -1010,7 +1010,7 @@ func TestDialerInitializesLazyCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, ok := d.cache[cn]
+	c, ok := d.cache[createKey(cn)]
 	if !ok {
 		t.Fatal("cache was not populated")
 	}
@@ -1103,63 +1103,6 @@ func (r *changingResolver) Resolve(_ context.Context, name string) (instance.Con
 	return instance.ConnName{}, fmt.Errorf("no resolution for %q", name)
 }
 
-func TestDialerUpdatesOnDialAfterDnsChange(t *testing.T) {
-	// At first, the resolver will resolve
-	// update.example.com to "my-instance"
-	// Then, the resolver will resolve the same domain name to
-	// "my-instance2".
-	// This shows that on every call to Dial(), the dialer will resolve the
-	// SRV record and connect to the correct instance.
-	inst := mock.NewFakeCSQLInstance(
-		"my-project", "my-region", "my-instance",
-	)
-	inst2 := mock.NewFakeCSQLInstance(
-		"my-project", "my-region", "my-instance2",
-	)
-	r := &changingResolver{
-		stage: new(int32),
-	}
-
-	d := setupDialer(t, setupConfig{
-		skipServer: true,
-		reqs: []*mock.Request{
-			mock.InstanceGetSuccess(inst, 1),
-			mock.CreateEphemeralSuccess(inst, 1),
-			mock.InstanceGetSuccess(inst2, 1),
-			mock.CreateEphemeralSuccess(inst2, 1),
-		},
-		dialerOptions: []Option{
-			WithResolver(r),
-			WithTokenSource(mock.EmptyTokenSource{}),
-		},
-	})
-
-	// Start the proxy for instance 1
-	stop1 := mock.StartServerProxy(t, inst)
-	t.Cleanup(func() {
-		stop1()
-	})
-
-	testSuccessfulDial(
-		context.Background(), t, d,
-		"update.example.com",
-	)
-	stop1()
-
-	atomic.StoreInt32(r.stage, 1)
-
-	// Start the proxy for instance 2
-	stop2 := mock.StartServerProxy(t, inst2)
-	t.Cleanup(func() {
-		stop2()
-	})
-
-	testSucessfulDialWithInstanceName(
-		context.Background(), t, d,
-		"update.example.com", "my-instance2",
-	)
-}
-
 func TestDialerUpdatesAutomaticallyAfterDnsChange(t *testing.T) {
 	// At first, the resolver will resolve
 	// update.example.com to "my-instance"
@@ -1207,7 +1150,7 @@ func TestDialerUpdatesAutomaticallyAfterDnsChange(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 	instCn, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "update.example.com")
-	c, _ := d.cache[instCn]
+	c, _ := d.cache[createKey(instCn)]
 	if !c.isClosed() {
 		t.Fatal("Expected monitoredCache to be closed after domain name changed. monitoredCache was not closed.")
 	}

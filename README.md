@@ -307,13 +307,12 @@ zone has a TXT record with the value `my-project:region:my-instance`. The
 application establishes connections to the `my-project:region:my-instance` 
 Cloud SQL instance. 
 
-Then, to reconfigure the application using a different database
-instance: `my-project:other-region:my-instance-2`. You update the DNS record
-for `prod-db.mycompany.example.com` with the target 
-`my-project:other-region:my-instance-2`
+Then, to reconfigure the application to use a different database
+instance, change the value of the `prod-db.mycompany.example.com` DNS record
+from `my-project:region:my-instance` to `my-project:other-region:my-instance-2`
 
 The connector inside the application detects the change to this
-DNS entry. Now, when the application connects to its database using the 
+DNS record. Now, when the application connects to its database using the 
 domain name `prod-db.mycompany.example.com`, it will connect to the
 `my-project:other-region:my-instance-2` Cloud SQL instance. 
 
