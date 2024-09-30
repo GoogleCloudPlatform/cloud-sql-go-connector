@@ -117,6 +117,24 @@ func wantCountMetric(t *testing.T, wantName string, ms []metric) {
 	)
 }
 
+// wantSumMetric ensures the provided metrics include a metric with the wanted
+// name and at least one data point.
+func wantSumMetric(t *testing.T, wantName string, ms []metric) {
+	t.Helper()
+	gotNames := make(map[string]view.AggregationData)
+	for _, m := range ms {
+		gotNames[m.name] = m.data
+		_, ok := m.data.(*view.SumData)
+		if m.name == wantName && ok {
+			return
+		}
+	}
+	t.Fatalf(
+		"metric name want = %v with SumData, all metrics = %v",
+		wantName, dump(t, gotNames),
+	)
+}
+
 func TestDialerWithMetrics(t *testing.T) {
 	spy := &spyMetricsExporter{}
 	view.RegisterExporter(spy)
@@ -166,13 +184,15 @@ func TestDialerWithMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buf.WriteByte failed: %v", err)
 	}
-	_, err = conn2.Write(buf.Bytes())
-	if err != nil {
-		t.Fatalf("conn.Write failed: %v", err)
-	}
+	// Doing a read before doing a write, because when this unit test runs on
+	// Windows, it fails when the write is done before the read.
 	_, err = conn2.Read(buf.Bytes())
 	if err != nil {
 		t.Fatalf("conn.Read failed: %v", err)
+	}
+	_, err = conn2.Write(buf.Bytes())
+	if err != nil {
+		t.Fatalf("conn.Write failed: %v", err)
 	}
 	defer conn2.Close()
 	// dial a bogus instance
@@ -187,8 +207,8 @@ func TestDialerWithMetrics(t *testing.T) {
 	wantLastValueMetric(t, "cloudsqlconn/open_connections", spy.data(), 2)
 	wantDistributionMetric(t, "cloudsqlconn/dial_latency", spy.data())
 	wantCountMetric(t, "cloudsqlconn/refresh_success_count", spy.data())
-	wantLastValueMetric(t, "cloudsqlconn/bytes_sent", spy.data(), 1)
-	wantLastValueMetric(t, "cloudsqlconn/bytes_received", spy.data(), 1)
+	wantSumMetric(t, "cloudsqlconn/bytes_sent", spy.data())
+	wantSumMetric(t, "cloudsqlconn/bytes_received", spy.data())
 
 	// failure metrics from dialing bogus instance
 	wantCountMetric(t, "cloudsqlconn/dial_failure_count", spy.data())
