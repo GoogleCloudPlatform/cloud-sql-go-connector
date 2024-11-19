@@ -13,7 +13,7 @@ require (
 	golang.org/x/oauth2 v0.23.0
 	golang.org/x/time v0.7.0
 	google.golang.org/api v0.202.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20241021214115-324edc3d5d38
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20241118233622-e639e219e697
 	google.golang.org/grpc v1.67.1
 )
 
@@ -48,5 +48,5 @@ require (
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/sys v0.26.0 // indirect
 	golang.org/x/text v0.19.0 // indirect
-	google.golang.org/protobuf v1.35.1 // indirect
+	google.golang.org/protobuf v1.35.2 // indirect
 )
