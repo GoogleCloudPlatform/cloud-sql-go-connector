@@ -1,6 +1,6 @@
 module cloud.google.com/go/cloudsqlconn
 
-go 1.22.7
+go 1.21
 
 require (
 	github.com/go-sql-driver/mysql v1.8.1
