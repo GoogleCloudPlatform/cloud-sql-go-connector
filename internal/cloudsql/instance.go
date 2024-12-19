@@ -241,11 +241,21 @@ func (c ConnectionInfo) TLSConfig() *tls.Config {
 	for _, caCert := range c.ServerCACert {
 		pool.AddCert(caCert)
 	}
+
 	if c.ServerCAMode == "GOOGLE_MANAGED_CAS_CA" ||
 		c.ServerCAMode == "CUSTOMER_MANAGED_CAS_CA" {
+
+		// If the connector was configured with a domain name, use that domain name
+		// to validate the certificate. Otherwise, use the DNS name from the
+		// instance ConnectionInfo API response.
+		serverName := c.DNSName
+		if c.ConnectionName.HasDomainName() {
+			serverName = c.ConnectionName.DomainName()
+		}
+
 		// For CAS instances, we can rely on the DNS name to verify the server identity.
 		return &tls.Config{
-			ServerName:   c.DNSName,
+			ServerName:   serverName,
 			Certificates: []tls.Certificate{c.ClientCertificate},
 			RootCAs:      pool,
 			MinVersion:   tls.VersionTLS13,
