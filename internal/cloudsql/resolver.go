@@ -105,7 +105,7 @@ func (r *DNSInstanceConnectionNameResolver) queryDNS(ctx context.Context, domain
 	// Attempt to parse records, returning the first valid record.
 	for _, record := range records {
 		// Parse the target as a CN
-		cn, parseErr := instance.ParseConnName(record)
+		cn, parseErr := instance.ParseConnNameWithDomainName(record, domainName)
 		if parseErr != nil {
 			perr = fmt.Errorf("unable to parse TXT for %q -> %q : %v", domainName, record, parseErr)
 			continue
