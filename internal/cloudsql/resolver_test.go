@@ -36,7 +36,7 @@ func (r *fakeResolver) LookupTXT(_ context.Context, name string) (addrs []string
 }
 
 func TestDNSInstanceNameResolver_Lookup_Success_TxtRecord(t *testing.T) {
-	want, _ := instance.ParseConnName("my-project:my-region:my-instance")
+	want, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
 
 	r := DNSInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{
