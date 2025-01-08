@@ -394,7 +394,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	}()
 
 	iConn := newInstrumentedConn(tlsConn, func() {
-		n := atomic.AddUint64(c.openConnsCount, ^uint64(0))
+		n := atomic.AddUint64(c.openConnsCount, ^uint64(0)) // c.openConnsCount = c.openConnsCount - 1
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
 	}, d.dialerID, cn.String())
 
