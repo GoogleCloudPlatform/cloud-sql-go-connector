@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"cloud.google.com/go/auth/credentials"
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
@@ -174,12 +175,11 @@ func (nullLogger) Debugf(_ context.Context, _ string, _ ...interface{}) {}
 // RSA keypair is generated will be faster.
 func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg := &dialerConfig{
-		refreshTimeout:  cloudsql.RefreshTimeout,
-		dialFunc:        proxy.Dial,
-		logger:          nullLogger{},
-		useragents:      []string{userAgent},
-		serviceUniverse: "googleapis.com",
-		failoverPeriod:  cloudsql.FailoverPeriod,
+		refreshTimeout: cloudsql.RefreshTimeout,
+		dialFunc:       proxy.Dial,
+		logger:         nullLogger{},
+		useragents:     []string{userAgent},
+		failoverPeriod: cloudsql.FailoverPeriod,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -201,16 +201,13 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// WithTokenSource or implicitly with WithCredentialsJSON etc., then use the
 	// default token source.
 	if !cfg.setCredentials {
-		c, err := google.FindDefaultCredentials(ctx, sqladmin.SqlserviceAdminScope)
+		c, err := credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes: []string{sqladmin.SqlserviceAdminScope},
+		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create default credentials: %v", err)
 		}
-		ud, err := c.GetUniverseDomain()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get universe domain: %v", err)
-		}
-		cfg.credentialsUniverse = ud
-		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithTokenSource(c.TokenSource))
+		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithAuthCredentials(c))
 		scoped, err := google.DefaultTokenSource(ctx, iamLoginScope)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create scoped token source: %v", err)
@@ -223,15 +220,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			"can not use WithAdminAPIEndpoint and WithUniverseDomain Options together, " +
 				"use WithAdminAPIEndpoint (it already contains the universe domain)",
 		)
-	}
-
-	if cfg.credentialsUniverse != "" && cfg.serviceUniverse != "" {
-		if cfg.credentialsUniverse != cfg.serviceUniverse {
-			return nil, fmt.Errorf(
-				"the configured service universe domain (%s) does not match the credential universe domain (%s)",
-				cfg.serviceUniverse, cfg.credentialsUniverse,
-			)
-		}
 	}
 
 	client, err := sqladmin.NewService(ctx, cfg.sqladminOpts...)

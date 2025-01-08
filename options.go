@@ -22,6 +22,7 @@ import (
 	"os"
 	"time"
 
+	"cloud.google.com/go/auth/credentials"
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
@@ -46,8 +47,6 @@ type dialerConfig struct {
 	lazyRefresh            bool
 	iamLoginTokenSource    oauth2.TokenSource
 	useragents             []string
-	credentialsUniverse    string
-	serviceUniverse        string
 	setAdminAPIEndpoint    bool
 	setUniverseDomain      bool
 	setCredentials         bool
@@ -87,18 +86,15 @@ func WithCredentialsFile(filename string) Option {
 // or refresh token JSON credentials to be used as the basis for authentication.
 func WithCredentialsJSON(b []byte) Option {
 	return func(d *dialerConfig) {
-		c, err := google.CredentialsFromJSON(context.Background(), b, sqladmin.SqlserviceAdminScope)
+		c, err := credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes:          []string{sqladmin.SqlserviceAdminScope},
+			CredentialsJSON: b,
+		})
 		if err != nil {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
 		}
-		ud, err := c.GetUniverseDomain()
-		if err != nil {
-			d.err = errtype.NewConfigError(err.Error(), "n/a")
-			return
-		}
-		d.credentialsUniverse = ud
-		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentials(c))
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithAuthCredentials(c))
 
 		// Create another set of credentials scoped to login only
 		scoped, err := google.CredentialsFromJSON(context.Background(), b, iamLoginScope)
@@ -193,7 +189,6 @@ func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithEndpoint(url))
 		d.setAdminAPIEndpoint = true
-		d.serviceUniverse = ""
 	}
 }
 
@@ -202,7 +197,6 @@ func WithAdminAPIEndpoint(url string) Option {
 func WithUniverseDomain(ud string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithUniverseDomain(ud))
-		d.serviceUniverse = ud
 		d.setUniverseDomain = true
 	}
 }
