@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"cloud.google.com/go/auth"
 	"cloud.google.com/go/auth/credentials"
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
@@ -37,8 +38,6 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -151,8 +150,8 @@ type Dialer struct {
 	// network. By default, it is golang.org/x/net/proxy#Dial.
 	dialFunc func(cxt context.Context, network, addr string) (net.Conn, error)
 
-	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn.
-	iamTokenSource oauth2.TokenSource
+	// iamTokenProvider supplies the OAuth2 token used for IAM DB Authn.
+	iamTokenProvider auth.TokenProvider
 
 	// resolver converts instance names into DNS names.
 	resolver       instance.ConnectionNameResolver
@@ -197,9 +196,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// Add this to the end to make sure it's not overridden
 	cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
 
-	// If callers have not provided a token source, either explicitly with
-	// WithTokenSource or implicitly with WithCredentialsJSON etc., then use the
-	// default token source.
+	// If callers have not provided a credential source, either explicitly with
+	// WithTokenSource or implicitly with WithCredentialsJSON etc., then use
+	// default credentials
 	if !cfg.setCredentials {
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes: []string{sqladmin.SqlserviceAdminScope},
@@ -208,11 +207,14 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return nil, fmt.Errorf("failed to create default credentials: %v", err)
 		}
 		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithAuthCredentials(c))
-		scoped, err := google.DefaultTokenSource(ctx, iamLoginScope)
+		// create second set of credentials, scoped for IAM AuthN login only
+		scoped, err := credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes: []string{iamLoginScope},
+		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to create scoped token source: %v", err)
+			return nil, fmt.Errorf("failed to create scoped credentials: %v", err)
 		}
-		cfg.iamLoginTokenSource = scoped
+		cfg.iamLoginTokenProvider = scoped.TokenProvider
 	}
 
 	if cfg.setUniverseDomain && cfg.setAdminAPIEndpoint {
@@ -261,7 +263,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		logger:            cfg.logger,
 		defaultDialConfig: dc,
 		dialerID:          uuid.New().String(),
-		iamTokenSource:    cfg.iamLoginTokenSource,
+		iamTokenProvider:  cfg.iamLoginTokenProvider,
 		dialFunc:          cfg.dialFunc,
 		resolver:          r,
 		failoverPeriod:    cfg.failoverPeriod,
@@ -624,7 +626,7 @@ func (d *Dialer) connectionInfoCache(
 			cn,
 			d.logger,
 			d.sqladmin, rsaKey,
-			d.refreshTimeout, d.iamTokenSource,
+			d.refreshTimeout, d.iamTokenProvider,
 			d.dialerID, useIAMAuthNDial,
 		)
 	} else {
@@ -632,7 +634,7 @@ func (d *Dialer) connectionInfoCache(
 			cn,
 			d.logger,
 			d.sqladmin, rsaKey,
-			d.refreshTimeout, d.iamTokenSource,
+			d.refreshTimeout, d.iamTokenProvider,
 			d.dialerID, useIAMAuthNDial,
 		)
 	}
