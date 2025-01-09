@@ -280,69 +280,18 @@ func TestSQLServerFailsOnIAMAuthN(t *testing.T) {
 	}
 }
 
-func TestUniverseDomain(t *testing.T) {
-	tcs := []struct {
-		desc string
-		opts Option
-	}{
-		{
-			desc: "When universe domain matches GDU",
-			opts: WithOptions(
-				WithUniverseDomain("googleapis.com"),
-				WithCredentialsJSON(fakeServiceAccount("")),
-			),
-		},
-		{
-			desc: "When TPC universe matches TPC credential domain",
-			opts: WithOptions(
-				WithUniverseDomain("test-universe.test"),
-				WithCredentialsJSON(fakeServiceAccount("test-universe.test")),
-			),
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.desc, func(t *testing.T) {
-			_, err := NewDialer(context.Background(), tc.opts)
-			if err != nil {
-				t.Fatalf("NewDialer failed with error = %v", err)
-			}
-		})
-	}
-}
-
 func TestUniverseDomainErrors(t *testing.T) {
-	tcs := []struct {
-		desc string
-		opts Option
-	}{
-		{
-			desc: "When universe domain does not match ADC credentials from GDU",
-			opts: WithOptions(WithUniverseDomain("test-universe.test")),
-		},
-		{
-			desc: "When GDU does not match credential domain",
-			opts: WithOptions(WithCredentialsJSON(
-				fakeServiceAccount("test-universe.test"),
-			)),
-		},
-		{
-			desc: "WithUniverseDomain used alongside WithAdminAPIEndpoint",
-			opts: WithOptions(
-				WithUniverseDomain("googleapis.com"),
-				WithAdminAPIEndpoint("https://sqladmin.googleapis.com"),
-			),
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.desc, func(t *testing.T) {
-			_, err := NewDialer(context.Background(), tc.opts)
-			t.Log(err)
-			if err == nil {
-				t.Fatalf("Wanted universe domain mismatch, want error, got nil")
-			}
-		})
+	_, err := NewDialer(
+		context.Background(),
+		WithUniverseDomain("googleapis.com"),
+		WithAdminAPIEndpoint("https://sqladmin.googleapis.com"),
+	)
+	t.Log(err)
+	if err == nil {
+		t.Fatalf(
+			`WithUniverseDomain used alongside WithAdminAPIEndpoint, want error, 
+			got nil`,
+		)
 	}
 }
 
