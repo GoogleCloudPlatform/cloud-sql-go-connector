@@ -280,21 +280,6 @@ func TestSQLServerFailsOnIAMAuthN(t *testing.T) {
 	}
 }
 
-func TestUniverseDomainErrors(t *testing.T) {
-	_, err := NewDialer(
-		context.Background(),
-		WithUniverseDomain("googleapis.com"),
-		WithAdminAPIEndpoint("https://sqladmin.googleapis.com"),
-	)
-	t.Log(err)
-	if err == nil {
-		t.Fatalf(
-			`WithUniverseDomain used alongside WithAdminAPIEndpoint, want error, 
-			got nil`,
-		)
-	}
-}
-
 func TestDialerWithCustomDialFunc(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("proj", "region", "inst",
 		mock.WithEngineVersion("SQLSERVER"),

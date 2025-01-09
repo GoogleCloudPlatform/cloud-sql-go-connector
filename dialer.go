@@ -217,13 +217,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		cfg.iamLoginTokenProvider = scoped.TokenProvider
 	}
 
-	if cfg.setUniverseDomain && cfg.setAdminAPIEndpoint {
-		return nil, errors.New(
-			"can not use WithAdminAPIEndpoint and WithUniverseDomain Options together, " +
-				"use WithAdminAPIEndpoint (it already contains the universe domain)",
-		)
-	}
-
 	client, err := sqladmin.NewService(ctx, cfg.sqladminOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)

@@ -49,7 +49,6 @@ type dialerConfig struct {
 	iamLoginTokenProvider  auth.TokenProvider
 	useragents             []string
 	setAdminAPIEndpoint    bool
-	setUniverseDomain      bool
 	setCredentials         bool
 	setTokenSource         bool
 	setIAMAuthNTokenSource bool
@@ -201,7 +200,6 @@ func WithAdminAPIEndpoint(url string) Option {
 func WithUniverseDomain(ud string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithUniverseDomain(ud))
-		d.setUniverseDomain = true
 	}
 }
 
