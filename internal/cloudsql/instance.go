@@ -241,9 +241,9 @@ func (c ConnectionInfo) TLSConfig() *tls.Config {
 	for _, caCert := range c.ServerCACert {
 		pool.AddCert(caCert)
 	}
-	if c.ServerCAMode == "GOOGLE_MANAGED_CAS_CA" ||
-		c.ServerCAMode == "CUSTOMER_MANAGED_CAS_CA" {
-		// For CAS instances, we can rely on the DNS name to verify the server identity.
+	if c.ServerCAMode != "" && c.ServerCAMode != "GOOGLE_MANAGED_INTERNAL_CA" {
+		// By default, use Standard TLS hostname verification name to
+		// verify the server identity.
 		return &tls.Config{
 			ServerName:   c.DNSName,
 			Certificates: []tls.Certificate{c.ClientCertificate},
@@ -251,6 +251,7 @@ func (c ConnectionInfo) TLSConfig() *tls.Config {
 			MinVersion:   tls.VersionTLS13,
 		}
 	}
+	// For legacy instances use the custom TLS validation
 	return &tls.Config{
 		ServerName:   c.ConnectionName.String(),
 		Certificates: []tls.Certificate{c.ClientCertificate},
