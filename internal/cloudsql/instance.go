@@ -23,10 +23,10 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/auth"
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
-	"golang.org/x/oauth2"
 	"golang.org/x/time/rate"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -129,7 +129,7 @@ func NewRefreshAheadCache(
 	client *sqladmin.Service,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
-	ts oauth2.TokenSource,
+	tp auth.TokenProvider,
 	dialerID string,
 	useIAMAuthNDial bool,
 ) *RefreshAheadCache {
@@ -142,7 +142,7 @@ func NewRefreshAheadCache(
 			l,
 			client,
 			key,
-			ts,
+			tp,
 			dialerID,
 		),
 		refreshTimeout:  refreshTimeout,

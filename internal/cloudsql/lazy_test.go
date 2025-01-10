@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/auth"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
-	"golang.org/x/oauth2"
 )
 
 func TestLazyRefreshCacheConnectionInfo(t *testing.T) {
@@ -95,20 +95,20 @@ func TestLazyRefreshCacheForceRefresh(t *testing.T) {
 	}
 }
 
-// spyTokenSource is a non-threadsafe spy for tracking token source usage
-type spyTokenSource struct {
+// spyTokenProvider is a non-threadsafe spy for tracking token provider usage
+type spyTokenProvider struct {
 	mu    sync.Mutex
 	count int
 }
 
-func (s *spyTokenSource) Token() (*oauth2.Token, error) {
+func (s *spyTokenProvider) Token(context.Context) (*auth.Token, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.count++
-	return &oauth2.Token{}, nil
+	return &auth.Token{}, nil
 }
 
-func (s *spyTokenSource) callCount() int {
+func (s *spyTokenProvider) callCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.count
@@ -131,7 +131,7 @@ func TestLazyRefreshCacheUpdateRefresh(t *testing.T) {
 		}
 	}()
 
-	spy := &spyTokenSource{}
+	spy := &spyTokenProvider{}
 	c := NewLazyRefreshCache(
 		testInstanceConnName(), nullLogger{}, client,
 		RSAKey, 30*time.Second, spy, "", false, // disable IAM AuthN at first
@@ -143,7 +143,7 @@ func TestLazyRefreshCacheUpdateRefresh(t *testing.T) {
 	}
 
 	if got := spy.callCount(); got != 0 {
-		t.Fatal("oauth2.TokenSource was called, but should not have been")
+		t.Fatal("auth.TokenProvider was called, but should not have been")
 	}
 
 	c.UpdateRefresh(ptr(true))
@@ -153,12 +153,12 @@ func TestLazyRefreshCacheUpdateRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Q: Why should the token source be called twice?
+	// Q: Why should the token provider be called twice?
 	// A: Because the refresh code retrieves a token first (1 call) and then
 	//    refreshes it (1 call) for a total of 2 calls.
 	if got, want := spy.callCount(), 2; got != want {
 		t.Fatalf(
-			"oauth2.TokenSource call count, got = %v, want = %v",
+			"auth.TokenProvider call count, got = %v, want = %v",
 			got, want,
 		)
 	}
