@@ -1167,3 +1167,76 @@ func TestDialerUpdatesAutomaticallyAfterDnsChange(t *testing.T) {
 	)
 
 }
+
+func TestDialerChecksSubjectAlternativeNameAndSucceeds(t *testing.T) {
+
+	// Create an instance with custom SAN 'db.example.com'
+	inst := mock.NewFakeCSQLInstanceWithSan(
+		"my-project", "my-region", "my-instance", []string{"db.example.com"},
+		mock.WithDNS("db.example.com"),
+		mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
+	)
+
+	wantName, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithResolver(&fakeResolver{
+				entries: map[string]instance.ConnName{
+					"db.example.com": wantName,
+				},
+			}),
+		},
+	})
+
+	// Dial db.example.com
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"db.example.com",
+	)
+}
+
+func TestDialerChecksSubjectAlternativeNameAndFails(t *testing.T) {
+
+	// Create an instance with custom SAN 'db.example.com'
+	inst := mock.NewFakeCSQLInstanceWithSan(
+		"my-project", "my-region", "my-instance", []string{"db.example.com"},
+		mock.WithDNS("db.example.com"),
+		mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
+	)
+
+	// Resolve the dns name 'bad.example.com' to the the instance.
+	wantName, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "bad.example.com")
+
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithResolver(&fakeResolver{
+				entries: map[string]instance.ConnName{
+					"bad.example.com": wantName,
+				},
+			}),
+		},
+	})
+
+	// Dial 'bad.example.com'. This will error as 'failed to verify certificate'
+	_, err := d.Dial(
+		context.Background(), "bad.example.com",
+	)
+	if err == nil {
+		t.Fatal("want dial error, got no error")
+	}
+	if !strings.Contains(fmt.Sprint(err), "tls: failed to verify certificate") {
+		t.Fatal("want error containing `tls: failed to verify certificate`. Got: ", err)
+	}
+}
