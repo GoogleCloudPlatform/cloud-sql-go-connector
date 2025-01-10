@@ -178,8 +178,14 @@ func WithServerCAMode(serverCAMode string) FakeCSQLInstanceOption {
 
 // NewFakeCSQLInstance returns a CloudSQLInst object for configuring mocks.
 func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceOption) FakeCSQLInstance {
+	return NewFakeCSQLInstanceWithSan(project, region, name, nil, opts...)
+}
+
+// NewFakeCSQLInstanceWithSan returns a CloudSQLInst object for configuring
+// mocks, including SubjectAlternativeNames in the server certificate.
+func NewFakeCSQLInstanceWithSan(project, region, name string, sanDNSNames []string, opts ...FakeCSQLInstanceOption) FakeCSQLInstance {
 	// TODO: consider options for this?
-	key, cert, err := generateCerts(project, name)
+	key, cert, err := generateCerts(project, name, sanDNSNames)
 	if err != nil {
 		panic(err)
 	}
@@ -274,7 +280,7 @@ func GenerateCertWithCommonName(i FakeCSQLInstance, cn string) []byte {
 
 // generateCerts generates a private key, an X.509 certificate, and a TLS
 // certificate for a particular fake Cloud SQL database instance.
-func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, error) {
+func generateCerts(project, name string, dnsNames []string) (*rsa.PrivateKey, *x509.Certificate, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, nil, err
@@ -291,6 +297,7 @@ func generateCerts(project, name string) (*rsa.PrivateKey, *x509.Certificate, er
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
+		DNSNames:              dnsNames,
 	}
 
 	return key, cert, nil
