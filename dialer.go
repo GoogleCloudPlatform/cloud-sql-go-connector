@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,6 +52,12 @@ const (
 	// iamLoginScope is the OAuth2 scope used for tokens embedded in the ephemeral
 	// certificate.
 	iamLoginScope = "https://www.googleapis.com/auth/sqlservice.login"
+	// universeDomainEnvVar is the environment variable for setting the default
+	// service domain for a given Cloud universe.
+	universeDomainEnvVar = "GOOGLE_CLOUD_UNIVERSE_DOMAIN"
+	// defaultUniverseDomain is the default value for universe domain.
+	// Universe domain is the default service domain for a given Cloud universe.
+	defaultUniverseDomain = "googleapis.com"
 )
 
 var (
@@ -116,6 +123,25 @@ type cacheKey struct {
 	project    string
 	region     string
 	name       string
+}
+
+// getClientUniverseDomain returns the default service domain for a given Cloud
+// universe, with the following precedence:
+//
+// 1. A non-empty option.WithUniverseDomain or similar client option.
+// 2. A non-empty environment variable GOOGLE_CLOUD_UNIVERSE_DOMAIN.
+// 3. The default value "googleapis.com".
+//
+// This is the universe domain configured for the client, which will be compared
+// to the universe domain that is separately configured for the credentials.
+func (cfg *dialerConfig) getClientUniverseDomain() string {
+	if cfg.clientUniverseDomain != "" {
+		return cfg.clientUniverseDomain
+	}
+	if envUD := os.Getenv(universeDomainEnvVar); envUD != "" {
+		return envUD
+	}
+	return defaultUniverseDomain
 }
 
 // A Dialer is used to create connections to Cloud SQL instances.
@@ -221,7 +247,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// For all credential paths, use built-in httptransport.NewClient
 	if cfg.authCredentials != nil {
 		authClient, err := httptransport.NewClient(&httptransport.Options{
-			Credentials: cfg.authCredentials,
+			Credentials:    cfg.authCredentials,
+			UniverseDomain: cfg.getClientUniverseDomain(),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create auth client: %v", err)
