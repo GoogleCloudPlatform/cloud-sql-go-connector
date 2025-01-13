@@ -46,6 +46,7 @@ type dialerConfig struct {
 	useIAMAuthN            bool
 	logger                 debug.ContextLogger
 	lazyRefresh            bool
+	authCredentials        *auth.Credentials
 	iamLoginTokenProvider  auth.TokenProvider
 	useragents             []string
 	setAdminAPIEndpoint    bool
@@ -94,8 +95,7 @@ func WithCredentialsJSON(b []byte) Option {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
 		}
-		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithAuthCredentials(c))
-
+		d.authCredentials = c
 		// Create another set of credentials scoped to login only
 		scoped, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{iamLoginScope},

@@ -31,6 +31,7 @@ import (
 
 	"cloud.google.com/go/auth"
 	"cloud.google.com/go/auth/credentials"
+	"cloud.google.com/go/auth/httptransport"
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
@@ -206,7 +207,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create default credentials: %v", err)
 		}
-		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithAuthCredentials(c))
+		cfg.authCredentials = c
 		// create second set of credentials, scoped for IAM AuthN login only
 		scoped, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes: []string{iamLoginScope},
@@ -215,6 +216,17 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return nil, fmt.Errorf("failed to create scoped credentials: %v", err)
 		}
 		cfg.iamLoginTokenProvider = scoped.TokenProvider
+	}
+
+	// For all credential paths, use built-in httptransport.NewClient
+	if cfg.authCredentials != nil {
+		authClient, err := httptransport.NewClient(&httptransport.Options{
+			Credentials: cfg.authCredentials,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create auth client: %v", err)
+		}
+		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithHTTPClient(authClient))
 	}
 
 	client, err := sqladmin.NewService(ctx, cfg.sqladminOpts...)
