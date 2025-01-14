@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.14.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.13.2...v1.14.0) (2025-01-14)
+
+
+### Features
+
+* Custom SAN Support ([#902](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/902)) ([9339d75](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/9339d75fa1663eb32de2c5054e05a4d45337e735))
+* Custom SAN Support ([#911](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/911)) ([772fae4](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/772fae4ffdf19c3f4fb8e024845c976008e1e30f))
+* drop support for Go 1.21 ([#906](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/906)) ([12c1618](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/12c1618f3c29aad0d32f16dcf445b57422380137))
+* Support Customer CAS Private CA for server certificates. https://github.com/GoogleCloudPlatform/cloud-sql-jdbc-socket-factory/pull/2095 ([e88d82a](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/e88d82a8fdd459ef4c3ff11b7af36a074a715f35))
+* Support Private CA for server certificates. https://github.com/GoogleCloudPlatform/cloud-sql-nodejs-connector/pull/408 ([e88d82a](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/e88d82a8fdd459ef4c3ff11b7af36a074a715f35))
+* Support server certificates from a private CA ([a8ed925](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/a8ed9259825912f78b2c111d9c38f7b00b6eee94))
+
+
+### Bug Fixes
+
+* use auth DetectDefault over oauth2 FindDefaultCredentials ([#909](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/909)) ([52fef27](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/52fef27f82bb4c47c3ee96a06a2046da99d77225))
+
 ## [1.13.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.13.1...v1.13.2) (2024-12-10)
 
 
