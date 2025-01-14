@@ -244,7 +244,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		cfg.iamLoginTokenProvider = scoped.TokenProvider
 	}
 
-	// For all credential paths, use built-in httptransport.NewClient
+	// For all credential paths, use auth library's built-in
+	// httptransport.NewClient
 	if cfg.authCredentials != nil {
 		authClient, err := httptransport.NewClient(&httptransport.Options{
 			Credentials:    cfg.authCredentials,
@@ -253,7 +254,11 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create auth client: %v", err)
 		}
-		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithHTTPClient(authClient))
+		// If callers have not provided an HTTPClient explicitly with
+		// WithHTTPClient, then use auth client
+		if !cfg.setHTTPClient {
+			cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithHTTPClient(authClient))
+		}
 	}
 
 	client, err := sqladmin.NewService(ctx, cfg.sqladminOpts...)

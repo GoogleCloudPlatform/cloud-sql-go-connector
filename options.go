@@ -52,6 +52,7 @@ type dialerConfig struct {
 	useragents             []string
 	setAdminAPIEndpoint    bool
 	setCredentials         bool
+	setHTTPClient          bool
 	setTokenSource         bool
 	setIAMAuthNTokenSource bool
 	resolver               instance.ConnectionNameResolver
@@ -184,6 +185,7 @@ func WithRefreshTimeout(t time.Duration) Option {
 func WithHTTPClient(client *http.Client) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithHTTPClient(client))
+		d.setHTTPClient = true
 	}
 }
 
