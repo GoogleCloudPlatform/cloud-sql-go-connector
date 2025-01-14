@@ -24,11 +24,15 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"cloud.google.com/go/auth"
+	"cloud.google.com/go/auth/credentials"
+	"cloud.google.com/go/auth/httptransport"
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
@@ -36,8 +40,6 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -50,6 +52,12 @@ const (
 	// iamLoginScope is the OAuth2 scope used for tokens embedded in the ephemeral
 	// certificate.
 	iamLoginScope = "https://www.googleapis.com/auth/sqlservice.login"
+	// universeDomainEnvVar is the environment variable for setting the default
+	// service domain for a given Cloud universe.
+	universeDomainEnvVar = "GOOGLE_CLOUD_UNIVERSE_DOMAIN"
+	// defaultUniverseDomain is the default value for universe domain.
+	// Universe domain is the default service domain for a given Cloud universe.
+	defaultUniverseDomain = "googleapis.com"
 )
 
 var (
@@ -117,6 +125,25 @@ type cacheKey struct {
 	name       string
 }
 
+// getClientUniverseDomain returns the default service domain for a given Cloud
+// universe, with the following precedence:
+//
+// 1. A non-empty option.WithUniverseDomain or similar client option.
+// 2. A non-empty environment variable GOOGLE_CLOUD_UNIVERSE_DOMAIN.
+// 3. The default value "googleapis.com".
+//
+// This is the universe domain configured for the client, which will be compared
+// to the universe domain that is separately configured for the credentials.
+func (c *dialerConfig) getClientUniverseDomain() string {
+	if c.clientUniverseDomain != "" {
+		return c.clientUniverseDomain
+	}
+	if envUD := os.Getenv(universeDomainEnvVar); envUD != "" {
+		return envUD
+	}
+	return defaultUniverseDomain
+}
+
 // A Dialer is used to create connections to Cloud SQL instances.
 //
 // Use NewDialer to initialize a Dialer.
@@ -150,8 +177,8 @@ type Dialer struct {
 	// network. By default, it is golang.org/x/net/proxy#Dial.
 	dialFunc func(cxt context.Context, network, addr string) (net.Conn, error)
 
-	// iamTokenSource supplies the OAuth2 token used for IAM DB Authn.
-	iamTokenSource oauth2.TokenSource
+	// iamTokenProvider supplies the OAuth2 token used for IAM DB Authn.
+	iamTokenProvider auth.TokenProvider
 
 	// resolver converts instance names into DNS names.
 	resolver       instance.ConnectionNameResolver
@@ -174,12 +201,11 @@ func (nullLogger) Debugf(_ context.Context, _ string, _ ...interface{}) {}
 // RSA keypair is generated will be faster.
 func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg := &dialerConfig{
-		refreshTimeout:  cloudsql.RefreshTimeout,
-		dialFunc:        proxy.Dial,
-		logger:          nullLogger{},
-		useragents:      []string{userAgent},
-		serviceUniverse: "googleapis.com",
-		failoverPeriod:  cloudsql.FailoverPeriod,
+		refreshTimeout: cloudsql.RefreshTimeout,
+		dialFunc:       proxy.Dial,
+		logger:         nullLogger{},
+		useragents:     []string{userAgent},
+		failoverPeriod: cloudsql.FailoverPeriod,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -197,40 +223,41 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// Add this to the end to make sure it's not overridden
 	cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
 
-	// If callers have not provided a token source, either explicitly with
-	// WithTokenSource or implicitly with WithCredentialsJSON etc., then use the
-	// default token source.
+	// If callers have not provided a credential source, either explicitly with
+	// WithTokenSource or implicitly with WithCredentialsJSON etc., then use
+	// default credentials
 	if !cfg.setCredentials {
-		c, err := google.FindDefaultCredentials(ctx, sqladmin.SqlserviceAdminScope)
+		c, err := credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes: []string{sqladmin.SqlserviceAdminScope},
+		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create default credentials: %v", err)
 		}
-		ud, err := c.GetUniverseDomain()
+		cfg.authCredentials = c
+		// create second set of credentials, scoped for IAM AuthN login only
+		scoped, err := credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes: []string{iamLoginScope},
+		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to get universe domain: %v", err)
+			return nil, fmt.Errorf("failed to create scoped credentials: %v", err)
 		}
-		cfg.credentialsUniverse = ud
-		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithTokenSource(c.TokenSource))
-		scoped, err := google.DefaultTokenSource(ctx, iamLoginScope)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create scoped token source: %v", err)
-		}
-		cfg.iamLoginTokenSource = scoped
+		cfg.iamLoginTokenProvider = scoped.TokenProvider
 	}
 
-	if cfg.setUniverseDomain && cfg.setAdminAPIEndpoint {
-		return nil, errors.New(
-			"can not use WithAdminAPIEndpoint and WithUniverseDomain Options together, " +
-				"use WithAdminAPIEndpoint (it already contains the universe domain)",
-		)
-	}
-
-	if cfg.credentialsUniverse != "" && cfg.serviceUniverse != "" {
-		if cfg.credentialsUniverse != cfg.serviceUniverse {
-			return nil, fmt.Errorf(
-				"the configured service universe domain (%s) does not match the credential universe domain (%s)",
-				cfg.serviceUniverse, cfg.credentialsUniverse,
-			)
+	// For all credential paths, use auth library's built-in
+	// httptransport.NewClient
+	if cfg.authCredentials != nil {
+		authClient, err := httptransport.NewClient(&httptransport.Options{
+			Credentials:    cfg.authCredentials,
+			UniverseDomain: cfg.getClientUniverseDomain(),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create auth client: %v", err)
+		}
+		// If callers have not provided an HTTPClient explicitly with
+		// WithHTTPClient, then use auth client
+		if !cfg.setHTTPClient {
+			cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithHTTPClient(authClient))
 		}
 	}
 
@@ -273,7 +300,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		logger:            cfg.logger,
 		defaultDialConfig: dc,
 		dialerID:          uuid.New().String(),
-		iamTokenSource:    cfg.iamLoginTokenSource,
+		iamTokenProvider:  cfg.iamLoginTokenProvider,
 		dialFunc:          cfg.dialFunc,
 		resolver:          r,
 		failoverPeriod:    cfg.failoverPeriod,
@@ -636,7 +663,7 @@ func (d *Dialer) connectionInfoCache(
 			cn,
 			d.logger,
 			d.sqladmin, rsaKey,
-			d.refreshTimeout, d.iamTokenSource,
+			d.refreshTimeout, d.iamTokenProvider,
 			d.dialerID, useIAMAuthNDial,
 		)
 	} else {
@@ -644,7 +671,7 @@ func (d *Dialer) connectionInfoCache(
 			cn,
 			d.logger,
 			d.sqladmin, rsaKey,
-			d.refreshTimeout, d.iamTokenSource,
+			d.refreshTimeout, d.iamTokenProvider,
 			d.dialerID, useIAMAuthNDial,
 		)
 	}

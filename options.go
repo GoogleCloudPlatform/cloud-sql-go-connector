@@ -22,12 +22,14 @@ import (
 	"os"
 	"time"
 
+	"cloud.google.com/go/auth"
+	"cloud.google.com/go/auth/credentials"
+	"cloud.google.com/go/auth/oauth2adapt"
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	apiopt "google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -44,13 +46,13 @@ type dialerConfig struct {
 	useIAMAuthN            bool
 	logger                 debug.ContextLogger
 	lazyRefresh            bool
-	iamLoginTokenSource    oauth2.TokenSource
+	clientUniverseDomain   string
+	authCredentials        *auth.Credentials
+	iamLoginTokenProvider  auth.TokenProvider
 	useragents             []string
-	credentialsUniverse    string
-	serviceUniverse        string
 	setAdminAPIEndpoint    bool
-	setUniverseDomain      bool
 	setCredentials         bool
+	setHTTPClient          bool
 	setTokenSource         bool
 	setIAMAuthNTokenSource bool
 	resolver               instance.ConnectionNameResolver
@@ -87,26 +89,25 @@ func WithCredentialsFile(filename string) Option {
 // or refresh token JSON credentials to be used as the basis for authentication.
 func WithCredentialsJSON(b []byte) Option {
 	return func(d *dialerConfig) {
-		c, err := google.CredentialsFromJSON(context.Background(), b, sqladmin.SqlserviceAdminScope)
+		c, err := credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes:          []string{sqladmin.SqlserviceAdminScope},
+			CredentialsJSON: b,
+		})
 		if err != nil {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
 		}
-		ud, err := c.GetUniverseDomain()
-		if err != nil {
-			d.err = errtype.NewConfigError(err.Error(), "n/a")
-			return
-		}
-		d.credentialsUniverse = ud
-		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithCredentials(c))
-
+		d.authCredentials = c
 		// Create another set of credentials scoped to login only
-		scoped, err := google.CredentialsFromJSON(context.Background(), b, iamLoginScope)
+		scoped, err := credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes:          []string{iamLoginScope},
+			CredentialsJSON: b,
+		})
 		if err != nil {
 			d.err = errtype.NewConfigError(err.Error(), "n/a")
 			return
 		}
-		d.iamLoginTokenSource = scoped.TokenSource
+		d.iamLoginTokenProvider = scoped.TokenProvider
 		d.setCredentials = true
 	}
 }
@@ -158,7 +159,7 @@ func WithIAMAuthNTokenSources(apiTS, iamLoginTS oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
 		d.setIAMAuthNTokenSource = true
 		d.setCredentials = true
-		d.iamLoginTokenSource = iamLoginTS
+		d.iamLoginTokenProvider = oauth2adapt.TokenProviderFromTokenSource(iamLoginTS)
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(apiTS))
 	}
 }
@@ -184,6 +185,7 @@ func WithRefreshTimeout(t time.Duration) Option {
 func WithHTTPClient(client *http.Client) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithHTTPClient(client))
+		d.setHTTPClient = true
 	}
 }
 
@@ -193,7 +195,6 @@ func WithAdminAPIEndpoint(url string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithEndpoint(url))
 		d.setAdminAPIEndpoint = true
-		d.serviceUniverse = ""
 	}
 }
 
@@ -202,8 +203,7 @@ func WithAdminAPIEndpoint(url string) Option {
 func WithUniverseDomain(ud string) Option {
 	return func(d *dialerConfig) {
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithUniverseDomain(ud))
-		d.serviceUniverse = ud
-		d.setUniverseDomain = true
+		d.clientUniverseDomain = ud
 	}
 }
 

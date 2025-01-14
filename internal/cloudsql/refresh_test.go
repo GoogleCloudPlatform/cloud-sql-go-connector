@@ -25,9 +25,9 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/auth"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
-	"golang.org/x/oauth2"
 )
 
 const testDialerID = "some-dialer-id"
@@ -140,40 +140,6 @@ func TestRefreshForCASInstances(t *testing.T) {
 	}
 }
 
-// If a caller has provided a static token source that cannot be refreshed
-// (e.g., when the Cloud SQL Proxy is invokved with --token), then the
-// refresher cannot determine the token's expiration (without additional API
-// calls), and so the refresher should use the certificate's expiration instead
-// of the token's expiration which is otherwise unset.
-func TestRefreshWithStaticTokenSource(t *testing.T) {
-	cn := testInstanceConnName()
-	inst := mock.NewFakeCSQLInstance(
-		cn.Project(), cn.Region(), cn.Name(),
-	)
-	client, cleanup, err := mock.NewSQLAdminService(
-		context.Background(),
-		mock.InstanceGetSuccess(inst, 1),
-		mock.CreateEphemeralSuccess(inst, 1),
-	)
-	if err != nil {
-		t.Fatalf("failed to create test SQL admin service: %s", err)
-	}
-	t.Cleanup(func() { _ = cleanup() })
-
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "myaccestoken"})
-	r := newAdminAPIClient(nullLogger{}, client, RSAKey, ts, testDialerID)
-	ci, err := r.ConnectionInfo(context.Background(), cn, true)
-	if err != nil {
-		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
-	}
-	if !ci.Expiration.After(time.Now()) {
-		t.Fatalf(
-			"Connection info expiration should be in the future, got = %v",
-			ci.Expiration,
-		)
-	}
-}
-
 func TestRefreshRetries50xResponses(t *testing.T) {
 	cn := testInstanceConnName()
 	inst := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name(),
@@ -238,17 +204,17 @@ func TestRefreshFailsFast(t *testing.T) {
 }
 
 type tokenResp struct {
-	tok *oauth2.Token
+	tok *auth.Token
 	err error
 }
 
-type fakeTokenSource struct {
+type fakeTokenProvider struct {
 	responses []tokenResp
 	mu        sync.Mutex
 	ct        int
 }
 
-func (f *fakeTokenSource) Token() (*oauth2.Token, error) {
+func (f *fakeTokenProvider) Token(context.Context) (*auth.Token, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	resp := f.responses[f.ct]
@@ -256,7 +222,7 @@ func (f *fakeTokenSource) Token() (*oauth2.Token, error) {
 	return resp.tok, resp.err
 }
 
-func (f *fakeTokenSource) count() int {
+func (f *fakeTokenProvider) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.ct
@@ -274,16 +240,16 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 		{
 			desc: "when the token's expiration comes BEFORE the cert",
 			resps: []tokenResp{
-				{tok: &oauth2.Token{}},
-				{tok: &oauth2.Token{Expiry: t1}},
+				{tok: &auth.Token{}},
+				{tok: &auth.Token{Expiry: t1}},
 			},
 			wantExpiry: t1,
 		},
 		{
 			desc: "when the token's expiration comes AFTER the cert",
 			resps: []tokenResp{
-				{tok: &oauth2.Token{}},
-				{tok: &oauth2.Token{Expiry: t2}},
+				{tok: &auth.Token{}},
+				{tok: &auth.Token{Expiry: t2}},
 			},
 			wantExpiry: certExpiry,
 		},
@@ -303,8 +269,8 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
-			ts := &fakeTokenSource{responses: tc.resps}
-			r := newAdminAPIClient(nullLogger{}, client, RSAKey, ts, testDialerID)
+			tp := &fakeTokenProvider{responses: tc.resps}
+			r := newAdminAPIClient(nullLogger{}, client, RSAKey, tp, testDialerID)
 			rr, err := r.ConnectionInfo(context.Background(), cn, true)
 			if err != nil {
 				t.Fatalf("want no error, got = %v", err)
@@ -330,7 +296,7 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 		{
 			desc: "when refreshing a token fails",
 			resps: []tokenResp{
-				{tok: &oauth2.Token{}, err: nil},
+				{tok: &auth.Token{}, err: nil},
 				{tok: nil, err: errors.New("refresh failed")},
 			},
 			wantCount: 2,
@@ -349,13 +315,13 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
-			ts := &fakeTokenSource{responses: tc.resps}
-			r := newAdminAPIClient(nullLogger{}, client, RSAKey, ts, testDialerID)
+			tp := &fakeTokenProvider{responses: tc.resps}
+			r := newAdminAPIClient(nullLogger{}, client, RSAKey, tp, testDialerID)
 			_, err := r.ConnectionInfo(context.Background(), cn, true)
 			if err == nil {
 				t.Fatalf("expected get failed error, got = %v", err)
 			}
-			if count := ts.count(); count != tc.wantCount {
+			if count := tp.count(); count != tc.wantCount {
 				t.Fatalf("expected fake token source to be called %v time, got = %v", tc.wantCount, count)
 			}
 		})

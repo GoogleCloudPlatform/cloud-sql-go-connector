@@ -20,9 +20,9 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/auth"
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/instance"
-	"golang.org/x/oauth2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
@@ -45,7 +45,7 @@ func NewLazyRefreshCache(
 	client *sqladmin.Service,
 	key *rsa.PrivateKey,
 	_ time.Duration,
-	ts oauth2.TokenSource,
+	tp auth.TokenProvider,
 	dialerID string,
 	useIAMAuthNDial bool,
 ) *LazyRefreshCache {
@@ -56,7 +56,7 @@ func NewLazyRefreshCache(
 			l,
 			client,
 			key,
-			ts,
+			tp,
 			dialerID,
 		),
 		useIAMAuthNDial: useIAMAuthNDial,
