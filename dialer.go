@@ -134,9 +134,9 @@ type cacheKey struct {
 //
 // This is the universe domain configured for the client, which will be compared
 // to the universe domain that is separately configured for the credentials.
-func (cfg *dialerConfig) getClientUniverseDomain() string {
-	if cfg.clientUniverseDomain != "" {
-		return cfg.clientUniverseDomain
+func (c *dialerConfig) getClientUniverseDomain() string {
+	if c.clientUniverseDomain != "" {
+		return c.clientUniverseDomain
 	}
 	if envUD := os.Getenv(universeDomainEnvVar); envUD != "" {
 		return envUD
