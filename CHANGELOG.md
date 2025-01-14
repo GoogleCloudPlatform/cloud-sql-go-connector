@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.14.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.13.2...v1.14.0) (2025-01-14)
+
+
+### Features
+
+* Custom SAN Support ([#911](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/911)) ([772fae4](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/772fae4ffdf19c3f4fb8e024845c976008e1e30f))
+* drop support for Go 1.21 ([#906](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/906)) ([12c1618](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/12c1618f3c29aad0d32f16dcf445b57422380137))
+* Support server certificates from a private CA ([#899](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/pull/899)) ([a8ed925](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/a8ed9259825912f78b2c111d9c38f7b00b6eee94))
+
+
+### Bug Fixes
+
+* use auth DetectDefault over oauth2 FindDefaultCredentials ([#909](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/909)) ([52fef27](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/52fef27f82bb4c47c3ee96a06a2046da99d77225))
+
 ## [1.13.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.13.1...v1.13.2) (2024-12-10)
 
 
