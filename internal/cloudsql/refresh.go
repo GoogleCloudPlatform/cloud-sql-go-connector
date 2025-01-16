@@ -171,14 +171,6 @@ func fetchEphemeralCert(
 				tokErr,
 			)
 		}
-		tok, tokErr = tp.Token(ctx)
-		if tokErr != nil {
-			return tls.Certificate{}, errtype.NewRefreshError(
-				"failed to get Oauth2 token",
-				inst.String(),
-				tokErr,
-			)
-		}
 		req.AccessToken = tok.Value
 	}
 	resp, err := retry50x(ctx, func(ctx2 context.Context) (*sqladmin.GenerateEphemeralCertResponse, error) {
