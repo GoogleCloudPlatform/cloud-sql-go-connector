@@ -153,10 +153,7 @@ func TestLazyRefreshCacheUpdateRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Q: Why should the token provider be called twice?
-	// A: Because the refresh code retrieves a token first (1 call) and then
-	//    refreshes it (1 call) for a total of 2 calls.
-	if got, want := spy.callCount(), 2; got != want {
+	if got, want := spy.callCount(), 1; got != want {
 		t.Fatalf(
 			"auth.TokenProvider call count, got = %v, want = %v",
 			got, want,
