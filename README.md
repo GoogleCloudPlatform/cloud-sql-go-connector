@@ -277,8 +277,7 @@ import (
 
 func connect() {
 	cleanup, err := mysql.RegisterDriver("cloudsql-mysql",
-		cloudsqlconn.WithDNSResolver(),
-		cloudsqlconn.WithCredentialsFile("key.json"))
+		cloudsqlconn.WithDNSResolver())
 	if err != nil {
 		// ... handle error
 	}
