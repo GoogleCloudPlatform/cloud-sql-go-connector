@@ -240,7 +240,6 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 		{
 			desc: "when the token's expiration comes BEFORE the cert",
 			resps: []tokenResp{
-				{tok: &auth.Token{}},
 				{tok: &auth.Token{Expiry: t1}},
 			},
 			wantExpiry: t1,
@@ -248,7 +247,6 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 		{
 			desc: "when the token's expiration comes AFTER the cert",
 			resps: []tokenResp{
-				{tok: &auth.Token{}},
 				{tok: &auth.Token{Expiry: t2}},
 			},
 			wantExpiry: certExpiry,
