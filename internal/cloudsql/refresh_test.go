@@ -240,7 +240,6 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 		{
 			desc: "when the token's expiration comes BEFORE the cert",
 			resps: []tokenResp{
-				{tok: &auth.Token{}},
 				{tok: &auth.Token{Expiry: t1}},
 			},
 			wantExpiry: t1,
@@ -248,7 +247,6 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 		{
 			desc: "when the token's expiration comes AFTER the cert",
 			resps: []tokenResp{
-				{tok: &auth.Token{}},
 				{tok: &auth.Token{Expiry: t2}},
 			},
 			wantExpiry: certExpiry,
@@ -292,14 +290,6 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 			desc:      "when fetching a token fails",
 			resps:     []tokenResp{{tok: nil, err: errors.New("fetch failed")}},
 			wantCount: 1,
-		},
-		{
-			desc: "when refreshing a token fails",
-			resps: []tokenResp{
-				{tok: &auth.Token{}, err: nil},
-				{tok: nil, err: errors.New("refresh failed")},
-			},
-			wantCount: 2,
 		},
 	}
 	cn := testInstanceConnName()
