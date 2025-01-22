@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -247,6 +248,14 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// For all credential paths, use auth library's built-in
 	// httptransport.NewClient
 	if cfg.authCredentials != nil {
+		// Set headers for auth client as below WithHTTPClient will ignore
+		// WithQuotaProject and WithUserAgent Options
+		headers := http.Header{}
+		headers.Set("User-Agent", strings.Join(cfg.useragents, " "))
+		if cfg.quotaProject != "" {
+			headers.Set("X-Goog-User-Project", cfg.quotaProject)
+		}
+
 		authClient, err := httptransport.NewClient(&httptransport.Options{
 			Credentials:    cfg.authCredentials,
 			UniverseDomain: cfg.getClientUniverseDomain(),
@@ -259,6 +268,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		if !cfg.setHTTPClient {
 			cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithHTTPClient(authClient))
 		}
+	} else if cfg.quotaProject != "" {
+		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithQuotaProject(cfg.quotaProject))
 	}
 
 	client, err := sqladmin.NewService(ctx, cfg.sqladminOpts...)

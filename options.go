@@ -47,6 +47,7 @@ type dialerConfig struct {
 	logger                 debug.ContextLogger
 	lazyRefresh            bool
 	clientUniverseDomain   string
+	quotaProject           string
 	authCredentials        *auth.Credentials
 	iamLoginTokenProvider  auth.TokenProvider
 	useragents             []string
@@ -210,7 +211,7 @@ func WithUniverseDomain(ud string) Option {
 // WithQuotaProject returns an Option that specifies the project used for quota and billing purposes.
 func WithQuotaProject(p string) Option {
 	return func(cfg *dialerConfig) {
-		cfg.sqladminOpts = append(cfg.sqladminOpts, apiopt.WithQuotaProject(p))
+		cfg.quotaProject = p
 	}
 }
 
