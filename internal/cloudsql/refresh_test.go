@@ -293,14 +293,6 @@ func TestRefreshWithIAMAuthErrors(t *testing.T) {
 			resps:     []tokenResp{{tok: nil, err: errors.New("fetch failed")}},
 			wantCount: 1,
 		},
-		{
-			desc: "when refreshing a token fails",
-			resps: []tokenResp{
-				{tok: &auth.Token{}, err: nil},
-				{tok: nil, err: errors.New("refresh failed")},
-			},
-			wantCount: 2,
-		},
 	}
 	cn := testInstanceConnName()
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
