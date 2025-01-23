@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.14.0...v1.14.1) (2025-01-23)
+
+
+### Bug Fixes
+
+* correct default usage for `WithQuotaProject` and `WithUserAgent` ([#920](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/920)) ([8520c3d](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/8520c3d938e5011eb77ff5b5dc08c4e94e691a16))
+
 ## [1.14.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.13.2...v1.14.0) (2025-01-14)
 
 
