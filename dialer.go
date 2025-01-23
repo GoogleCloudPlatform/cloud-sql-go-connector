@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -220,9 +221,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, errUseTokenSource
 	}
 
-	// Add this to the end to make sure it's not overridden
-	cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
-
 	// If callers have not provided a credential source, either explicitly with
 	// WithTokenSource or implicitly with WithCredentialsJSON etc., then use
 	// default credentials
@@ -247,6 +245,14 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// For all credential paths, use auth library's built-in
 	// httptransport.NewClient
 	if cfg.authCredentials != nil {
+		// Set headers for auth client as below WithHTTPClient will ignore
+		// WithQuotaProject and WithUserAgent Options
+		headers := http.Header{}
+		headers.Set("User-Agent", strings.Join(cfg.useragents, " "))
+		if cfg.quotaProject != "" {
+			headers.Set("X-Goog-User-Project", cfg.quotaProject)
+		}
+
 		authClient, err := httptransport.NewClient(&httptransport.Options{
 			Credentials:    cfg.authCredentials,
 			UniverseDomain: cfg.getClientUniverseDomain(),
@@ -258,6 +264,12 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		// WithHTTPClient, then use auth client
 		if !cfg.setHTTPClient {
 			cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithHTTPClient(authClient))
+		}
+	} else {
+		// Add this to the end to make sure it's not overridden
+		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
+		if cfg.quotaProject != "" {
+			cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithQuotaProject(cfg.quotaProject))
 		}
 	}
 
