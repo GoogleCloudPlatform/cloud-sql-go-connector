@@ -221,9 +221,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		return nil, errUseTokenSource
 	}
 
-	// Add this to the end to make sure it's not overridden
-	cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
-
 	// If callers have not provided a credential source, either explicitly with
 	// WithTokenSource or implicitly with WithCredentialsJSON etc., then use
 	// default credentials
@@ -268,8 +265,12 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		if !cfg.setHTTPClient {
 			cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithHTTPClient(authClient))
 		}
-	} else if cfg.quotaProject != "" {
-		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithQuotaProject(cfg.quotaProject))
+	} else {
+		// Add this to the end to make sure it's not overridden
+		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
+		if cfg.quotaProject != "" {
+			cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithQuotaProject(cfg.quotaProject))
+		}
 	}
 
 	client, err := sqladmin.NewService(ctx, cfg.sqladminOpts...)
