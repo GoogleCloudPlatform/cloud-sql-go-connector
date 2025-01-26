@@ -66,7 +66,7 @@ func (r *DNSInstanceConnectionNameResolver) Resolve(ctx context.Context, icn str
 	if err != nil {
 		// The connection name was not in project:region:instance format.
 		// Check that connection name is a valid DNS domain name.
-		if instance.isValidDomain(icn) {
+		if instance.IsValidDomain(icn) {
 			// Attempt to query a TXT record and see if it works instead.
 			cn, err = r.queryDNS(ctx, icn)
 			if err != nil {

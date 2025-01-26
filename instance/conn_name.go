@@ -72,8 +72,8 @@ func (c *ConnName) HasDomainName() bool {
 	return c.domainName != ""
 }
 
-// isValidDomain validates that a string is a well-formed domain name
-func isValidDomain(dn string) bool {
+// IsValidDomain validates that a string is a well-formed domain name
+func IsValidDomain(dn string) bool {
 	b := []byte(dn)
 	m := domainNameRegex.FindSubmatch(b)
 	if m == nil {

@@ -66,7 +66,7 @@ func TestIsValidDomain(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		v := isValidDomain(tc.domain)
+		v := IsValidDomain(tc.domain)
 		if v != tc.want {
 			t.Errorf("isValidDomainName(%s) failed: want %v, got %v", tc.domain, tc.want, v)
 		}
