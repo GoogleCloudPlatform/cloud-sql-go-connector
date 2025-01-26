@@ -28,7 +28,7 @@ var (
 	// (e.g. "google.com:PROJECT")
 	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+)")
 	// The domain name pattern in accordance with RFC 1035, RFC 1123 and RFC 2181.
-	domainNameRegex = regexp.MustCompile("^[A-Za-z0-9-]{1,63}\\.[A-Za-z]{2,6}$")
+	domainNameRegex = regexp.MustCompile(`^(?:[_a-z0-9](?:[_a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?)?$`)
 )
 
 // ConnName represents the "instance connection name", in the format
