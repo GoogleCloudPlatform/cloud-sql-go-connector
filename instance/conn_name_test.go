@@ -45,3 +45,30 @@ func TestParseConnName(t *testing.T) {
 		}
 	}
 }
+
+func TestIsValidDomain(t *testing.T) {
+	tests := []struct {
+		domain string
+		want   bool
+	}{
+		{
+			"prod-db.mycompany.example.com",
+			true,
+		},
+		{
+			"example.com.",
+			true,
+		},
+		{
+			"example",
+			false,
+		},
+	}
+
+	for _, tc := range tests {
+		v := isValidDomain(tc.domain)
+		if v != tc.want {
+			t.Errorf("isValidDomainName(%s) failed: want %v, got %v", tc.domain, tc.want, v)
+		}
+	}
+}
