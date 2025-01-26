@@ -67,7 +67,7 @@ func (c *ConnName) DomainName() string {
 	return c.domainName
 }
 
-// HasDomainName returns whether there is a Cloud SQL domain name
+// HasDomainName returns whether the Cloud SQL instance has a domain name
 func (c *ConnName) HasDomainName() bool {
 	return c.domainName != ""
 }
