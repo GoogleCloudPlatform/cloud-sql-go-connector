@@ -22,16 +22,16 @@ func TestParseConnName(t *testing.T) {
 		want ConnName
 	}{
 		{
-			"project:region:instance",
-			ConnName{project: "project", region: "region", name: "instance"},
+			name: "project:region:instance",
+			want: ConnName{project: "project", region: "region", name: "instance"},
 		},
 		{
-			"google.com:project:region:instance",
-			ConnName{project: "google.com:project", region: "region", name: "instance"},
+			name: "google.com:project:region:instance",
+			want: ConnName{project: "google.com:project", region: "region", name: "instance"},
 		},
 		{
-			"project:instance", // missing region
-			ConnName{},
+			name: "project:instance", // missing region
+			want: ConnName{},
 		},
 	}
 
@@ -41,7 +41,7 @@ func TestParseConnName(t *testing.T) {
 			t.Errorf("unexpected error: %e", err)
 		}
 		if c != tc.want {
-			t.Errorf("ParseConnName(%s) failed: want %v, got %v", tc.name, tc.want, err)
+			t.Errorf("ParseConnName(%s) failed: want %v, got %v", tc.name, tc.want, c)
 		}
 	}
 }
