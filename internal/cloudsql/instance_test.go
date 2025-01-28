@@ -150,19 +150,6 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Now self sign the server's cert
-	// TODO: this also should return structured data and handle the PEM
-	// encoding elsewhere
-	certBytes, err := mock.SelfSign(i.Cert, i.Key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ = pem.Decode(certBytes)
-	serverCACert, err := x509.ParseCertificate(b.Bytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Assemble a connection info with the raw and parsed client cert
 	// and the self-signed server certificate
 	ci := ConnectionInfo{
@@ -172,7 +159,7 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 			PrivateKey:  RSAKey,
 			Leaf:        clientCert,
 		},
-		ServerCACert: []*x509.Certificate{serverCACert},
+		ServerCACert: []*x509.Certificate{i.Cert},
 		DBVersion:    "doesn't matter here",
 		Expiration:   clientCert.NotAfter,
 	}
@@ -198,7 +185,7 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 	}
 
 	verifyPeerCert := got.VerifyPeerCertificate
-	err = verifyPeerCert([][]byte{serverCACert.Raw}, nil)
+	err = verifyPeerCert([][]byte{i.Cert.Raw}, nil)
 	if err != nil {
 		t.Fatalf("expected to verify peer cert, got error: %v", err)
 	}
