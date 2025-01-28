@@ -52,20 +52,20 @@ func TestIsValidDomain(t *testing.T) {
 		want   bool
 	}{
 		{
-			"prod-db.mycompany.example.com",
-			true,
+			domain: "prod-db.mycompany.example.com",
+			want:   true,
 		},
 		{
-			"example.com.",
-			true,
+			domain: "example.com.",
+			want:   true,
 		},
 		{
-			"-example.com",
-			false,
+			domain: "-example.com",
+			want:   false,
 		},
 		{
-			"example",
-			false,
+			domain: "example",
+			want:   false,
 		},
 	}
 
