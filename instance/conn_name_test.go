@@ -56,15 +56,23 @@ func TestIsValidDomain(t *testing.T) {
 			want:   true,
 		},
 		{
-			domain: "example.com.",
+			domain: "example.com.", // trailing dot
 			want:   true,
 		},
 		{
-			domain: "-example.com",
+			domain: "-example.com", // leading hyphen
 			want:   false,
 		},
 		{
-			domain: "example",
+			domain: "example", // missing TLD
+			want:   false,
+		},
+		{
+			domain: "127.0.0.1", // IPv4 address
+			want:   false,
+		},
+		{
+			domain: "0:0:0:0:0:0:0:1", // IPv6 address
 			want:   false,
 		},
 	}
