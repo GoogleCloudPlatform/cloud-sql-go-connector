@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.14.1...v1.14.2) (2025-01-30)
+
+
+### Bug Fixes
+
+* pass headers to transport ([#928](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/928)) ([08be3ab](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/08be3aba5c5d2a6a69c370e1a2772b2f73435a1f))
+
 ## [1.14.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.14.0...v1.14.1) (2025-01-23)
 
 
