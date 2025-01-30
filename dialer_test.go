@@ -1174,3 +1174,134 @@ func TestDialerChecksSubjectAlternativeNameAndFails(t *testing.T) {
 		t.Fatal("want error containing `tls: failed to verify certificate`. Got: ", err)
 	}
 }
+
+func TestDialerRefreshesAfterRotateClientCA(t *testing.T) {
+	inst := mock.NewFakeCSQLInstanceWithSan(
+		"my-project", "my-region", "my-instance", []string{"db.example.com"},
+		mock.WithDNS("db.example.com"),
+		mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
+	)
+
+	d := setupDialer(t, setupConfig{
+		skipServer:   true,
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 2),
+			mock.CreateEphemeralSuccess(inst, 2),
+		},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithDebugLogger(&dialerTestLogger{t: t}),
+			//WithLazyRefresh(),
+			// Note: this succeeds with lazy refresh, but fails with lazy.
+			// because dialer.ForceRefresh does not block connections while the
+			// refresh is in progress.
+		},
+	})
+	cancel1 := mock.StartServerProxy(t, inst)
+	t.Log("First attempt...")
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"my-project:my-region:my-instance",
+	)
+	t.Log("First attempt OK. Resetting client cert.")
+
+	// Close the server
+	cancel1()
+
+	mock.RotateClientCA(inst)
+
+	// Start the server with new certificates
+	cancel2 := mock.StartServerProxy(t, inst)
+	defer cancel2()
+
+	// Dial a second time. We expect no error on dial, but TLS error on read.
+	t.Log("Second attempt should fail...")
+	conn, err := d.Dial(context.Background(), "my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal("Should be no certificate error after, got ", err)
+	}
+
+	// Expect an error on read. This should trigger the dialer to refresh.
+	_, err = io.ReadAll(conn)
+	if err != nil {
+		t.Log("Got error on read as expected.", err)
+	} else {
+		t.Fatal("Want read error, got no error")
+	}
+	t.Log("Second attempt done")
+
+	// Dial again. This should complete after the refresh.
+	t.Log("Third attempt...")
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"my-project:my-region:my-instance",
+	)
+	t.Log("Third attempt OK.")
+}
+
+func TestDialerRefreshesAfterRotateServerCA(t *testing.T) {
+	inst := mock.NewFakeCSQLInstanceWithSan(
+		"my-project", "my-region", "my-instance", []string{"db.example.com"},
+		mock.WithDNS("db.example.com"),
+		mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
+	)
+
+	d := setupDialer(t, setupConfig{
+		skipServer:   true,
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 2),
+			mock.CreateEphemeralSuccess(inst, 2),
+		},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithDebugLogger(&dialerTestLogger{t: t}),
+			WithLazyRefresh(),
+			// Note: this succeeds with lazy refresh, but fails with lazy.
+			// because dialer.ForceRefresh does not block connections while the
+			// refresh is in progress.
+		},
+	})
+	cancel1 := mock.StartServerProxy(t, inst)
+	t.Log("First attempt...")
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"my-project:my-region:my-instance",
+	)
+	t.Log("First attempt OK. Resetting client cert.")
+
+	// Close the server
+	cancel1()
+
+	mock.RotateCA(inst)
+
+	// Start the server with new certificates
+	cancel2 := mock.StartServerProxy(t, inst)
+	defer cancel2()
+
+	// Dial a second time. We expect no error on dial, but TLS error on read.
+	t.Log("Second attempt should fail...")
+	_, err := d.Dial(context.Background(), "my-project:my-region:my-instance")
+	if err != nil {
+		t.Log("Got error on dial as expected.", err)
+	} else {
+		t.Fatal("Want dial error, got no error")
+	}
+
+	// Dial again. This should occur after the refresh has completed.
+	t.Log("Third attempt...")
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"my-project:my-region:my-instance",
+	)
+	t.Log("Third attempt OK.")
+}
+
+type dialerTestLogger struct {
+	t *testing.T
+}
+
+func (l *dialerTestLogger) Debugf(f string, args ...interface{}) {
+	l.t.Logf(f, args...)
+}
