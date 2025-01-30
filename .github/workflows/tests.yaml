@@ -104,6 +104,7 @@ jobs:
           SQLSERVER_USER: "${{ steps.secrets.outputs.SQLSERVER_USER }}"
           SQLSERVER_PASS: "${{ steps.secrets.outputs.SQLSERVER_PASS }}"
           SQLSERVER_DB: "${{ steps.secrets.outputs.SQLSERVER_DB }}"
+          QUOTA_PROJECT: "${{ vars.GOOGLE_CLOUD_PROJECT }}"
         # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
         shell: bash
         run: |

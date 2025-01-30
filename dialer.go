@@ -254,6 +254,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		}
 
 		authClient, err := httptransport.NewClient(&httptransport.Options{
+			Headers:        headers,
 			Credentials:    cfg.authCredentials,
 			UniverseDomain: cfg.getClientUniverseDomain(),
 		})
