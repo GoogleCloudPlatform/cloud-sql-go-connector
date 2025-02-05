@@ -21,10 +21,10 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
-	"math/big"
+	"io"
+	"net"
 	"testing"
 	"time"
 
@@ -55,10 +55,13 @@ type FakeCSQLInstance struct {
 	pscEnabled   bool
 	signer       SignFunc
 	clientSigner ClientSignFunc
+	certExpiry   time.Time
 	// Key is the server's private key
 	Key *rsa.PrivateKey
 	// Cert is the server's certificate
 	Cert *x509.Certificate
+	// certs holds all of the certificates for this instance
+	certs *TLSCertificates
 }
 
 // String returns the instance connection name for the
@@ -67,14 +70,29 @@ func (f FakeCSQLInstance) String() string {
 	return fmt.Sprintf("%v:%v:%v", f.project, f.region, f.name)
 }
 
-func (f FakeCSQLInstance) signedCert() ([]byte, error) {
-	return f.signer(f.Cert, f.Key)
+// serverCACert returns the current server CA cert.
+func (f FakeCSQLInstance) serverCACert() ([]byte, error) {
+	if f.signer != nil {
+		return f.signer(f.Cert, f.Key)
+	}
+	if f.serverCAMode == "" || f.serverCAMode == "GOOGLE_MANAGED_INTERNAL_CA" {
+		// legacy server mode, return only the server cert
+		return toPEMFormat(f.certs.serverCert)
+	}
+	return toPEMFormat(f.certs.casServerCertificate, f.certs.serverIntermediateCaCert, f.certs.serverCaCert)
 }
 
 // ClientCert creates an ephemeral client certificate signed with the Cloud SQL
 // instance's private key. The return value is PEM encoded.
 func (f FakeCSQLInstance) ClientCert(pubKey *rsa.PublicKey) ([]byte, error) {
-	return f.clientSigner(f.Cert, f.Key, pubKey)
+	if f.clientSigner != nil {
+		c, err := f.clientSigner(f.Cert, f.Key, pubKey)
+		if err != nil {
+			return c, err
+		}
+		return c, nil
+	}
+	return f.certs.signWithClientKey(pubKey)
 }
 
 // FakeCSQLInstanceOption is a function that configures a FakeCSQLInstance.
@@ -111,7 +129,7 @@ func WithDNS(dns string) FakeCSQLInstanceOption {
 // WithCertExpiry sets the server certificate's expiration to t.
 func WithCertExpiry(t time.Time) FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
-		f.Cert.NotAfter = t
+		f.certExpiry = t
 	}
 }
 
@@ -184,28 +202,26 @@ func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceO
 // NewFakeCSQLInstanceWithSan returns a CloudSQLInst object for configuring
 // mocks, including SubjectAlternativeNames in the server certificate.
 func NewFakeCSQLInstanceWithSan(project, region, name string, sanDNSNames []string, opts ...FakeCSQLInstanceOption) FakeCSQLInstance {
-	// TODO: consider options for this?
-	key, cert, err := generateCerts(project, name, sanDNSNames)
-	if err != nil {
-		panic(err)
-	}
 
 	f := FakeCSQLInstance{
-		project:      project,
-		region:       region,
-		name:         name,
-		ipAddrs:      map[string]string{"PUBLIC": "0.0.0.0"},
-		DNSName:      "",
-		dbVersion:    "POSTGRES_12", // default of no particular importance
-		backendType:  "SECOND_GEN",
-		signer:       SelfSign,
-		clientSigner: SignWithClientKey,
-		Key:          key,
-		Cert:         cert,
+		project:     project,
+		region:      region,
+		name:        name,
+		ipAddrs:     map[string]string{"PUBLIC": "0.0.0.0"},
+		DNSName:     "",
+		dbVersion:   "POSTGRES_12", // default of no particular importance
+		backendType: "SECOND_GEN",
 	}
 	for _, o := range opts {
 		o(&f)
 	}
+
+	certs := newTLSCertificates(project, name, sanDNSNames, f.certExpiry)
+
+	f.Key = certs.serverKey
+	f.Cert = certs.serverCert
+	f.certs = certs
+
 	return f
 }
 
@@ -226,114 +242,21 @@ func SelfSign(c *x509.Certificate, k *rsa.PrivateKey) ([]byte, error) {
 	return certPEM.Bytes(), nil
 }
 
-// SignWithClientKey produces a PEM encoded certificate signed by the parent
-// certificate c using the server's private key and the client's public key.
-func SignWithClientKey(c *x509.Certificate, k *rsa.PrivateKey, clientKey *rsa.PublicKey) ([]byte, error) {
-	// Create a signed cert from the client's public key.
-	cert := &x509.Certificate{ // TODO: Validate this format vs API
-		SerialNumber: &big.Int{},
-		Subject: pkix.Name{
-			Country:      []string{"US"},
-			Organization: []string{"Google, Inc"},
-			CommonName:   "Google Cloud SQL Client",
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              c.NotAfter,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		BasicConstraintsValid: true,
-	}
-	certBytes, err := x509.CreateCertificate(rand.Reader, cert, c, clientKey, k)
-	if err != nil {
-		return nil, err
-	}
-	certPEM := new(bytes.Buffer)
-	err = pem.Encode(certPEM, &pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: certBytes,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return certPEM.Bytes(), nil
-}
-
 // GenerateCertWithCommonName produces a certificate signed by the Fake Cloud
 // SQL instance's CA with the specified common name cn.
 func GenerateCertWithCommonName(i FakeCSQLInstance, cn string) []byte {
-	cert := &x509.Certificate{
-		SerialNumber: &big.Int{},
-		Subject: pkix.Name{
-			CommonName: cn,
-		},
-		NotBefore: time.Now(),
-		NotAfter:  time.Now().AddDate(0, 0, 1),
-		IsCA:      true,
-	}
-	signed, err := x509.CreateCertificate(
-		rand.Reader, cert, i.Cert, &i.Key.PublicKey, i.Key)
-	if err != nil {
-		panic(err)
-	}
-	return signed
-}
-
-// generateCerts generates a private key, an X.509 certificate, and a TLS
-// certificate for a particular fake Cloud SQL database instance.
-func generateCerts(project, name string, dnsNames []string) (*rsa.PrivateKey, *x509.Certificate, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cert := &x509.Certificate{
-		SerialNumber: &big.Int{},
-		Subject: pkix.Name{
-			CommonName: fmt.Sprintf("%s:%s", project, name),
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(0, 0, 1),
-		IsCA:                  true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		BasicConstraintsValid: true,
-		DNSNames:              dnsNames,
-	}
-
-	return key, cert, nil
+	return i.certs.generateServerCertWithCn(cn).Raw
 }
 
 // StartServerProxy starts a fake server proxy and listens on the provided port
 // on all interfaces, configured with TLS as specified by the FakeCSQLInstance.
 // Callers should invoke the returned function to clean up all resources.
 func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
-	certBytes, err := x509.CreateCertificate(
-		rand.Reader, i.Cert, i.Cert, &i.Key.PublicKey, i.Key)
-	if err != nil {
-		t.Fatalf("failed to create certificate: %v", err)
-	}
 
-	caPEM := &bytes.Buffer{}
-	err = pem.Encode(caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
-	if err != nil {
-		t.Fatalf("pem.Encode: %v", err)
-	}
-
-	caKeyPEM := &bytes.Buffer{}
-	err = pem.Encode(caKeyPEM, &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(i.Key),
-	})
-	if err != nil {
-		t.Fatalf("pem.Encode: %v", err)
-	}
-
-	serverCert, err := tls.X509KeyPair(caPEM.Bytes(), caKeyPEM.Bytes())
-	if err != nil {
-		t.Fatalf("failed to create X.509 Key Pair: %v", err)
-	}
 	ln, err := tls.Listen("tcp", ":3307", &tls.Config{
-		Certificates: []tls.Certificate{serverCert},
+		Certificates: i.certs.serverChain(i.serverCAMode),
+		ClientCAs:    i.certs.clientCAPool(),
+		ClientAuth:   tls.RequireAndVerifyClientCert,
 	})
 	if err != nil {
 		t.Fatalf("failed to start listener: %v", err)
@@ -345,11 +268,24 @@ func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 			case <-ctx.Done():
 				return
 			default:
-				conn, err := ln.Accept()
-				if err != nil {
+				conn, aErr := ln.Accept()
+				if opErr, ok := aErr.(net.Error); ok {
+					if opErr.Timeout() {
+						continue
+					}
 					return
 				}
-				_, _ = conn.Write([]byte(i.name))
+				if aErr == io.EOF {
+					return
+				}
+				if aErr != nil {
+					t.Logf("Fake server accept error: %v", aErr)
+					return
+				}
+				_, wErr := conn.Write([]byte(i.name))
+				if wErr != nil {
+					t.Logf("Fake server write error: %v", wErr)
+				}
 				_ = conn.Close()
 			}
 		}
@@ -358,4 +294,14 @@ func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 		cancel()
 		_ = ln.Close()
 	}
+}
+
+// RotateCA rotates all CA certificates and keys.
+func RotateCA(inst FakeCSQLInstance) {
+	inst.certs.rotateCA()
+}
+
+// RotateClientCA rotates only client CA certificates and keys.
+func RotateClientCA(inst FakeCSQLInstance) {
+	inst.certs.rotateClientCA()
 }

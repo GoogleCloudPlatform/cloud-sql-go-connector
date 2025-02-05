@@ -112,19 +112,12 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 			ips = append(ips, &sqladmin.IpMapping{IpAddress: addr, Type: "PRIVATE"})
 		}
 	}
-	certBytes1, err := i.signedCert()
+
+	certBytes, err := i.serverCACert()
 	if err != nil {
 		panic(err)
 	}
-	certBytes := certBytes1
-	if i.serverCAMode == "GOOGLE_MANAGED_CAS_CA" {
-		// CAS instances return two CAs in the trust chain.
-		certBytes2, err := i.signedCert()
-		if err != nil {
-			panic(err)
-		}
-		certBytes = append(certBytes, certBytes2...)
-	}
+
 	db := &sqladmin.ConnectSettings{
 		BackendType:     i.backendType,
 		DatabaseVersion: i.dbVersion,
