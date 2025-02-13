@@ -2,8 +2,6 @@ module cloud.google.com/go/cloudsqlconn
 
 go 1.23
 
-toolchain go1.23.6
-
 require (
 	cloud.google.com/go/auth v0.14.1
 	cloud.google.com/go/auth/oauth2adapt v0.2.7
