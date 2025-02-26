@@ -31,8 +31,6 @@ import (
 var (
 	// "Cloud SQL MySQL instance connection name, in the form of 'project:region:instance'.
 	mysqlConnName = os.Getenv("MYSQL_CONNECTION_NAME")
-	// "Cloud SQL MySQL instance connection name, in the form of 'project:region:instance'.
-	mysqlIAMConnName = os.Getenv("MYSQL_IAM_CONNECTION_NAME")
 	// Name of database user.
 	mysqlUser = os.Getenv("MYSQL_USER")
 	// Name of database IAM user.
@@ -92,7 +90,7 @@ func TestMySQLDriver(t *testing.T) {
 			desc:         "auto IAM authn",
 			driverName:   "cloudsql-mysql-iam",
 			opts:         []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN()},
-			instanceName: mysqlIAMConnName,
+			instanceName: mysqlConnName,
 			user:         mysqlIAMUser,
 			password:     "password",
 		},
