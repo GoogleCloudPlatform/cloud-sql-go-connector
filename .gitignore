@@ -4,3 +4,29 @@
 
 # direnv
 .envrc
+test_results.txt
+.tools
+export MYSQL_CONNECTION_NAME=cloud-sql-connector-testing:us-central1:mysql-proxy-testing
+export MYSQL_USER=mysql-proxy-testing
+export MYSQL_PASS=nbfJwk9XENJauafSCBFSe2Ys
+export MYSQL_DB=proxy_testing
+export MYSQL_IAM_CONNECTION_NAME=cloud-sql-connector-testing:us-central1:mysql-proxy-testing
+export MYSQL_USER_IAM=cloudsql-proxy
+export POSTGRES_CONNECTION_NAME=cloud-sql-connector-testing:us-central1:postgres-proxy-testing
+export POSTGRES_IAM_CONNECTION_NAME=cloud-sql-connector-testing:us-central1:postgres-iam-test
+export POSTGRES_USER=postgres-proxy-testing
+export POSTGRES_USER_IAM=cloudsql-proxy@gh-13a715-cloudsql-proxy.iam
+export POSTGRES_PASS=7jYpd7z3L6szfhJAKLeMf8HH
+export POSTGRES_DB=proxy_testing
+export POSTGRES_CAS_CONNECTION_NAME=cloud-sql-connector-testing:us-central1:postgres-cas-test
+export POSTGRES_CAS_PASS=O%_I?MYF5pZS6YVg
+export POSTGRES_CUSTOMER_CAS_CONNECTION_NAME=cloud-sql-connector-testing:us-central1:postgres-customer-cas-test
+export POSTGRES_CUSTOMER_CAS_PASS=M3GP@@III8tO*Rp8
+export POSTGRES_CUSTOMER_CAS_PASS_VALID_DOMAIN_NAME=valid-san-test.csqlconnectortest.com
+export POSTGRES_CUSTOMER_CAS_PASS_INVALID_DOMAIN_NAME=invalid-san-test.csqlconnectortest.com
+export SQLSERVER_CONNECTION_NAME=cloud-sql-connector-testing:us-central1:sqlserver-proxy-testing
+export SQLSERVER_USER=sqlserver-proxy-testing
+export SQLSERVER_PASS=x886ZzmDgKGnKHVCrwUeYFKT
+export SQLSERVER_DB=proxy_testing
+export IMPERSONATED_USER=impersonated@cloud-sql-connector-testing.iam.gserviceaccount.com
+export QUOTA_PROJECT=hessjc-playground-01
