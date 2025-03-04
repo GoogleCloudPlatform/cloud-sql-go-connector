@@ -47,7 +47,7 @@ var (
 	postgresCustomerCASPass     = os.Getenv("POSTGRES_CUSTOMER_CAS_PASS")            // Password for the database user for customer CAS instances; be careful when entering a password on the command line (it may go into your terminal's history).
 	postgresDB                  = os.Getenv("POSTGRES_DB")                           // Name of the database to connect to.
 	postgresUserIAM             = os.Getenv("POSTGRES_USER_IAM")                     // Name of database IAM user.
-	project                     = os.Getenv("GOOGLE_CLOUD_PROJECT")                  // Name of the Google Cloud Platform project.
+	project                     = os.Getenv("QUOTA_PROJECT")                         // Name of the Google Cloud Platform project to use for quota and billing.
 )
 
 func requirePostgresVars(t *testing.T) {
@@ -71,7 +71,7 @@ func requirePostgresVars(t *testing.T) {
 	case postgresUserIAM:
 		t.Fatal("'POSTGRES_USER_IAM' env var not set")
 	case project:
-		t.Fatal("'GOOGLE_CLOUD_PROJECT' env var not set")
+		t.Fatal("'QUOTA_PROJECT' env var not set")
 	}
 }
 

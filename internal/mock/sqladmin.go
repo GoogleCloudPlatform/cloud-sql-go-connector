@@ -102,45 +102,41 @@ func (r *Request) matches(hR *http.Request) bool {
 //
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
 func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
-	var ips []*sqladmin.IpMapping
-	for ipType, addr := range i.ipAddrs {
-		if ipType == "PUBLIC" {
-			ips = append(ips, &sqladmin.IpMapping{IpAddress: addr, Type: "PRIMARY"})
-			continue
-		}
-		if ipType == "PRIVATE" {
-			ips = append(ips, &sqladmin.IpMapping{IpAddress: addr, Type: "PRIVATE"})
-		}
-	}
-	certBytes1, err := i.signedCert()
-	if err != nil {
-		panic(err)
-	}
-	certBytes := certBytes1
-	if i.serverCAMode == "GOOGLE_MANAGED_CAS_CA" {
-		// CAS instances return two CAs in the trust chain.
-		certBytes2, err := i.signedCert()
-		if err != nil {
-			panic(err)
-		}
-		certBytes = append(certBytes, certBytes2...)
-	}
-	db := &sqladmin.ConnectSettings{
-		BackendType:     i.backendType,
-		DatabaseVersion: i.dbVersion,
-		DnsName:         i.DNSName,
-		IpAddresses:     ips,
-		Region:          i.region,
-		ServerCaCert:    &sqladmin.SslCert{Cert: string(certBytes)},
-		PscEnabled:      i.pscEnabled,
-		ServerCaMode:    i.serverCAMode,
-	}
-
 	r := &Request{
 		reqMethod: http.MethodGet,
 		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s/connectSettings", i.project, i.name),
 		reqCt:     ct,
 		handle: func(resp http.ResponseWriter, _ *http.Request) {
+			// Calculate the response when the request occurs the response contains
+			// up-to-date data stored in the FakeCSQLInstance.
+			// This is especially important for the i.serverCACert().
+			var ips []*sqladmin.IpMapping
+			for ipType, addr := range i.ipAddrs {
+				if ipType == "PUBLIC" {
+					ips = append(ips, &sqladmin.IpMapping{IpAddress: addr, Type: "PRIMARY"})
+					continue
+				}
+				if ipType == "PRIVATE" {
+					ips = append(ips, &sqladmin.IpMapping{IpAddress: addr, Type: "PRIVATE"})
+				}
+			}
+
+			certBytes, err := i.serverCACert()
+			if err != nil {
+				panic(err)
+			}
+
+			db := &sqladmin.ConnectSettings{
+				BackendType:     i.backendType,
+				DatabaseVersion: i.dbVersion,
+				DnsName:         i.DNSName,
+				IpAddresses:     ips,
+				Region:          i.region,
+				ServerCaCert:    &sqladmin.SslCert{Cert: string(certBytes)},
+				PscEnabled:      i.pscEnabled,
+				ServerCaMode:    i.serverCAMode,
+			}
+
 			b, err := db.MarshalJSON()
 			if err != nil {
 				http.Error(resp, err.Error(), http.StatusInternalServerError)

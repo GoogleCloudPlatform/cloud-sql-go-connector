@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.15.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.14.2...v1.15.0) (2025-02-12)
+
+
+### Features
+
+* add support for Go 1.24 and drop Go 1.22 ([#942](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/942)) ([e10fbd2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/e10fbd2f790bc17fc7eb72ea785b11efddfb451f))
+
+
+### Bug Fixes
+
+* Refresh client cert when CA rotation ([#934](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/934)) ([c22e2d4](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/c22e2d4e861df7cf317af16c1015d40811dae3d8)), closes [#932](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/932)
+
+## [1.14.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.14.1...v1.14.2) (2025-01-30)
+
+
+### Bug Fixes
+
+* pass headers to transport ([#928](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/928)) ([08be3ab](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/08be3aba5c5d2a6a69c370e1a2772b2f73435a1f))
+
 ## [1.14.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.14.0...v1.14.1) (2025-01-23)
 
 
