@@ -102,6 +102,14 @@ func (r *Request) matches(hR *http.Request) bool {
 //
 // https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
 func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
+	return InstanceGetWithDnsNamesSuccess(i, ct, false)
+}
+
+// InstanceGetSuccess returns a Request that responds to the `instance.get` SQL Admin
+// endpoint. It responds with a "StatusOK" and a DatabaseInstance object.
+//
+// https://cloud.google.com/sql/docs/mysql/admin-api/rest/v1beta4/instances/get
+func InstanceGetWithDnsNamesSuccess(i FakeCSQLInstance, ct int, useLegacyDns bool) *Request {
 	r := &Request{
 		reqMethod: http.MethodGet,
 		reqPath:   fmt.Sprintf("/sql/v1beta4/projects/%s/instances/%s/connectSettings", i.project, i.name),
@@ -125,11 +133,23 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 			if err != nil {
 				panic(err)
 			}
+			var dnsNames []*sqladmin.DnsNameMapping
+			dnsName := ""
+			if useLegacyDns {
+				dnsName = i.DNSName
+			} else {
+				dnsNames = []*sqladmin.DnsNameMapping{{
+					Name:           i.DNSName,
+					ConnectionType: "PRIVATE_SERVICE_CONNECT",
+					DnsScope:       "INSTANCE",
+				}}
+			}
 
 			db := &sqladmin.ConnectSettings{
 				BackendType:     i.backendType,
 				DatabaseVersion: i.dbVersion,
-				DnsName:         i.DNSName,
+				DnsNames:        dnsNames,
+				DnsName:         dnsName,
 				IpAddresses:     ips,
 				Region:          i.region,
 				ServerCaCert:    &sqladmin.SslCert{Cert: string(certBytes)},

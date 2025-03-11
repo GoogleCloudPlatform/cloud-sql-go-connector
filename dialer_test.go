@@ -1104,35 +1104,69 @@ func TestDialerUpdatesAutomaticallyAfterDnsChange(t *testing.T) {
 
 func TestDialerChecksSubjectAlternativeNameAndSucceeds(t *testing.T) {
 
-	// Create an instance with custom SAN 'db.example.com'
-	inst := mock.NewFakeCSQLInstanceWithSan(
-		"my-project", "my-region", "my-instance", []string{"db.example.com"},
-		mock.WithDNS("db.example.com"),
-		mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
-	)
+	tcs := []struct {
+		name   string
+		legacy bool
+		icn    string
+		dn     string
+	}{{
+		name:   "domainName DnsName older",
+		legacy: true,
+		icn:    "my-project:my-region:my-instance",
+	}, {
+		name:   "domainName DnsNames newer",
+		legacy: true,
+		icn:    "my-project:my-region:my-instance",
+	},
+		{
+			name:   "InstanceConnectionName DnsName older",
+			legacy: true,
+			icn:    "my-project:my-region:my-instance",
+			dn:     "db.example.com",
+		}, {
+			name:   "InstanceConnectionName DnsNames newer",
+			legacy: true,
+			icn:    "my-project:my-region:my-instance",
+			dn:     "db.example.com",
+		}}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create an instance with custom SAN 'db.example.com'
+			inst := mock.NewFakeCSQLInstanceWithSan(
+				"my-project", "my-region", "my-instance", []string{"db.example.com"},
+				mock.WithDNS("db.example.com"),
+				mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
+			)
 
-	wantName, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
-	d := setupDialer(t, setupConfig{
-		testInstance: inst,
-		reqs: []*mock.Request{
-			mock.InstanceGetSuccess(inst, 1),
-			mock.CreateEphemeralSuccess(inst, 1),
-		},
-		dialerOptions: []Option{
-			WithTokenSource(mock.EmptyTokenSource{}),
-			WithResolver(&fakeResolver{
-				entries: map[string]instance.ConnName{
-					"db.example.com": wantName,
+			wantName, _ := instance.ParseConnNameWithDomainName(tc.icn, tc.dn)
+			d := setupDialer(t, setupConfig{
+				testInstance: inst,
+				reqs: []*mock.Request{
+					mock.InstanceGetWithDnsNamesSuccess(inst, 1, tc.legacy),
+					mock.CreateEphemeralSuccess(inst, 1),
 				},
-			}),
-		},
-	})
+				dialerOptions: []Option{
+					WithTokenSource(mock.EmptyTokenSource{}),
+					WithResolver(&fakeResolver{
+						entries: map[string]instance.ConnName{
+							"db.example.com":                   wantName,
+							"my-project:my-region:my-instance": wantName,
+						},
+					}),
+				},
+			})
+			dnOrIcn := tc.icn
+			if tc.dn != "" {
+				dnOrIcn = tc.dn
+			}
 
-	// Dial db.example.com
-	testSuccessfulDial(
-		context.Background(), t, d,
-		"db.example.com",
-	)
+			// Dial db.example.com
+			testSuccessfulDial(
+				context.Background(), t, d,
+				dnOrIcn,
+			)
+		})
+	}
 }
 
 func TestDialerChecksSubjectAlternativeNameAndFails(t *testing.T) {
