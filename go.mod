@@ -17,7 +17,7 @@ require (
 	golang.org/x/oauth2 v0.28.0
 	golang.org/x/time v0.11.0
 	google.golang.org/api v0.224.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250227231956-55c901821b1e
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250311190419-81fb87f6b8bf
 	google.golang.org/grpc v1.71.0
 )
 
