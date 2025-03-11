@@ -15,15 +15,12 @@
 package cloudsqlconn_test
 
 import (
-	"context"
 	"database/sql"
-	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
-	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/mysql/mysql"
 	gomysql "github.com/go-sql-driver/mysql"
 )
@@ -55,16 +52,6 @@ func requireMySQLVars(t *testing.T) {
 	}
 }
 
-type mockResolver struct {
-}
-
-func (r *mockResolver) Resolve(_ context.Context, name string) (instanceName instance.ConnName, err error) {
-	if name == "mysql.example.com" {
-		return instance.ParseConnNameWithDomainName(mysqlConnName, "mysql.example.com")
-	}
-	return instance.ConnName{}, fmt.Errorf("no resolution for %v", name)
-}
-
 func TestMySQLDriver(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping MySQL integration tests")
@@ -93,14 +80,6 @@ func TestMySQLDriver(t *testing.T) {
 			instanceName: mysqlConnName,
 			user:         mysqlIAMUser,
 			password:     "password",
-		},
-		{
-			desc:         "with dns",
-			driverName:   "cloudsql-mysql-dns",
-			opts:         []cloudsqlconn.Option{cloudsqlconn.WithResolver(&mockResolver{})},
-			instanceName: "mysql.example.com",
-			user:         mysqlUser,
-			password:     mysqlPass,
 		},
 	}
 

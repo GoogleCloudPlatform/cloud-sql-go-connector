@@ -970,6 +970,8 @@ func (r *fakeResolver) Resolve(_ context.Context, name string) (instance.ConnNam
 func TestDialerSuccessfullyDialsDnsTxtRecord(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance(
 		"my-project", "my-region", "my-instance",
+		mock.WithDNSMapping("db.example.com", "INSTANCE", "CUSTOM_SAN"),
+		mock.WithDNSMapping("db2.example.com", "INSTANCE", "CUSTOM_SAN"),
 	)
 	wantName, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
 	wantName2, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db2.example.com")
@@ -1046,9 +1048,11 @@ func TestDialerUpdatesAutomaticallyAfterDnsChange(t *testing.T) {
 	// SRV record and connect to the correct instance.
 	inst := mock.NewFakeCSQLInstance(
 		"my-project", "my-region", "my-instance",
+		mock.WithDNS("update.example.com"),
 	)
 	inst2 := mock.NewFakeCSQLInstance(
 		"my-project", "my-region", "my-instance2",
+		mock.WithDNS("update.example.com"),
 	)
 	r := &changingResolver{
 		stage: new(int32),
@@ -1104,42 +1108,85 @@ func TestDialerUpdatesAutomaticallyAfterDnsChange(t *testing.T) {
 
 func TestDialerChecksSubjectAlternativeNameAndSucceeds(t *testing.T) {
 
-	// Create an instance with custom SAN 'db.example.com'
-	inst := mock.NewFakeCSQLInstanceWithSan(
-		"my-project", "my-region", "my-instance", []string{"db.example.com"},
-		mock.WithDNS("db.example.com"),
-		mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
-	)
+	tcs := []struct {
+		name   string
+		legacy bool
+		icn    string
+		dn     string
+	}{{
+		name:   "domainName DnsName older",
+		legacy: true,
+		icn:    "my-project:my-region:my-instance",
+	}, {
+		name:   "domainName DnsNames newer",
+		legacy: false,
+		icn:    "my-project:my-region:my-instance",
+	},
+		{
+			name:   "InstanceConnectionName DnsName older",
+			legacy: true,
+			icn:    "my-project:my-region:my-instance",
+			dn:     "db.example.com",
+		}, {
+			name:   "InstanceConnectionName DnsNames newer",
+			legacy: false,
+			icn:    "my-project:my-region:my-instance",
+			dn:     "db.example.com",
+		}}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create an instance with custom SAN 'db.example.com'
+			var inst mock.FakeCSQLInstance
+			if tc.legacy || tc.dn == "" {
+				inst = mock.NewFakeCSQLInstance(
+					"my-project", "my-region", "my-instance",
+					mock.WithDNS("db.example.com"),
+					mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
+				)
+			} else {
+				inst = mock.NewFakeCSQLInstance(
+					"my-project", "my-region", "my-instance",
+					mock.WithDNSMapping("db.example.com", "INSTANCE", "CUSTOM_SAN"),
+					mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
+				)
+			}
 
-	wantName, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
-	d := setupDialer(t, setupConfig{
-		testInstance: inst,
-		reqs: []*mock.Request{
-			mock.InstanceGetSuccess(inst, 1),
-			mock.CreateEphemeralSuccess(inst, 1),
-		},
-		dialerOptions: []Option{
-			WithTokenSource(mock.EmptyTokenSource{}),
-			WithResolver(&fakeResolver{
-				entries: map[string]instance.ConnName{
-					"db.example.com": wantName,
+			wantName, _ := instance.ParseConnNameWithDomainName(tc.icn, tc.dn)
+			d := setupDialer(t, setupConfig{
+				testInstance: inst,
+				reqs: []*mock.Request{
+					mock.InstanceGetSuccess(inst, 1),
+					mock.CreateEphemeralSuccess(inst, 1),
 				},
-			}),
-		},
-	})
+				dialerOptions: []Option{
+					WithTokenSource(mock.EmptyTokenSource{}),
+					WithResolver(&fakeResolver{
+						entries: map[string]instance.ConnName{
+							"db.example.com":                   wantName,
+							"my-project:my-region:my-instance": wantName,
+						},
+					}),
+				},
+			})
+			dnOrIcn := tc.icn
+			if tc.dn != "" {
+				dnOrIcn = tc.dn
+			}
 
-	// Dial db.example.com
-	testSuccessfulDial(
-		context.Background(), t, d,
-		"db.example.com",
-	)
+			// Dial db.example.com
+			testSuccessfulDial(
+				context.Background(), t, d,
+				dnOrIcn,
+			)
+		})
+	}
 }
 
 func TestDialerChecksSubjectAlternativeNameAndFails(t *testing.T) {
 
 	// Create an instance with custom SAN 'db.example.com'
-	inst := mock.NewFakeCSQLInstanceWithSan(
-		"my-project", "my-region", "my-instance", []string{"db.example.com"},
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
 		mock.WithDNS("db.example.com"),
 		mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
 	)
@@ -1207,8 +1254,8 @@ func TestDialerRefreshesAfterRotateCACerts(t *testing.T) {
 	}
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
-			inst := mock.NewFakeCSQLInstanceWithSan(
-				"my-project", "my-region", "my-instance", []string{"db.example.com"},
+			inst := mock.NewFakeCSQLInstance(
+				"my-project", "my-region", "my-instance",
 				mock.WithDNS("db.example.com"),
 				mock.WithServerCAMode("GOOGLE_MANAGED_CAS_CA"),
 			)

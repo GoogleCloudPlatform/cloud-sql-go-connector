@@ -246,9 +246,9 @@ func (ct *TLSCertificates) generateServerCertWithCn(cn string) *x509.Certificate
 // serverChain creates a []tls.Certificate for use with a TLS server socket.
 // serverCAMode controls whether this returns a legacy or CAS server
 // certificate.
-func (ct *TLSCertificates) serverChain(serverCAMode string) []tls.Certificate {
+func (ct *TLSCertificates) serverChain(useStandardTLSValidation bool) []tls.Certificate {
 	// if this server is running in legacy mode
-	if serverCAMode == "" || serverCAMode == "GOOGLE_MANAGED_INTERNAL_CA" {
+	if !useStandardTLSValidation {
 		return []tls.Certificate{{
 			Certificate: [][]byte{ct.serverCert.Raw, ct.serverCaCert.Raw},
 			PrivateKey:  ct.serverKey,
