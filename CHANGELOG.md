@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.15.0...v1.16.0) (2025-03-14)
+
+
+### Features
+
+* add domain name validation ([#925](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/925)) ([986152f](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/986152ff1b733ad70b43bad1d22a450376ce5021))
+
 ## [1.15.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.14.2...v1.15.0) (2025-02-12)
 
 
