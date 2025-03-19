@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
-	"cloud.google.com/go/cloudsqlconn/instance"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -38,16 +37,18 @@ import (
 )
 
 var (
-	postgresConnName            = os.Getenv("POSTGRES_CONNECTION_NAME")              // "Cloud SQL Postgres instance connection name, in the form of 'project:region:instance'.
-	postgresCASConnName         = os.Getenv("POSTGRES_CAS_CONNECTION_NAME")          // "Cloud SQL Postgres CAS instance connection name, in the form of 'project:region:instance'.
-	postgresCustomerCASConnName = os.Getenv("POSTGRES_CUSTOMER_CAS_CONNECTION_NAME") // "Cloud SQL Postgres Customer CAS instance connection name, in the form of 'project:region:instance'.
-	postgresUser                = os.Getenv("POSTGRES_USER")                         // Name of database user.
-	postgresPass                = os.Getenv("POSTGRES_PASS")                         // Password for the database user; be careful when entering a password on the command line (it may go into your terminal's history).
-	postgresCASPass             = os.Getenv("POSTGRES_CAS_PASS")                     // Password for the database user for CAS instances; be careful when entering a password on the command line (it may go into your terminal's history).
-	postgresCustomerCASPass     = os.Getenv("POSTGRES_CUSTOMER_CAS_PASS")            // Password for the database user for customer CAS instances; be careful when entering a password on the command line (it may go into your terminal's history).
-	postgresDB                  = os.Getenv("POSTGRES_DB")                           // Name of the database to connect to.
-	postgresUserIAM             = os.Getenv("POSTGRES_USER_IAM")                     // Name of database IAM user.
-	project                     = os.Getenv("QUOTA_PROJECT")                         // Name of the Google Cloud Platform project to use for quota and billing.
+	postgresConnName             = os.Getenv("POSTGRES_CONNECTION_NAME")                  // "Cloud SQL Postgres instance connection name, in the form of 'project:region:instance'.
+	postgresCASConnName          = os.Getenv("POSTGRES_CAS_CONNECTION_NAME")              // "Cloud SQL Postgres CAS instance connection name, in the form of 'project:region:instance'.
+	postgresCustomerCASConnName  = os.Getenv("POSTGRES_CUSTOMER_CAS_CONNECTION_NAME")     // "Cloud SQL Postgres Customer CAS instance connection name, in the form of 'project:region:instance'.
+	postgresUser                 = os.Getenv("POSTGRES_USER")                             // Name of database user.
+	postgresPass                 = os.Getenv("POSTGRES_PASS")                             // Password for the database user; be careful when entering a password on the command line (it may go into your terminal's history).
+	postgresCASPass              = os.Getenv("POSTGRES_CAS_PASS")                         // Password for the database user for CAS instances; be careful when entering a password on the command line (it may go into your terminal's history).
+	postgresCustomerCASPass      = os.Getenv("POSTGRES_CUSTOMER_CAS_PASS")                // Password for the database user for customer CAS instances; be careful when entering a password on the command line (it may go into your terminal's history).
+	postgresDB                   = os.Getenv("POSTGRES_DB")                               // Name of the database to connect to.
+	postgresUserIAM              = os.Getenv("POSTGRES_USER_IAM")                         // Name of database IAM user.
+	project                      = os.Getenv("QUOTA_PROJECT")                             // Name of the Google Cloud Platform project to use for quota and billing.
+	postgresSANDomainName        = os.Getenv("POSTGRES_CUSTOMER_CAS_DOMAIN_NAME")         // Cloud SQL Postgres CAS domain name that is an instance Custom SAN of the postgresSANConnName instance.
+	postgresSANInvalidDomainName = os.Getenv("POSTGRES_CUSTOMER_CAS_INVALID_DOMAIN_NAME") // Cloud SQL Postgres CAS domain name that IS NOT an instance Custom SAN of the postgresSANConnName instance.
 )
 
 func requirePostgresVars(t *testing.T) {
@@ -72,6 +73,10 @@ func requirePostgresVars(t *testing.T) {
 		t.Fatal("'POSTGRES_USER_IAM' env var not set")
 	case project:
 		t.Fatal("'QUOTA_PROJECT' env var not set")
+	case postgresSANDomainName:
+		t.Fatal("'POSTGRES_SAN_DOMAIN_NAME' env var not set")
+	case postgresSANInvalidDomainName:
+		t.Fatal("'POSTGRES_SAN_INVALID_DOMAIN_NAME' env var not set")
 	}
 }
 
@@ -267,14 +272,105 @@ func TestPostgresCustomerCASConnect(t *testing.T) {
 	t.Log(now)
 }
 
-type pgMockResolver struct {
+func TestPostgresSANDomainConnect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
+	requirePostgresVars(t)
+
+	ctx := context.Background()
+
+	// Configure the driver to connect to the database
+	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresCustomerCASPass, "postgres")
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("failed to parse pgx config: %v", err)
+	}
+
+	// Create a new dialer with any options
+	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithDNSResolver())
+
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+
+	// call cleanup when you're done with the database connection to close dialer
+	cleanup := func() error { return d.Close() }
+
+	// Tell the driver to use the Cloud SQL Go Connector to create connections
+	// postgresConnName takes the form of 'project:region:instance'.
+	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+		return d.Dial(ctx, postgresSANDomainName)
+	}
+
+	// Interact with the driver directly as you normally would
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("failed to create pool: %s", err)
+	}
+	// ... etc
+
+	defer cleanup()
+	defer pool.Close()
+
+	var now time.Time
+	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+	if err != nil {
+		t.Fatalf("QueryRow failed: %s", err)
+	}
+	t.Log(now)
 }
 
-func (r *pgMockResolver) Resolve(_ context.Context, name string) (instanceName instance.ConnName, err error) {
-	if name == "pg.example.com" {
-		return instance.ParseConnNameWithDomainName(postgresConnName, "pg.example.com")
+func TestPostgresSANBadDomainCausesConnectError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
 	}
-	return instance.ConnName{}, fmt.Errorf("no resolution for %v", name)
+	requirePostgresVars(t)
+
+	ctx := context.Background()
+
+	// Configure the driver to connect to the database
+	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresCustomerCASPass, "postgres")
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("failed to parse pgx config: %v", err)
+	}
+
+	// Create a new dialer with any options
+	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithDNSResolver())
+
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+
+	// call cleanup when you're done with the database connection to close dialer
+	cleanup := func() error { return d.Close() }
+
+	// Tell the driver to use the Cloud SQL Go Connector to create connections
+	// postgresConnName takes the form of 'project:region:instance'.
+	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+		return d.Dial(ctx, postgresSANInvalidDomainName)
+	}
+
+	// Interact with the driver directly as you normally would
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("failed to create pool: %s", err)
+	}
+	// ... etc
+
+	defer cleanup()
+	defer pool.Close()
+
+	var now time.Time
+	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+	if err == nil {
+		t.Fatal("Want error, got invalid error")
+	}
+	if !strings.Contains(fmt.Sprint(err), "Dial error: handshake failed") {
+		t.Fatal("Want error 'Dial error: handshake failed'.  got: ", err)
+	}
+	t.Log(now)
 }
 
 func TestPostgresPgxPoolConnectDomainName(t *testing.T) {
@@ -282,19 +378,19 @@ func TestPostgresPgxPoolConnectDomainName(t *testing.T) {
 		t.Skip("skipping Postgres integration tests")
 	}
 	requirePostgresVars(t)
-	pgxv5.RegisterDriver("pgxpool-connect")
+	pgxv5.RegisterDriver("pgxpool-connect", cloudsqlconn.WithDNSResolver())
 
 	ctx := context.Background()
 
 	// Configure the driver to connect to the database
-	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDB)
+	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresCustomerCASPass, postgresDB)
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("failed to parse pgx config: %v", err)
 	}
 
 	// Create a new dialer with any options
-	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithResolver(&pgMockResolver{}))
+	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithDNSResolver())
 	if err != nil {
 		t.Fatalf("failed to init Dialer: %v", err)
 	}
@@ -306,7 +402,7 @@ func TestPostgresPgxPoolConnectDomainName(t *testing.T) {
 	// Tell the driver to use the Cloud SQL Go Connector to create connections
 	// postgresConnName takes the form of 'project:region:instance'.
 	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
-		return d.Dial(ctx, "pg.example.com")
+		return d.Dial(ctx, postgresSANDomainName)
 	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, config)
@@ -443,7 +539,7 @@ func TestPostgresV5Hook(t *testing.T) {
 		{
 			driver: "cloudsql-postgres-v5-dns",
 			source: fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
-				"pg.example.com", postgresUser, postgresPass, postgresDB),
+				postgresSANDomainName, postgresUser, postgresCustomerCASPass, postgresDB),
 			IAMAuthN: false,
 			resolver: true,
 		},
@@ -464,7 +560,7 @@ func TestPostgresV5Hook(t *testing.T) {
 		if tc.IAMAuthN {
 			pgxv5.RegisterDriver(tc.driver, cloudsqlconn.WithIAMAuthN())
 		} else if tc.resolver {
-			pgxv5.RegisterDriver(tc.driver, cloudsqlconn.WithResolver(&pgMockResolver{}))
+			pgxv5.RegisterDriver(tc.driver, cloudsqlconn.WithDNSResolver())
 		} else {
 			pgxv5.RegisterDriver(tc.driver)
 		}
