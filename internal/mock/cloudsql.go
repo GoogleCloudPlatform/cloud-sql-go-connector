@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 // EmptyTokenSource is an Oauth2.TokenSource that returns empty tokens.
@@ -48,14 +49,20 @@ type FakeCSQLInstance struct {
 	name      string
 	dbVersion string
 	// ipAddrs is a map of IP type (PUBLIC or PRIVATE) to IP address.
-	ipAddrs      map[string]string
-	backendType  string
-	DNSName      string
-	serverCAMode string
-	pscEnabled   bool
-	signer       SignFunc
-	clientSigner ClientSignFunc
-	certExpiry   time.Time
+	ipAddrs     map[string]string
+	backendType string
+
+	// DNSName is the legacy field
+	// DNSNames supersedes DNSName.
+	DNSName  string
+	DNSNames []*sqladmin.DnsNameMapping
+
+	useStandardTLSValidation bool
+	serverCAMode             string
+	pscEnabled               bool
+	signer                   SignFunc
+	clientSigner             ClientSignFunc
+	certExpiry               time.Time
 	// Key is the server's private key
 	Key *rsa.PrivateKey
 	// Cert is the server's certificate
@@ -75,7 +82,7 @@ func (f FakeCSQLInstance) serverCACert() ([]byte, error) {
 	if f.signer != nil {
 		return f.signer(f.Cert, f.Key)
 	}
-	if f.serverCAMode == "" || f.serverCAMode == "GOOGLE_MANAGED_INTERNAL_CA" {
+	if !f.useStandardTLSValidation {
 		// legacy server mode, return only the server cert
 		return toPEMFormat(f.certs.serverCert)
 	}
@@ -123,6 +130,17 @@ func WithPSC(enabled bool) FakeCSQLInstanceOption {
 func WithDNS(dns string) FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
 		f.DNSName = dns
+	}
+}
+
+// WithDNSMapping adds the DnsNames records
+func WithDNSMapping(name, dnsScope, connectionType string) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.DNSNames = append(f.DNSNames,
+			&sqladmin.DnsNameMapping{
+				Name:           name,
+				DnsScope:       dnsScope,
+				ConnectionType: connectionType})
 	}
 }
 
@@ -196,12 +214,6 @@ func WithServerCAMode(serverCAMode string) FakeCSQLInstanceOption {
 
 // NewFakeCSQLInstance returns a CloudSQLInst object for configuring mocks.
 func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceOption) FakeCSQLInstance {
-	return NewFakeCSQLInstanceWithSan(project, region, name, nil, opts...)
-}
-
-// NewFakeCSQLInstanceWithSan returns a CloudSQLInst object for configuring
-// mocks, including SubjectAlternativeNames in the server certificate.
-func NewFakeCSQLInstanceWithSan(project, region, name string, sanDNSNames []string, opts ...FakeCSQLInstanceOption) FakeCSQLInstance {
 
 	f := FakeCSQLInstance{
 		project:     project,
@@ -215,8 +227,18 @@ func NewFakeCSQLInstanceWithSan(project, region, name string, sanDNSNames []stri
 	for _, o := range opts {
 		o(&f)
 	}
+	sanNames := make([]string, 0, 5)
+	if f.DNSName != "" {
+		sanNames = append(sanNames, f.DNSName)
+	}
+	for _, dnm := range f.DNSNames {
+		sanNames = append(sanNames, dnm.Name)
+	}
+	if len(sanNames) > 0 {
+		f.useStandardTLSValidation = true
+	}
 
-	certs := newTLSCertificates(project, name, sanDNSNames, f.certExpiry)
+	certs := newTLSCertificates(project, name, sanNames, f.certExpiry)
 
 	f.Key = certs.serverKey
 	f.Cert = certs.serverCert
@@ -254,7 +276,7 @@ func GenerateCertWithCommonName(i FakeCSQLInstance, cn string) []byte {
 func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 
 	ln, err := tls.Listen("tcp", ":3307", &tls.Config{
-		Certificates: i.certs.serverChain(i.serverCAMode),
+		Certificates: i.certs.serverChain(i.useStandardTLSValidation),
 		ClientCAs:    i.certs.clientCAPool(),
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 	})
