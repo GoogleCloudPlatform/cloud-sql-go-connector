@@ -60,8 +60,6 @@ availableSecrets:
     env: 'SQLSERVER_PASS'
   - versionName: 'projects/$PROJECT_ID/secrets/SQLSERVER_DB/versions/latest'
     env: 'SQLSERVER_DB'
-  - versionName: 'projects/$PROJECT_ID/secrets/SQLSERVER_DB/versions/latest'
-    env: 'SQLSERVER_DB'
 options:
   dynamicSubstitutions: true
   pool:
