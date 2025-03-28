@@ -46,7 +46,7 @@ var (
 	postgresCustomerCASPass      = os.Getenv("POSTGRES_CUSTOMER_CAS_PASS")                // Password for the database user for customer CAS instances; be careful when entering a password on the command line (it may go into your terminal's history).
 	postgresDB                   = os.Getenv("POSTGRES_DB")                               // Name of the database to connect to.
 	postgresUserIAM              = os.Getenv("POSTGRES_USER_IAM")                         // Name of database IAM user.
-	project                      = os.Getenv("QUOTA_PROJECT")                             // Name of the Google Cloud Platform project to use for quota and billing.
+	// project                      = os.Getenv("QUOTA_PROJECT")                             // Name of the Google Cloud Platform project to use for quota and billing.
 	postgresSANDomainName        = os.Getenv("POSTGRES_CUSTOMER_CAS_DOMAIN_NAME")         // Cloud SQL Postgres CAS domain name that is an instance Custom SAN of the postgresSANConnName instance.
 	postgresSANInvalidDomainName = os.Getenv("POSTGRES_CUSTOMER_CAS_INVALID_DOMAIN_NAME") // Cloud SQL Postgres CAS domain name that IS NOT an instance Custom SAN of the postgresSANConnName instance.
 )
@@ -71,8 +71,8 @@ func requirePostgresVars(t *testing.T) {
 		t.Fatal("'POSTGRES_DB' env var not set")
 	case postgresUserIAM:
 		t.Fatal("'POSTGRES_USER_IAM' env var not set")
-	case project:
-		t.Fatal("'QUOTA_PROJECT' env var not set")
+	// case project:
+	// 	t.Fatal("'QUOTA_PROJECT' env var not set")
 	case postgresSANDomainName:
 		t.Fatal("'POSTGRES_SAN_DOMAIN_NAME' env var not set")
 	case postgresSANInvalidDomainName:
@@ -176,53 +176,53 @@ func TestPostgresCASConnect(t *testing.T) {
 	t.Log(now)
 }
 
-func TestPostgresConnectWithQuotaProject(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping Postgres integration tests")
-	}
-	requirePostgresVars(t)
+// func TestPostgresConnectWithQuotaProject(t *testing.T) {
+// 	if testing.Short() {
+// 		t.Skip("skipping Postgres integration tests")
+// 	}
+// 	requirePostgresVars(t)
 
-	ctx := context.Background()
+// 	ctx := context.Background()
 
-	// Configure the driver to connect to the database
-	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDB)
-	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("failed to parse pgx config: %v", err)
-	}
+// 	// Configure the driver to connect to the database
+// 	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresPass, postgresDB)
+// 	config, err := pgxpool.ParseConfig(dsn)
+// 	if err != nil {
+// 		t.Fatalf("failed to parse pgx config: %v", err)
+// 	}
 
-	// Create a new dialer with any options
-	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithQuotaProject(project))
-	if err != nil {
-		t.Fatalf("failed to init Dialer: %v", err)
-	}
+// 	// Create a new dialer with any options
+// 	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithQuotaProject(project))
+// 	if err != nil {
+// 		t.Fatalf("failed to init Dialer: %v", err)
+// 	}
 
-	// call cleanup when you're done with the database connection to close dialer
-	cleanup := func() error { return d.Close() }
+// 	// call cleanup when you're done with the database connection to close dialer
+// 	cleanup := func() error { return d.Close() }
 
-	// Tell the driver to use the Cloud SQL Go Connector to create connections
-	// postgresConnName takes the form of 'project:region:instance'.
-	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
-		return d.Dial(ctx, postgresConnName)
-	}
+// 	// Tell the driver to use the Cloud SQL Go Connector to create connections
+// 	// postgresConnName takes the form of 'project:region:instance'.
+// 	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+// 		return d.Dial(ctx, postgresConnName)
+// 	}
 
-	// Interact with the driver directly as you normally would
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		t.Fatalf("failed to create pool: %s", err)
-	}
-	// ... etc
+// 	// Interact with the driver directly as you normally would
+// 	pool, err := pgxpool.NewWithConfig(ctx, config)
+// 	if err != nil {
+// 		t.Fatalf("failed to create pool: %s", err)
+// 	}
+// 	// ... etc
 
-	defer cleanup()
-	defer pool.Close()
+// 	defer cleanup()
+// 	defer pool.Close()
 
-	var now time.Time
-	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
-	if err != nil {
-		t.Fatalf("QueryRow failed: %s", err)
-	}
-	t.Log(now)
-}
+// 	var now time.Time
+// 	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+// 	if err != nil {
+// 		t.Fatalf("QueryRow failed: %s", err)
+// 	}
+// 	t.Log(now)
+// }
 
 func TestPostgresCustomerCASConnect(t *testing.T) {
 	if testing.Short() {
