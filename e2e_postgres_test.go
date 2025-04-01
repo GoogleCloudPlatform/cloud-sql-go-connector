@@ -29,8 +29,6 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv5"
