@@ -686,6 +686,11 @@ func TestPostgresAuthentication(t *testing.T) {
 			opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
 		},
 	}
+	if os.Getenv("IP_TYPE") == "private" {
+		tcs = tcs[len(tcs)-2:]
+		t.Log("IP_TYPE is set, only testing with credentials file and credentials JSON")
+	}
+
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ctx := context.Background()
