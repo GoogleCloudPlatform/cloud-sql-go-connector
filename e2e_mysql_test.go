@@ -15,7 +15,9 @@
 package cloudsqlconn_test
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -52,6 +54,14 @@ func requireMySQLVars(t *testing.T) {
 	}
 }
 
+func getDialerOptions() []cloudsqlconn.Option {
+	var opts []cloudsqlconn.Option
+	if os.Getenv("IP_TYPE") == "private" {
+		opts = append(opts, cloudsqlconn.WithPrivateIP())
+	}
+	return opts
+}
+
 func TestMySQLDriver(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping MySQL integration tests")
@@ -68,7 +78,7 @@ func TestMySQLDriver(t *testing.T) {
 		{
 			desc:         "default options",
 			driverName:   "cloudsql-mysql",
-			opts:         nil,
+			opts:         getDialerOptions(),
 			instanceName: mysqlConnName,
 			user:         mysqlUser,
 			password:     mysqlPass,
@@ -76,7 +86,7 @@ func TestMySQLDriver(t *testing.T) {
 		{
 			desc:         "auto IAM authn",
 			driverName:   "cloudsql-mysql-iam",
-			opts:         []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN()},
+			opts:         append(getDialerOptions(), cloudsqlconn.WithIAMAuthN()),
 			instanceName: mysqlConnName,
 			user:         mysqlIAMUser,
 			password:     "password",

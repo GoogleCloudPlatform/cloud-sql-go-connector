@@ -18,12 +18,14 @@
 package cloudsqlconn_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
 )
 
@@ -47,6 +49,14 @@ func requireSQLServerVars(t *testing.T) {
 	}
 }
 
+func getDialerOptions() []cloudsqlconn.Option {
+	var opts []cloudsqlconn.Option
+	if os.Getenv("IP_TYPE") == "private" {
+		opts = append(opts, cloudsqlconn.WithPrivateIP())
+	}
+	return opts
+}
+
 func TestSqlServerHook(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping SqlServer integration tests")
@@ -60,7 +70,7 @@ func TestSqlServerHook(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	cleanup, err := mssql.RegisterDriver("cloudsql-sqlserver")
+	cleanup, err := mssql.RegisterDriver("cloudsql-sqlserver", getDialerOptions()...)
 	if err != nil {
 		t.Fatalf("failed to register driver: %v", err)
 	}
