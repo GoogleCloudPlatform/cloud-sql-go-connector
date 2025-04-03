@@ -662,8 +662,10 @@ func TestPostgresAuthentication(t *testing.T) {
 		t.Skip("skipping Postgres integration tests")
 	}
 	requirePostgresVars(t)
+	if os.Getenv("IP_TYPE") != "private" {
+		creds := keyfile(t)
+	}
 
-	creds := keyfile(t)
 	tok, path, cleanup := removeAuthEnvVar(t)
 	defer cleanup()
 
