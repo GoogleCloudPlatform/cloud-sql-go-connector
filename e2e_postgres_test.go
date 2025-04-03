@@ -666,42 +666,42 @@ func TestPostgresAuthentication(t *testing.T) {
 	}
 	requirePostgresVars(t)
 	var creds string
-    if os.Getenv("IP_TYPE") != "private" {
-        creds = keyfile(t)
-    }
+	if os.Getenv("IP_TYPE") != "private" {
+		creds = keyfile(t)
+	}
 	tok, path, cleanup := removeAuthEnvVar(t)
 	defer cleanup()
 
 	tcs := []struct {
-        desc string
-        opts []cloudsqlconn.Option
-    }{
-        {
-            desc: "with token",
-            opts: []cloudsqlconn.Option{cloudsqlconn.WithTokenSource(
-                oauth2.StaticTokenSource(tok),
-            )},
-        },
-    }
+		desc string
+		opts []cloudsqlconn.Option
+	}{
+		{
+			desc: "with token",
+			opts: []cloudsqlconn.Option{cloudsqlconn.WithTokenSource(
+				oauth2.StaticTokenSource(tok),
+			)},
+		},
+	}
 
-    if os.Getenv("IP_TYPE") != "private" {
-        tcs = append(tcs,
-            struct {
-                desc string
-                opts []cloudsqlconn.Option
-            }{
-                desc: "with credentials file",
-                opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
-            },
-            struct {
-                desc string
-                opts []cloudsqlconn.Option
-            }{
-                desc: "with credentials JSON",
-                opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
-            },
-        )
-    }
+	if os.Getenv("IP_TYPE") != "private" {
+		tcs = append(tcs,
+			struct {
+				desc string
+				opts []cloudsqlconn.Option
+			}{
+				desc: "with credentials file",
+				opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
+			},
+			struct {
+				desc string
+				opts []cloudsqlconn.Option
+			}{
+				desc: "with credentials JSON",
+				opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
+			},
+		)
+	}
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ctx := context.Background()
