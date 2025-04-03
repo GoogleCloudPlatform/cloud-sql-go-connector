@@ -29,8 +29,6 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv5"
@@ -619,6 +617,8 @@ func TestPostgresV4Hook(t *testing.T) {
 	}
 }
 
+
+
 // removeAuthEnvVar retrieves an OAuth2 token and a path to a service account key
 // and then unsets GOOGLE_APPLICATION_CREDENTIALS. It returns a cleanup function
 // that restores the original setup.
@@ -632,6 +632,9 @@ func removeAuthEnvVar(t *testing.T) (*oauth2.Token, string, func()) {
 	tok, err := ts.Token()
 	if err != nil {
 		t.Errorf("failed to get token: %v", err)
+	}
+	if os.Getenv("IP_TYPE") == "private" {
+		return tok, "", func() {}
 	}
 	path, ok := os.LookupEnv("GOOGLE_APPLICATION_CREDENTIALS")
 	if !ok {
@@ -662,30 +665,43 @@ func TestPostgresAuthentication(t *testing.T) {
 		t.Skip("skipping Postgres integration tests")
 	}
 	requirePostgresVars(t)
-
-	creds := keyfile(t)
+	var creds string
+    if os.Getenv("IP_TYPE") != "private" {
+        creds = keyfile(t)
+    }
 	tok, path, cleanup := removeAuthEnvVar(t)
 	defer cleanup()
 
 	tcs := []struct {
-		desc string
-		opts []cloudsqlconn.Option
-	}{
-		{
-			desc: "with token",
-			opts: []cloudsqlconn.Option{cloudsqlconn.WithTokenSource(
-				oauth2.StaticTokenSource(tok),
-			)},
-		},
-		{
-			desc: "with credentials file",
-			opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
-		},
-		{
-			desc: "with credentials JSON",
-			opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
-		},
-	}
+        desc string
+        opts []cloudsqlconn.Option
+    }{
+        {
+            desc: "with token",
+            opts: []cloudsqlconn.Option{cloudsqlconn.WithTokenSource(
+                oauth2.StaticTokenSource(tok),
+            )},
+        },
+    }
+
+    if os.Getenv("IP_TYPE") != "private" {
+        tcs = append(tcs,
+            struct {
+                desc string
+                opts []cloudsqlconn.Option
+            }{
+                desc: "with credentials file",
+                opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
+            },
+            struct {
+                desc string
+                opts []cloudsqlconn.Option
+            }{
+                desc: "with credentials JSON",
+                opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
+            },
+        )
+    }
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ctx := context.Background()
