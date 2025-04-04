@@ -633,6 +633,9 @@ func removeAuthEnvVar(t *testing.T) (*oauth2.Token, string, func()) {
 	if err != nil {
 		t.Errorf("failed to get token: %v", err)
 	}
+	if os.Getenv("IP_TYPE") == "private" {
+		return tok, "", func() {}
+	}
 	path, ok := os.LookupEnv("GOOGLE_APPLICATION_CREDENTIALS")
 	if !ok {
 		t.Fatalf("GOOGLE_APPLICATION_CREDENTIALS was not set in the environment")
@@ -662,8 +665,10 @@ func TestPostgresAuthentication(t *testing.T) {
 		t.Skip("skipping Postgres integration tests")
 	}
 	requirePostgresVars(t)
-
-	creds := keyfile(t)
+	var creds string
+	if os.Getenv("IP_TYPE") != "private" {
+		creds = keyfile(t)
+	}
 	tok, path, cleanup := removeAuthEnvVar(t)
 	defer cleanup()
 
@@ -677,14 +682,25 @@ func TestPostgresAuthentication(t *testing.T) {
 				oauth2.StaticTokenSource(tok),
 			)},
 		},
-		{
-			desc: "with credentials file",
-			opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
-		},
-		{
-			desc: "with credentials JSON",
-			opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
-		},
+	}
+
+	if os.Getenv("IP_TYPE") != "private" {
+		tcs = append(tcs,
+			struct {
+				desc string
+				opts []cloudsqlconn.Option
+			}{
+				desc: "with credentials file",
+				opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
+			},
+			struct {
+				desc string
+				opts []cloudsqlconn.Option
+			}{
+				desc: "with credentials JSON",
+				opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))},
+			},
+		)
 	}
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
