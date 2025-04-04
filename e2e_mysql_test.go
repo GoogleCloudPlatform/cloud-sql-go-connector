@@ -22,7 +22,6 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/mysql/mysql"
-	"cloud.google.com/go/cloudsqlconn/option"
 	gomysql "github.com/go-sql-driver/mysql"
 )
 
@@ -61,9 +60,9 @@ func TestMySQLDriver(t *testing.T) {
 	}
 	requireMySQLVars(t)
 
-	options := []option.DialOption{}
+	var options []cloudsqlconn.DialOption
 	if ipType == "private" {
-		options = append(options, option.WithPrivateIP())
+		options = append(options, cloudsqlconn.WithPrivateIP())
 	}
 
 	tcs := []struct {
