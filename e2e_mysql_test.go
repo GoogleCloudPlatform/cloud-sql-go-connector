@@ -22,6 +22,7 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/mysql/mysql"
+	"cloud.google.com/go/cloudsqlconn/option"
 	gomysql "github.com/go-sql-driver/mysql"
 )
 
@@ -58,10 +59,11 @@ func TestMySQLDriver(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping MySQL integration tests")
 	}
+	requireMySQLVars(t)
 
-	var defaultOpts []cloudsqlconn.Option
+	options := []option.DialOption{}
 	if ipType == "private" {
-		defaultOpts = append(defaultOpts, cloudsqlconn.WithPrivateIP())
+		options = append(options, option.WithPrivateIP())
 	}
 
 	tcs := []struct {
@@ -75,7 +77,7 @@ func TestMySQLDriver(t *testing.T) {
 		{
 			desc:         "default options",
 			driverName:   "cloudsql-mysql",
-			opts:         defaultOpts,
+			opts:         options,
 			instanceName: mysqlConnName,
 			user:         mysqlUser,
 			password:     mysqlPass,
@@ -83,7 +85,7 @@ func TestMySQLDriver(t *testing.T) {
 		{
 			desc:         "auto IAM authn",
 			driverName:   "cloudsql-mysql-iam",
-			opts:         append(defaultOpts, cloudsqlconn.WithIAMAuthN()),
+			opts:         []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN(), options...},
 			instanceName: mysqlConnName,
 			user:         mysqlIAMUser,
 			password:     "password",
