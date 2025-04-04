@@ -84,7 +84,7 @@ func TestMySQLDriver(t *testing.T) {
 		{
 			desc:         "auto IAM authn",
 			driverName:   "cloudsql-mysql-iam",
-			opts:         []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN(), options...,},
+			opts:         []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN(), options...},
 			instanceName: mysqlConnName,
 			user:         mysqlIAMUser,
 			password:     "password",
