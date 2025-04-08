@@ -32,6 +32,7 @@ var (
 	sqlserverUser     = os.Getenv("SQLSERVER_USER")            // Name of database user.
 	sqlserverPass     = os.Getenv("SQLSERVER_PASS")            // Password for the database user; be careful when entering a password on the command line (it may go into your terminal's history).
 	sqlserverDB       = os.Getenv("SQLSERVER_DB")              // Name of the database to connect to.
+	ipType            = os.Getenv("IP_TYPE")                   // IP Type of the SqlServer instance to connect to.
 )
 
 func requireSQLServerVars(t *testing.T) {
@@ -53,6 +54,11 @@ func TestSqlServerHook(t *testing.T) {
 	}
 	requireSQLServerVars(t)
 
+	var opts []cloudsqlconn.Option
+	if ipType == "private" {
+		opts = append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
+	}
+
 	testConn := func(db *sql.DB) {
 		var now time.Time
 		if err := db.QueryRow("SELECT getdate()").Scan(&now); err != nil {
@@ -60,7 +66,7 @@ func TestSqlServerHook(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	cleanup, err := mssql.RegisterDriver("cloudsql-sqlserver")
+	cleanup, err := mssql.RegisterDriver("cloudsql-sqlserver", opts...)
 	if err != nil {
 		t.Fatalf("failed to register driver: %v", err)
 	}
