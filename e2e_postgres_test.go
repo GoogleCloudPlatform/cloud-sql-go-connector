@@ -51,7 +51,7 @@ var (
 	postgresSANInvalidDomainName = os.Getenv("POSTGRES_CUSTOMER_CAS_INVALID_DOMAIN_NAME") // Cloud SQL Postgres CAS domain name that IS NOT an instance Custom SAN of the postgresSANConnName instance.
 )
 
-func AddOptionsForPrivateIP(opts []cloudsqlconn.Option) []cloudsqlconn.Option {
+func AddIPTypeOptions(opts []cloudsqlconn.Option) []cloudsqlconn.Option {
 	if ipType == "private" {
 		return append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
 	}
@@ -104,9 +104,7 @@ func TestPostgresPgxPoolConnect(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	// Create a new dialer with any options
 	d, err := cloudsqlconn.NewDialer(ctx, opts...)
@@ -158,9 +156,7 @@ func TestPostgresCASConnect(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	// Create a new dialer with any options
 	d, err := cloudsqlconn.NewDialer(ctx, opts...)
@@ -212,9 +208,7 @@ func TestPostgresConnectWithQuotaProject(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	// Create a new dialer with any options
 	d, err := cloudsqlconn.NewDialer(ctx, append(opts, cloudsqlconn.WithQuotaProject(project))...)
@@ -266,9 +260,7 @@ func TestPostgresCustomerCASConnect(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	// Create a new dialer with any options
 	d, err := cloudsqlconn.NewDialer(ctx, opts...)
@@ -320,9 +312,7 @@ func TestPostgresSANDomainConnect(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	// Create a new dialer with any options
 	d, err := cloudsqlconn.NewDialer(ctx, append(opts, cloudsqlconn.WithDNSResolver())...)
@@ -375,9 +365,7 @@ func TestPostgresSANBadDomainCausesConnectError(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	// Create a new dialer with any options
 	d, err := cloudsqlconn.NewDialer(ctx, append(opts, cloudsqlconn.WithDNSResolver())...)
@@ -434,9 +422,7 @@ func TestPostgresPgxPoolConnectDomainName(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	// Create a new dialer with any options
 	d, err := cloudsqlconn.NewDialer(ctx, append(opts, cloudsqlconn.WithDNSResolver())...)
@@ -485,9 +471,7 @@ func TestPostgresConnectWithIAMUser(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	d, err := cloudsqlconn.NewDialer(ctx, append(opts, cloudsqlconn.WithIAMAuthN())...)
 	if err != nil {
@@ -530,9 +514,7 @@ func TestPostgresConnectWithLazyRefresh(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	d, err := cloudsqlconn.NewDialer(
 		ctx,
@@ -569,9 +551,7 @@ func TestPostgresEngineVersion(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	d, err := cloudsqlconn.NewDialer(context.Background(), opts...)
 	if err != nil {
@@ -590,9 +570,7 @@ func TestPostgresV5Hook(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	tests := []struct {
 		driver   string
@@ -660,9 +638,7 @@ func TestPostgresV4Hook(t *testing.T) {
 
 	// Use WithPrivateIP option if the ipType is set to private
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = AddOptionsForPrivateIP(opts)
-	}
+	opts = AddIPTypeOptions(opts)
 
 	tests := []struct {
 		driver   string
@@ -762,7 +738,7 @@ func TestPostgresAuthentication(t *testing.T) {
 	var opts []cloudsqlconn.Option
 	if ipType != "private" {
 		creds = keyfile(t)
-		opts = AddOptionsForPrivateIP(opts)
+		opts = AddIPTypeOptions(opts)
 	}
 	tok, path, cleanup := removeAuthEnvVar(t)
 	defer cleanup()
