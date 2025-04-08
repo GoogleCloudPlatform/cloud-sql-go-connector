@@ -99,12 +99,7 @@ func TestMySQLDriver(t *testing.T) {
 				}
 				t.Log(now)
 			}
-            var registerOpts []cloudsqlconn.Option
-            if ipType == "private" {
-                registerOpts = append(registerOpts, cloudsqlconn.WithPrivateIP())
-            }
-            registerOpts = append(registerOpts, tc.opts...)
-			cleanup, err := mysql.RegisterDriver(tc.driverName, registerOpts...)
+			cleanup, err := mysql.RegisterDriver(tc.driverName, tc.opts...)
 			if err != nil {
 				t.Fatalf("failed to register driver: %v", err)
 			}
