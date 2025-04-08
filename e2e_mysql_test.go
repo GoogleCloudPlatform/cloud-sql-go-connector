@@ -59,7 +59,7 @@ func TestMySQLDriver(t *testing.T) {
 		t.Skip("skipping MySQL integration tests")
 	}
 
-	opts := []cloudsqlconn.Option
+	var opts []cloudsqlconn.Option
 	if ipType == "private" {
 		opts = append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
 	}
