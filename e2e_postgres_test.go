@@ -536,9 +536,7 @@ func TestPostgresConnectWithLazyRefresh(t *testing.T) {
 
 	d, err := cloudsqlconn.NewDialer(
 		ctx,
-		cloudsqlconn.WithLazyRefresh(),
-		cloudsqlconn.WithIAMAuthN(), // use IAM AuthN to exercise all paths
-		opts...,
+		append(opts, cloudsqlconn.WithLazyRefresh(), cloudsqlconn.WithIAMAuthN())...,
 	)
 	if err != nil {
 		t.Fatalf("failed to initiate Dialer: %v", err)
