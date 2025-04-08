@@ -59,8 +59,9 @@ func TestMySQLDriver(t *testing.T) {
 		t.Skip("skipping MySQL integration tests")
 	}
 
-	if ipType == "" {
-		ipType = "public"
+	opts := []cloudsqlconn.Option
+	if ipType == "private" {
+		opts = append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
 	}
 
 	tcs := []struct {
@@ -74,7 +75,7 @@ func TestMySQLDriver(t *testing.T) {
 		{
 			desc:         "default options",
 			driverName:   "cloudsql-mysql",
-			opts:         nil,
+			opts:         opts,
 			instanceName: mysqlConnName,
 			user:         mysqlUser,
 			password:     mysqlPass,
@@ -82,7 +83,7 @@ func TestMySQLDriver(t *testing.T) {
 		{
 			desc:         "auto IAM authn",
 			driverName:   "cloudsql-mysql-iam",
-			opts:         []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN()},
+			opts:         append(opts, cloudsqlconn.WithIAMAuthN()),
 			instanceName: mysqlConnName,
 			user:         mysqlIAMUser,
 			password:     "password",
