@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
 )
 
