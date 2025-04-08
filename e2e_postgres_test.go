@@ -53,7 +53,7 @@ var (
 
 func AddOptionsForPrivateIP(opts []cloudsqlconn.Option) []cloudsqlconn.Option {
 	if ipType == "private" {
-		opts = append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
+		return append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
 	}
 	return opts
 }
@@ -163,7 +163,7 @@ func TestPostgresCASConnect(t *testing.T) {
 	}
 
 	// Create a new dialer with any options
-	d, err := cloudsqlconn.NewDialer(ctx, opts)
+	d, err := cloudsqlconn.NewDialer(ctx, opts...)
 	if err != nil {
 		t.Fatalf("failed to init Dialer: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestPostgresConnectWithQuotaProject(t *testing.T) {
 	}
 
 	// Create a new dialer with any options
-	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithQuotaProject(project), opts...)
+	d, err := cloudsqlconn.NewDialer(ctx, append(opts, cloudsqlconn.WithQuotaProject(project))...)
 	if err != nil {
 		t.Fatalf("failed to init Dialer: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestPostgresSANDomainConnect(t *testing.T) {
 	}
 
 	// Create a new dialer with any options
-	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithDNSResolver(), opts...)
+	d, err := cloudsqlconn.NewDialer(ctx, append(opts, cloudsqlconn.WithDNSResolver())...)
 
 	if err != nil {
 		t.Fatalf("failed to init Dialer: %v", err)
@@ -380,7 +380,7 @@ func TestPostgresSANBadDomainCausesConnectError(t *testing.T) {
 	}
 
 	// Create a new dialer with any options
-	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithDNSResolver(), opts...)
+	d, err := cloudsqlconn.NewDialer(ctx, append(opts, cloudsqlconn.WithDNSResolver())...)
 
 	if err != nil {
 		t.Fatalf("failed to init Dialer: %v", err)
@@ -439,7 +439,7 @@ func TestPostgresPgxPoolConnectDomainName(t *testing.T) {
 	}
 
 	// Create a new dialer with any options
-	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithDNSResolver(), opts...)
+	d, err := cloudsqlconn.NewDialer(ctx, append(opts, cloudsqlconn.WithDNSResolver())...)
 	if err != nil {
 		t.Fatalf("failed to init Dialer: %v", err)
 	}
@@ -489,7 +489,7 @@ func TestPostgresConnectWithIAMUser(t *testing.T) {
 		opts = AddOptionsForPrivateIP(opts)
 	}
 
-	d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithIAMAuthN(), opts...)
+	d, err := cloudsqlconn.NewDialer(ctx, append(opts, cloudsqlconn.WithIAMAuthN())...)
 	if err != nil {
 		t.Fatalf("failed to initiate Dialer: %v", err)
 	}
@@ -608,14 +608,14 @@ func TestPostgresV5Hook(t *testing.T) {
 			source: fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUser, postgresPass, postgresDB),
 			IAMAuthN: false,
-			opts: opts,
+			opts:     opts,
 		},
 		{
 			driver: "cloudsql-postgres-iam-v5",
 			source: fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUserIAM, postgresDB),
 			IAMAuthN: true,
-			opts: opts,
+			opts:     opts,
 		},
 		{
 			driver: "cloudsql-postgres-v5-dns",
@@ -623,7 +623,7 @@ func TestPostgresV5Hook(t *testing.T) {
 				postgresSANDomainName, postgresUser, postgresCustomerCASPass, postgresDB),
 			IAMAuthN: false,
 			resolver: true,
-			opts: opts,
+			opts:     opts,
 		},
 	}
 
@@ -639,13 +639,15 @@ func TestPostgresV5Hook(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		var registerOpts []cloudsqlconn.Option
+		registerOpts = append(registerOpts, tc.opts...)
 		if tc.IAMAuthN {
-			pgxv5.RegisterDriver(tc.driver, cloudsqlconn.WithIAMAuthN(), opts...)
-		} else if tc.resolver {
-			pgxv5.RegisterDriver(tc.driver, cloudsqlconn.WithDNSResolver(), opts...)
-		} else {
-			pgxv5.RegisterDriver(tc.driver, opts...)
+			registerOpts = append(registerOpts, cloudsqlconn.WithIAMAuthN())
 		}
+		if tc.resolver {
+			registerOpts = append(registerOpts, cloudsqlconn.WithDNSResolver())
+		}
+		pgxv5.RegisterDriver(tc.driver, registerOpts...)
 		db, err := sql.Open(tc.driver, tc.source)
 
 		if err != nil {
@@ -675,14 +677,14 @@ func TestPostgresV4Hook(t *testing.T) {
 			source: fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUser, postgresPass, postgresDB),
 			IAMAuthN: false,
-			opts: opts,
+			opts:     opts,
 		},
 		{
 			driver: "cloudsql-postgres-iam-v4",
 			source: fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
 				postgresConnName, postgresUserIAM, postgresDB),
 			IAMAuthN: true,
-			opts: opts,
+			opts:     opts,
 		},
 	}
 	if testing.Short() {
@@ -697,11 +699,12 @@ func TestPostgresV4Hook(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		var registerOpts []cloudsqlconn.Option
+		registerOpts = append(registerOpts, tc.opts...)
 		if tc.IAMAuthN {
-			pgxv4.RegisterDriver(tc.driver, cloudsqlconn.WithIAMAuthN(), opts...)
-		} else {
-			pgxv4.RegisterDriver(tc.driver, opts...)
+			registerOpts = append(registerOpts, cloudsqlconn.WithIAMAuthN())
 		}
+		pgxv4.RegisterDriver(tc.driver, registerOpts...)
 		db, err := sql.Open(tc.driver, tc.source)
 		if err != nil {
 			t.Fatalf("sql.Open want err = nil, got = %v", err)
@@ -761,7 +764,7 @@ func TestPostgresAuthentication(t *testing.T) {
 	var opts []cloudsqlconn.Option
 	if ipType != "private" {
 		creds = keyfile(t)
-		opts = append(opts, AddOptionsForPrivateIP(opts))
+		opts = AddOptionsForPrivateIP(opts)
 	}
 	tok, path, cleanup := removeAuthEnvVar(t)
 	defer cleanup()
@@ -772,9 +775,9 @@ func TestPostgresAuthentication(t *testing.T) {
 	}{
 		{
 			desc: "with token",
-			opts: append([]cloudsqlconn.Option{cloudsqlconn.WithTokenSource(
+			opts: append(opts, cloudsqlconn.WithTokenSource(
 				oauth2.StaticTokenSource(tok),
-			)}, opts...),
+			)),
 		},
 	}
 
@@ -785,15 +788,14 @@ func TestPostgresAuthentication(t *testing.T) {
 				opts []cloudsqlconn.Option
 			}{
 				desc: "with credentials file",
-				opts: []cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)},
-				opts: append([]cloudsqlconn.Option{cloudsqlconn.WithCredentialsFile(path)}, opts...),
+				opts: append(opts, cloudsqlconn.WithCredentialsFile(path)),
 			},
 			struct {
 				desc string
 				opts []cloudsqlconn.Option
 			}{
 				desc: "with credentials JSON",
-				opts: append([]cloudsqlconn.Option{cloudsqlconn.WithCredentialsJSON([]byte(creds))}, opts...),
+				opts: append(opts, cloudsqlconn.WithCredentialsJSON([]byte(creds))),
 			},
 		)
 	}
