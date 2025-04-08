@@ -37,6 +37,8 @@ var (
 	mysqlPass = os.Getenv("MYSQL_PASS")
 	// Name of the database to connect to.
 	mysqlDB = os.Getenv("MYSQL_DB")
+	// IP Type of the MySQL instance to connect to.
+	ipType = os.Getenv("IP_TYPE")
 )
 
 func requireMySQLVars(t *testing.T) {
@@ -57,6 +59,11 @@ func TestMySQLDriver(t *testing.T) {
 		t.Skip("skipping MySQL integration tests")
 	}
 
+	var opts []cloudsqlconn.Option
+	if ipType == "private" {
+		opts = append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
+	}
+
 	tcs := []struct {
 		desc         string
 		driverName   string
@@ -68,7 +75,7 @@ func TestMySQLDriver(t *testing.T) {
 		{
 			desc:         "default options",
 			driverName:   "cloudsql-mysql",
-			opts:         nil,
+			opts:         opts,
 			instanceName: mysqlConnName,
 			user:         mysqlUser,
 			password:     mysqlPass,
@@ -76,7 +83,7 @@ func TestMySQLDriver(t *testing.T) {
 		{
 			desc:         "auto IAM authn",
 			driverName:   "cloudsql-mysql-iam",
-			opts:         []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN()},
+			opts:         append(opts, cloudsqlconn.WithIAMAuthN()),
 			instanceName: mysqlConnName,
 			user:         mysqlIAMUser,
 			password:     "password",

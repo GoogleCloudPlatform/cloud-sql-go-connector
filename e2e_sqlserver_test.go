@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
 )
 
@@ -53,6 +54,11 @@ func TestSqlServerHook(t *testing.T) {
 	}
 	requireSQLServerVars(t)
 
+	var opts []cloudsqlconn.Option
+	if ipType == "private" {
+		opts = append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
+	}
+
 	testConn := func(db *sql.DB) {
 		var now time.Time
 		if err := db.QueryRow("SELECT getdate()").Scan(&now); err != nil {
@@ -60,7 +66,7 @@ func TestSqlServerHook(t *testing.T) {
 		}
 		t.Log(now)
 	}
-	cleanup, err := mssql.RegisterDriver("cloudsql-sqlserver")
+	cleanup, err := mssql.RegisterDriver("cloudsql-sqlserver", opts...)
 	if err != nil {
 		t.Fatalf("failed to register driver: %v", err)
 	}
