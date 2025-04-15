@@ -796,8 +796,8 @@ func TestPostgresAuthentication(t *testing.T) {
 	var opts []cloudsqlconn.Option
 	if ipType != "private" {
 		creds = keyfile(t)
-		opts = AddIPTypeOptions(opts)
 	}
+	opts = AddIPTypeOptions(opts)
 	tok, path, cleanup := removeAuthEnvVar(t)
 	defer cleanup()
 
