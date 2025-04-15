@@ -40,9 +40,11 @@ var (
 	postgresConnName             = os.Getenv("POSTGRES_CONNECTION_NAME")                  // "Cloud SQL Postgres instance connection name, in the form of 'project:region:instance'.
 	postgresCASConnName          = os.Getenv("POSTGRES_CAS_CONNECTION_NAME")              // "Cloud SQL Postgres CAS instance connection name, in the form of 'project:region:instance'.
 	postgresCustomerCASConnName  = os.Getenv("POSTGRES_CUSTOMER_CAS_CONNECTION_NAME")     // "Cloud SQL Postgres Customer CAS instance connection name, in the form of 'project:region:instance'.
+	postgresMCPConnName          = os.Getenv("POSTGRES_MCP_CONNECTION_NAME")              // "Cloud SQL Postgres MCP instance connection name, in the form of 'project:region:instance'.
 	postgresUser                 = os.Getenv("POSTGRES_USER")                             // Name of database user.
 	postgresPass                 = os.Getenv("POSTGRES_PASS")                             // Password for the database user; be careful when entering a password on the command line (it may go into your terminal's history).
 	postgresCASPass              = os.Getenv("POSTGRES_CAS_PASS")                         // Password for the database user for CAS instances; be careful when entering a password on the command line (it may go into your terminal's history).
+	postgresMCPPass              = os.Getenv("POSTGRES_MCP_PASS")                         // Password for the database user for MCP instances; be careful when entering a password on the command line (it may go into your terminal's history).
 	postgresCustomerCASPass      = os.Getenv("POSTGRES_CUSTOMER_CAS_PASS")                // Password for the database user for customer CAS instances; be careful when entering a password on the command line (it may go into your terminal's history).
 	postgresDB                   = os.Getenv("POSTGRES_DB")                               // Name of the database to connect to.
 	postgresUserIAM              = os.Getenv("POSTGRES_USER_IAM")                         // Name of database IAM user.
@@ -66,12 +68,16 @@ func requirePostgresVars(t *testing.T) {
 		t.Fatal("'POSTGRES_CAS_CONNECTION_NAME' env var not set")
 	case postgresCustomerCASConnName:
 		t.Fatal("'POSTGRES_CUSTOMER_CAS_CONNECTION_NAME' env var not set")
+	case postgresMCPConnName:
+		t.Fatal("'POSTGRES_MCP_CONNECTION_NAME' env var not set")
 	case postgresUser:
 		t.Fatal("'POSTGRES_USER' env var not set")
 	case postgresPass:
 		t.Fatal("'POSTGRES_PASS' env var not set")
 	case postgresCASPass:
 		t.Fatal("'POSTGRES_CAS_PASS' env var not set")
+	case postgresMCPPass:
+		t.Fatal("'POSTGRES_MCP_PASS' env var not set")
 	case postgresCustomerCASPass:
 		t.Fatal("'POSTGRES_CUSTOMER_CAS_PASS' env var not set")
 	case postgresDB:
@@ -275,6 +281,58 @@ func TestPostgresCustomerCASConnect(t *testing.T) {
 	// postgresConnName takes the form of 'project:region:instance'.
 	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 		return d.Dial(ctx, postgresCustomerCASConnName)
+	}
+
+	// Interact with the driver directly as you normally would
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("failed to create pool: %s", err)
+	}
+	// ... etc
+
+	defer cleanup()
+	defer pool.Close()
+
+	var now time.Time
+	err = pool.QueryRow(context.Background(), "SELECT NOW()").Scan(&now)
+	if err != nil {
+		t.Fatalf("QueryRow failed: %s", err)
+	}
+	t.Log(now)
+}
+
+func TestPostgresMCPConnect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
+	requirePostgresVars(t)
+
+	ctx := context.Background()
+
+	// Configure the driver to connect to the database
+	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresUser, postgresMCPPass, postgresDB)
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("failed to parse pgx config: %v", err)
+	}
+
+	// Use WithPrivateIP option if the ipType is set to private
+	var opts []cloudsqlconn.Option
+	opts = AddIPTypeOptions(opts)
+
+	// Create a new dialer with any options
+	d, err := cloudsqlconn.NewDialer(ctx, opts...)
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+
+	// call cleanup when you're done with the database connection to close dialer
+	cleanup := func() error { return d.Close() }
+
+	// Tell the driver to use the Cloud SQL Go Connector to create connections
+	// postgresMCPConnName takes the form of 'project:region:instance'.
+	config.ConnConfig.DialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+		return d.Dial(ctx, postgresMCPConnName)
 	}
 
 	// Interact with the driver directly as you normally would

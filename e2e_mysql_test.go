@@ -37,6 +37,11 @@ var (
 	mysqlPass = os.Getenv("MYSQL_PASS")
 	// Name of the database to connect to.
 	mysqlDB = os.Getenv("MYSQL_DB")
+	// "Cloud SQL MySQL MCP instance connection name, in the form of 'project:region:instance'.
+	mysqlMCPConnName = os.Getenv("MYSQL_MCP_CONNECTION_NAME")
+	// Password for the database user of MCP instance; be careful when entering
+	// a password on the command line (it may go into your terminal's history).
+	mysqlMCPPass = os.Getenv("MYSQL_MCP_PASS")
 	// IP Type of the MySQL instance to connect to.
 	ipType = os.Getenv("IP_TYPE")
 )
@@ -51,6 +56,10 @@ func requireMySQLVars(t *testing.T) {
 		t.Fatal("'MYSQL_PASS' env var not set")
 	case mysqlDB:
 		t.Fatal("'MYSQL_DB' env var not set")
+	case mysqlMCPConnName:
+		t.Fatal("'MYSQL_MCP_CONNECTION_NAME' env var not set")
+	case mysqlMCPPass:
+		t.Fatal("'MYSQL_MCP_PASS' env var not set")
 	}
 }
 
@@ -85,6 +94,22 @@ func TestMySQLDriver(t *testing.T) {
 			driverName:   "cloudsql-mysql-iam",
 			opts:         append(opts, cloudsqlconn.WithIAMAuthN()),
 			instanceName: mysqlConnName,
+			user:         mysqlIAMUser,
+			password:     "password",
+		},
+		{
+			desc:         "default options with MCP",
+			driverName:   "cloudsql-mysql-mcp",
+			opts:         opts,
+			instanceName: mysqlMCPConnName,
+			user:         mysqlUser,
+			password:     mysqlMCPPass,
+		},
+		{
+			desc:         "auto IAM authn with MCP",
+			driverName:   "cloudsql-mysql-iam-mcp",
+			opts:         append(opts, cloudsqlconn.WithIAMAuthN()),
+			instanceName: mysqlMCPConnName,
 			user:         mysqlIAMUser,
 			password:     "password",
 		},
