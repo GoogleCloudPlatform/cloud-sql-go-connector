@@ -11,7 +11,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/microsoft/go-mssqldb v1.8.0
 	go.opencensus.io v0.24.0
-	golang.org/x/net v0.37.0
+	golang.org/x/net v0.38.0
 	golang.org/x/oauth2 v0.28.0
 	golang.org/x/time v0.11.0
 	google.golang.org/api v0.226.0
