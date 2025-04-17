@@ -188,6 +188,8 @@ func fetchEphemeralCert(
 
 	req := sqladmin.GenerateEphemeralCertRequest{
 		PublicKey: string(pem.EncodeToMemory(&pem.Block{Bytes: clientPubKey, Type: "RSA PUBLIC KEY"})),
+		// TODO: uncomment below when sqladmin package is updated
+		// UseMetadataExchange: true,
 	}
 	var tok *auth.Token
 	if tp != nil {

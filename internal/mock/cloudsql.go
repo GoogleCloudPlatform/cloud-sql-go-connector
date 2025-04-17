@@ -21,6 +21,7 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -28,8 +29,10 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/internal/connectorspb"
 	"golang.org/x/oauth2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
+	"google.golang.org/protobuf/proto"
 )
 
 // EmptyTokenSource is an Oauth2.TokenSource that returns empty tokens.
@@ -304,6 +307,12 @@ func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 					t.Logf("Fake server accept error: %v", aErr)
 					return
 				}
+				if aErr := metadataExchange(conn); aErr != nil {
+					conn.Close()
+					return
+				}
+
+				// Database protocol takes over from here.
 				_, wErr := conn.Write([]byte(i.name))
 				if wErr != nil {
 					t.Logf("Fake server write error: %v", wErr)
@@ -326,4 +335,67 @@ func RotateCA(inst FakeCSQLInstance) {
 // RotateClientCA rotates only client CA certificates and keys.
 func RotateClientCA(inst FakeCSQLInstance) {
 	inst.certs.rotateClientCA()
+}
+
+// metadataExchange mimics server side behavior in four steps:
+//
+//  1. Read a big endian uint32 (4 bytes) from the client. This is the number of
+//     bytes the message consumes. The length does not include the initial four
+//     bytes.
+//
+//  2. Read the message from the client using the message length and unmarshal
+//     it into a MetadataExchangeResponse message.
+//
+//  3. Prepare a response and write the size of the response as a uint32 (4
+//     bytes)
+//
+// 4. Marshal the response to bytes and write those to the client as well.
+//
+// Subsequent interactions with the test server use the database protocol.
+func metadataExchange(conn net.Conn) error {
+	msgSize := make([]byte, 4)
+	n, err := conn.Read(msgSize)
+	if err != nil {
+		return err
+	}
+	if n != 4 {
+		return fmt.Errorf("read %d bytes, want = 4", n)
+	}
+
+	size := binary.BigEndian.Uint32(msgSize)
+	buf := make([]byte, size)
+	n, err = conn.Read(buf)
+	if err != nil {
+		return err
+	}
+	if n != int(size) {
+		return fmt.Errorf("read %d bytes, want = %d", n, size)
+	}
+
+	m := &connectorspb.MetadataExchangeRequest{}
+	err = proto.Unmarshal(buf, m)
+	if err != nil {
+		return err
+	}
+
+	resp := &connectorspb.MetadataExchangeResponse{
+		ResponseCode: connectorspb.MetadataExchangeResponse_OK,
+	}
+	data, err := proto.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	respSize := proto.Size(resp)
+	buf = make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, uint32(respSize))
+
+	buf = append(buf, data...)
+	n, err = conn.Write(buf)
+	if err != nil {
+		return err
+	}
+	if n != len(buf) {
+		return fmt.Errorf("write %d bytes, want = %d", n, len(buf))
+	}
+	return nil
 }

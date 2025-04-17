@@ -50,7 +50,7 @@ type dialerConfig struct {
 	quotaProject           string
 	authCredentials        *auth.Credentials
 	iamLoginTokenProvider  auth.TokenProvider
-	useragents             []string
+	userAgents             []string
 	setAdminAPIEndpoint    bool
 	setCredentials         bool
 	setHTTPClient          bool
@@ -116,7 +116,7 @@ func WithCredentialsJSON(b []byte) Option {
 // WithUserAgent returns an Option that sets the User-Agent.
 func WithUserAgent(ua string) Option {
 	return func(d *dialerConfig) {
-		d.useragents = append(d.useragents, ua)
+		d.userAgents = append(d.userAgents, ua)
 	}
 }
 
