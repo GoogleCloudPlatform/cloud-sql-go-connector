@@ -456,7 +456,7 @@ func TestPostgresSANBadDomainCausesConnectError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Want error, got invalid error")
 	}
-	if !strings.Contains(fmt.Sprint(err), "Dial error: handshake failed") {
+	if !strings.Contains(fmt.Sprint(err), "dial error: handshake failed") {
 		t.Fatal("Want error 'Dial error: handshake failed'.  got: ", err)
 	}
 	t.Log(now)
