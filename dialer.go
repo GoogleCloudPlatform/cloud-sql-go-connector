@@ -20,6 +20,7 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	_ "embed"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -38,11 +39,13 @@ import (
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
+	"cloud.google.com/go/cloudsqlconn/internal/connectorspb"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -53,6 +56,9 @@ const (
 	// iamLoginScope is the OAuth2 scope used for tokens embedded in the ephemeral
 	// certificate.
 	iamLoginScope = "https://www.googleapis.com/auth/sqlservice.login"
+	// ioTimeout is the maximum amount of time to wait before aborting a
+	// metadata exhange
+	ioTimeout = 30 * time.Second
 	// universeDomainEnvVar is the environment variable for setting the default
 	// service domain for a given Cloud universe.
 	universeDomainEnvVar = "GOOGLE_CLOUD_UNIVERSE_DOMAIN"
@@ -180,7 +186,9 @@ type Dialer struct {
 
 	// iamTokenProvider supplies the OAuth2 token used for IAM DB Authn.
 	iamTokenProvider auth.TokenProvider
+	userAgent        string
 
+	buffer *buffer
 	// resolver converts instance names into DNS names.
 	resolver       instance.ConnectionNameResolver
 	failoverPeriod time.Duration
@@ -205,7 +213,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		refreshTimeout: cloudsql.RefreshTimeout,
 		dialFunc:       proxy.Dial,
 		logger:         nullLogger{},
-		useragents:     []string{userAgent},
+		userAgents:     []string{userAgent},
 		failoverPeriod: cloudsql.FailoverPeriod,
 	}
 	for _, opt := range opts {
@@ -242,13 +250,14 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		cfg.iamLoginTokenProvider = scoped.TokenProvider
 	}
 
+	userAgent := strings.Join(cfg.userAgents, " ")
 	// For all credential paths, use auth library's built-in
 	// httptransport.NewClient
 	if cfg.authCredentials != nil {
 		// Set headers for auth client as below WithHTTPClient will ignore
 		// WithQuotaProject and WithUserAgent Options
 		headers := http.Header{}
-		headers.Set("User-Agent", strings.Join(cfg.useragents, " "))
+		headers.Set("User-Agent", userAgent)
 		if cfg.quotaProject != "" {
 			headers.Set("X-Goog-User-Project", cfg.quotaProject)
 		}
@@ -268,7 +277,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		}
 	} else {
 		// Add this to the end to make sure it's not overridden
-		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(strings.Join(cfg.useragents, " ")))
+		cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithUserAgent(userAgent))
 		if cfg.quotaProject != "" {
 			cfg.sqladminOpts = append(cfg.sqladminOpts, option.WithQuotaProject(cfg.quotaProject))
 		}
@@ -317,6 +326,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		dialFunc:          cfg.dialFunc,
 		resolver:          r,
 		failoverPeriod:    cfg.failoverPeriod,
+		userAgent:         userAgent,
+		buffer:            newBuffer(),
 	}
 
 	return d, nil
@@ -426,6 +437,14 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		d.removeCached(ctx, cn, c, err)
 		_ = tlsConn.Close() // best effort close attempt
 		return nil, errtype.NewDialError("handshake failed", cn.String(), err)
+	}
+
+	// The metadata exchange must occur after the TLS connection is established
+	// to avoid leaking sensitive information.
+	err = d.metadataExchange(tlsConn)
+	if err != nil {
+		_ = tlsConn.Close() // best effort close attempt
+		return nil, err
 	}
 
 	latency := time.Since(startTime).Milliseconds()
@@ -566,6 +585,112 @@ func (d *Dialer) Warmup(ctx context.Context, icn string, opts ...DialOption) err
 		d.removeCached(ctx, cn, c, err)
 	}
 	return err
+}
+
+// metadataExchange sends metadata about the connection prior to the database
+// protocol taking over. The exchange consists of four steps:
+//
+//  1. Prepare a MetadataExchangeRequest including the protocol type and the
+//     user agent.
+//
+//  2. Write the size of the message as a big endian uint32 (4 bytes) to the
+//     server followed by the marshaled message. The length does not include the
+//     initial four bytes.
+//
+//  3. Read a big endian uint32 (4 bytes) from the server. This is the
+//     MetadataExchangeResponse message length and does not include the initial
+//     four bytes.
+//
+//  4. Unmarshal the response using the message length in step 3. If the
+//     response is not OK, return the response's error. If there is no error, the
+//     metadata exchange has succeeded and the connection is complete.
+//
+// Subsequent interactions with the server use the database protocol.
+func (d *Dialer) metadataExchange(conn net.Conn) error {
+	req := &connectorspb.MetadataExchangeRequest{
+		UserAgent:          d.userAgent,
+		ClientProtocolType: connectorspb.MetadataExchangeRequest_TCP,
+	}
+	m, err := proto.Marshal(req)
+	if err != nil {
+		return err
+	}
+	b := d.buffer.get()
+	defer d.buffer.put(b)
+
+	buf := *b
+	reqSize := proto.Size(req)
+	binary.BigEndian.PutUint32(buf, uint32(reqSize))
+	buf = append(buf[:4], m...)
+
+	// Set IO deadline before write
+	err = conn.SetDeadline(time.Now().Add(ioTimeout))
+	if err != nil {
+		return err
+	}
+	defer conn.SetDeadline(time.Time{})
+
+	_, err = conn.Write(buf)
+	if err != nil {
+		return err
+	}
+
+	// Reset IO deadline before read
+	err = conn.SetDeadline(time.Now().Add(ioTimeout))
+	if err != nil {
+		return err
+	}
+	defer conn.SetDeadline(time.Time{})
+
+	buf = buf[:4]
+	_, err = conn.Read(buf)
+	if err != nil {
+		return err
+	}
+
+	respSize := binary.BigEndian.Uint32(buf)
+	resp := buf[:respSize]
+	_, err = conn.Read(resp)
+	if err != nil {
+		return err
+	}
+
+	var mdxResp connectorspb.MetadataExchangeResponse
+	err = proto.Unmarshal(resp, &mdxResp)
+	if err != nil {
+		return err
+	}
+
+	if mdxResp.GetResponseCode() != connectorspb.MetadataExchangeResponse_OK {
+		return errors.New(mdxResp.GetError())
+	}
+
+	return nil
+}
+
+const maxMessageSize = 16 * 1024 // 16 kb
+
+type buffer struct {
+	pool sync.Pool
+}
+
+func newBuffer() *buffer {
+	return &buffer{
+		pool: sync.Pool{
+			New: func() any {
+				buf := make([]byte, maxMessageSize)
+				return &buf
+			},
+		},
+	}
+}
+
+func (b *buffer) get() *[]byte {
+	return b.pool.Get().(*[]byte)
+}
+
+func (b *buffer) put(buf *[]byte) {
+	b.pool.Put(buf)
 }
 
 // newInstrumentedConn initializes an instrumentedConn that on closing will
