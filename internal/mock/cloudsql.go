@@ -54,8 +54,9 @@ type FakeCSQLInstance struct {
 
 	// DNSName is the legacy field
 	// DNSNames supersedes DNSName.
-	DNSName  string
-	DNSNames []*sqladmin.DnsNameMapping
+	DNSName    string
+	MissingSAN string
+	DNSNames   []*sqladmin.DnsNameMapping
 
 	useStandardTLSValidation bool
 	serverCAMode             string
@@ -131,6 +132,15 @@ func WithDNS(dns string) FakeCSQLInstanceOption {
 	return func(f *FakeCSQLInstance) {
 		f.DNSName = dns
 	}
+}
+
+// WithMissingSAN will cause the omit this dns name
+// from the server cert, even though it is in the metadata.
+func WithMissingSAN(dns string) FakeCSQLInstanceOption {
+	return func(f *FakeCSQLInstance) {
+		f.MissingSAN = dns
+	}
+
 }
 
 // WithDNSMapping adds the DnsNames records
@@ -228,17 +238,19 @@ func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceO
 		o(&f)
 	}
 	sanNames := make([]string, 0, 5)
-	if f.DNSName != "" {
+	if f.DNSName != "" && f.DNSName != f.MissingSAN {
 		sanNames = append(sanNames, f.DNSName)
 	}
 	for _, dnm := range f.DNSNames {
-		sanNames = append(sanNames, dnm.Name)
+		if dnm.Name != f.MissingSAN {
+			sanNames = append(sanNames, dnm.Name)
+		}
 	}
 	if len(sanNames) > 0 {
 		f.useStandardTLSValidation = true
 	}
 
-	certs := newTLSCertificates(project, name, sanNames, f.certExpiry)
+	certs := NewTLSCertificates(project, name, sanNames, f.certExpiry)
 
 	f.Key = certs.serverKey
 	f.Cert = certs.serverCert
