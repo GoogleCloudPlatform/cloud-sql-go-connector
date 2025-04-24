@@ -74,8 +74,8 @@ func mustGenerateKey() *rsa.PrivateKey {
 	return key
 }
 
-// newTLSCertificates creates a new instance of the TLSCertificates.
-func newTLSCertificates(projectName, instanceName string, sans []string, clientCertExpires time.Time) *TLSCertificates {
+// NewTLSCertificates creates a new instance of the TLSCertificates.
+func NewTLSCertificates(projectName, instanceName string, sans []string, clientCertExpires time.Time) *TLSCertificates {
 	c := &TLSCertificates{
 		clientCertExpires: clientCertExpires,
 		projectName:       projectName,
@@ -140,7 +140,7 @@ func mustBuildSignedCertificate(
 	isCa bool,
 	subject pkix.Name,
 	subjectPublicKey *rsa.PrivateKey,
-	certificateIssuer pkix.Name,
+	issuerCert *x509.Certificate,
 	issuerPrivateKey *rsa.PrivateKey,
 	notAfter time.Time,
 	subjectAlternativeNames []string) *x509.Certificate {
@@ -155,7 +155,6 @@ func mustBuildSignedCertificate(
 		Subject:               subject,
 		SubjectKeyId:          generateSKI(&subjectPublicKey.PublicKey),
 		AuthorityKeyId:        generateSKI(&issuerPrivateKey.PublicKey),
-		Issuer:                certificateIssuer,
 		NotBefore:             time.Now(),
 		NotAfter:              notAfter,
 		IsCA:                  isCa,
@@ -165,7 +164,7 @@ func mustBuildSignedCertificate(
 		DNSNames:              subjectAlternativeNames,
 	}
 
-	certDerBytes, err := x509.CreateCertificate(rand.Reader, cert, cert, &subjectPublicKey.PublicKey, issuerPrivateKey)
+	certDerBytes, err := x509.CreateCertificate(rand.Reader, cert, issuerCert, &subjectPublicKey.PublicKey, issuerPrivateKey)
 	if err != nil {
 		panic(err)
 	}
@@ -238,7 +237,7 @@ func (ct *TLSCertificates) generateServerCertWithCn(cn string) *x509.Certificate
 		false,
 		name(cn),
 		ct.serverKey,
-		serverCaSubject,
+		ct.serverCaCert,
 		ct.serverCaKey,
 		time.Now().Add(1*time.Hour), nil)
 }
@@ -261,7 +260,32 @@ func (ct *TLSCertificates) serverChain(useStandardTLSValidation bool) []tls.Cert
 		PrivateKey:  ct.serverKey,
 		Leaf:        ct.casServerCertificate,
 	}}
+}
 
+// CreateServerChain creates a legacy server certificate chain containing the
+// CN and SAN fields.
+func (ct *TLSCertificates) CreateServerChain(cn string, sans []string) []*x509.Certificate {
+	cert := mustBuildSignedCertificate(
+		false,
+		name(cn),
+		ct.serverKey,
+		ct.serverCaCert,
+		ct.serverCaKey,
+		time.Now().Add(1*time.Hour), sans)
+	return []*x509.Certificate{cert, ct.serverCaCert}
+}
+
+// CreateCASServerChain creates a certificate chain containing the
+// CN and SAN fields.
+func (ct *TLSCertificates) CreateCASServerChain(cn string, sans []string) []*x509.Certificate {
+	cert := mustBuildSignedCertificate(
+		false,
+		name(cn),
+		ct.serverKey,
+		ct.serverIntermediateCaCert,
+		ct.serverIntermediateCaKey,
+		time.Now().Add(1*time.Hour), sans)
+	return []*x509.Certificate{cert, ct.serverIntermediateCaCert, ct.serverCaCert}
 }
 func (ct *TLSCertificates) clientCAPool() *x509.CertPool {
 	clientCa := x509.NewCertPool()
@@ -288,7 +312,7 @@ func (ct *TLSCertificates) rotateCA() {
 			true,
 			intermediateCaSubject,
 			ct.serverIntermediateCaKey,
-			serverCaSubject,
+			ct.serverCaCert,
 			ct.serverCaKey,
 			oneYear,
 			nil)
@@ -298,7 +322,7 @@ func (ct *TLSCertificates) rotateCA() {
 			false,
 			name(""),
 			ct.serverKey,
-			intermediateCaSubject,
+			ct.serverIntermediateCaCert,
 			ct.serverIntermediateCaKey,
 			oneYear,
 			ct.sans)
@@ -307,10 +331,10 @@ func (ct *TLSCertificates) rotateCA() {
 		false,
 		name(ct.projectName+":"+ct.instanceName),
 		ct.serverKey,
-		serverCaSubject,
+		ct.serverCaCert,
 		ct.serverCaKey,
 		oneYear,
-		nil)
+		ct.sans)
 
 	ct.rotateClientCA()
 }

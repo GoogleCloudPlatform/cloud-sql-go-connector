@@ -1222,6 +1222,67 @@ func TestDialerChecksSubjectAlternativeNameAndFails(t *testing.T) {
 	}
 }
 
+func TestDialerChecksSubjectAlternativeNameAndFallsBackToCN(t *testing.T) {
+
+	// Create an instance with custom SAN 'db.example.com'
+	inst := mock.NewFakeCSQLInstance(
+		"myProject", "myRegion", "myInstance",
+		mock.WithDNS("db.example.com"),
+		mock.WithMissingSAN("db.example.com"), // don't put db.example.com in the server cert.
+	)
+
+	// resolve db.example.com to the same instance
+	wantName, _ := instance.ParseConnNameWithDomainName("myProject:myRegion:myInstance", "db.example.com")
+
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithResolver(&fakeResolver{
+				entries: map[string]instance.ConnName{
+					"db.example.com":                wantName,
+					"myProject:myRegion:myInstance": wantName,
+				},
+			}),
+		},
+	})
+
+	tcs := []struct {
+		desc string
+		icn  string
+	}{
+		{
+			desc: "Fallback from connect with Instance Connection Name",
+			icn:  "myProject:myRegion:myInstance",
+		},
+		{
+			desc: "Fallback from connect with configured domain name",
+			icn:  "db.example.com",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+
+			// Dial 'db2.example.com'. This succeed overall.
+			//  First the Hostname check will fail because the certificate does not
+			//  contain db2.example.com
+			//  Then the CN field check will succeed, because the instance connection
+			//  name matches.
+			_, err := d.Dial(
+				context.Background(), tc.icn,
+			)
+			if err != nil {
+				t.Fatal("Want no error. Got: ", err)
+			}
+		})
+	}
+}
+
 func TestDialerRefreshesAfterRotateCACerts(t *testing.T) {
 	tcs := []struct {
 		desc            string

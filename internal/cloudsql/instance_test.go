@@ -165,14 +165,6 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 	}
 
 	got := ci.TLSConfig()
-	wantServerName := cn.String()
-	if got.ServerName != wantServerName {
-		t.Fatalf(
-			"ConnectInfo return unexpected server name in TLS Config, "+
-				"want = %v, got = %v",
-			wantServerName, got.ServerName,
-		)
-	}
 
 	if got.MinVersion != tls.VersionTLS13 {
 		t.Fatalf(
@@ -403,7 +395,7 @@ func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
 	wantRootCAs.AddCert(subCACert)
 	// Assemble a connection info with the raw and parsed client cert
 	// and the self-signed server certificate
-	wantServerName := "testing dns name"
+	wantServerName := "db.example.com"
 	ci := ConnectionInfo{
 		DNSName: wantServerName,
 		ClientCertificate: tls.Certificate{
@@ -434,8 +426,8 @@ func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
 	if got.Certificates[0].Leaf != ci.ClientCertificate.Leaf {
 		t.Fatal("leaf certificates do not match")
 	}
-	if got.InsecureSkipVerify {
-		t.Fatal("InsecureSkipVerify is true, expected false")
+	if !got.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify is false, expected true")
 	}
 	if !got.RootCAs.Equal(wantRootCAs) {
 		t.Fatalf("unexpected root CAs, got %v, want %v", got.RootCAs, wantRootCAs)
