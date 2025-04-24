@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.16.1...v1.17.0) (2025-04-24)
+
+
+### Features
+
+* Update TLS validation to use both SAN and CN fields. ([#979](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/979)) ([df60a20](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/df60a2061dbfd78ce30a87319be8d8e027957d86))
+
 ## [1.16.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.16.0...v1.16.1) (2025-04-16)
 
 
