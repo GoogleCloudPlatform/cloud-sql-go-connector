@@ -649,8 +649,8 @@ func (i *instrumentedConn) Close() error {
 }
 
 func (i *instrumentedConn) reportCounters() {
-	bytesRead := atomic.SwapInt64(&i.bytesRead, 0)
-	bytesWritten := atomic.SwapInt64(&i.bytesWritten, 0)
+	bytesRead := atomic.LoadInt64(&i.bytesRead)
+	bytesWritten := atomic.LoadInt64(&i.bytesWritten)
 	trace.RecordBytesReceived(context.Background(), bytesRead, i.connName, i.dialerID)
 	trace.RecordBytesSent(context.Background(), bytesWritten, i.connName, i.dialerID)
 }
