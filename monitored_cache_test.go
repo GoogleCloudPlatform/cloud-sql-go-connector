@@ -114,19 +114,22 @@ func TestMonitoredCache_Close(t *testing.T) {
 	// set up the state as if there were 2 open connections.
 	c.openConns = []*instrumentedConn{
 		{
-			closed:    false,
-			closeFunc: inc,
-			Conn:      &mockConn{},
+			closed:       false,
+			closeFunc:    inc,
+			stopReporter: func() {},
+			Conn:         &mockConn{},
 		},
 		{
-			closed:    false,
-			closeFunc: inc,
-			Conn:      &mockConn{},
+			closed:       false,
+			closeFunc:    inc,
+			stopReporter: func() {},
+			Conn:         &mockConn{},
 		},
 		{
-			closed:    true,
-			closeFunc: inc,
-			Conn:      &mockConn{},
+			closed:       true,
+			closeFunc:    inc,
+			stopReporter: func() {},
+			Conn:         &mockConn{},
 		},
 	}
 	*c.openConnsCount = 2
