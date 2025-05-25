@@ -338,7 +338,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		trace.AddDialerID(d.dialerID),
 	)
 	defer func() {
-		go trace.RecordDialError(context.Background(), icn, d.dialerID, err)
+		trace.RecordDialError(context.Background(), icn, d.dialerID, err)
 		endDial(err)
 	}()
 	cn, err := d.resolver.Resolve(ctx, icn)
@@ -429,11 +429,9 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	}
 
 	latency := time.Since(startTime).Milliseconds()
-	go func() {
-		n := atomic.AddUint64(c.openConnsCount, 1)
-		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
-		trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
-	}()
+	n := atomic.AddUint64(c.openConnsCount, 1)
+	trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
+	trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
 
 	closeFunc := func() {
 		n := atomic.AddUint64(c.openConnsCount, ^uint64(0)) // c.openConnsCount = c.openConnsCount - 1
