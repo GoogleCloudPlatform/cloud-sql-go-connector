@@ -429,12 +429,12 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	}
 
 	latency := time.Since(startTime).Milliseconds()
-	n := atomic.AddUint64(c.openConnsCount, 1)
+	n := c.openConnsCount.Add(1)
 	trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
 	trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
 
 	closeFunc := func() {
-		n := atomic.AddUint64(c.openConnsCount, ^uint64(0)) // c.openConnsCount = c.openConnsCount - 1
+		n := c.openConnsCount.Add(^uint64(0)) // c.openConnsCount = c.openConnsCount - 1
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
 	}
 	errFunc := func(err error) {
@@ -595,8 +595,8 @@ type instrumentedConn struct {
 	closed       bool
 	dialerID     string
 	connName     string
-	bytesRead    int64
-	bytesWritten int64
+	bytesRead    atomic.Int64
+	bytesWritten atomic.Int64
 	reportTicker *time.Ticker
 	stopReporter func()
 }
@@ -606,7 +606,7 @@ type instrumentedConn struct {
 func (i *instrumentedConn) Read(b []byte) (int, error) {
 	bytesRead, err := i.Conn.Read(b)
 	if err == nil {
-		atomic.AddInt64(&i.bytesRead, int64(bytesRead))
+		i.bytesRead.Add(int64(bytesRead))
 	} else {
 		i.errFunc(err)
 	}
@@ -618,7 +618,7 @@ func (i *instrumentedConn) Read(b []byte) (int, error) {
 func (i *instrumentedConn) Write(b []byte) (int, error) {
 	bytesWritten, err := i.Conn.Write(b)
 	if err == nil {
-		atomic.AddInt64(&i.bytesWritten, int64(bytesWritten))
+		i.bytesWritten.Add(int64(bytesWritten))
 	} else {
 		i.errFunc(err)
 	}
@@ -645,8 +645,8 @@ func (i *instrumentedConn) Close() error {
 }
 
 func (i *instrumentedConn) reportCounters() {
-	bytesRead := atomic.SwapInt64(&i.bytesRead, 0)
-	bytesWritten := atomic.SwapInt64(&i.bytesWritten, 0)
+	bytesRead := i.bytesRead.Swap(0)
+	bytesWritten := i.bytesWritten.Swap(0)
 	trace.RecordBytesReceived(context.Background(), bytesRead, i.connName, i.dialerID)
 	trace.RecordBytesSent(context.Background(), bytesWritten, i.connName, i.dialerID)
 }
