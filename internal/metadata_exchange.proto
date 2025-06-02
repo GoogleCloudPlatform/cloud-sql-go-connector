@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package mdx;
+option go_package = "./mdx";
+option java_package = "com.google.cloud.sql.v1beta4";
+option java_outer_classname = "CloudSqlMetadataExchangeProto";
+option java_multiple_files = true;
+
+// TODO: Use the version of this from the public API instead.
+// To build this manually:
+// protoc -I=./internal/mdx --go_out=internal/md/ internal/mdx/metadata_exchange.proto
+
+// Message used by Cloud SQL connectors, including the Cloud SQL Auth Proxy and
+// the Cloud SQL Language Connectors, to exchange client and connection
+// metadata.
+message MetadataExchangeRequest {
+  // Indicates the socket-level protocol used by the database client, useful for
+  // the MySQL caching_sha2_password, which detects the socket type as part
+  // of the authentication protocol.
+  enum ClientProtocolType {
+    // Client protocol type is unspecified, TCP is used as default
+    CLIENT_PROTOCOL_TYPE_UNSPECIFIED = 0;
+    // TCP socket connection, used for connections through the Auth Proxy
+    // Client's TCP ports.
+    TCP = 1;
+    // TLS socket over TCP, used in the connectors which pass an already
+    // connected TCP socket with a complete handshake to the mysql driver.
+    TLS = 2;
+    // Unix Domain socket connection, used for connections through the Auth
+    // Proxy Client's unix sockets.
+    UDS = 3;
+  }
+
+  // User agent from the connector sending the request
+  optional string user_agent = 1;
+
+  // Client protocol type
+  optional ClientProtocolType client_protocol_type = 2;
+}
+
+// The response from the Cloud SQL instance back to the connector
+// following an MetadataExchangeRequest.
+message MetadataExchangeResponse {
+  // The status of the server metadata exchange.
+  enum ResponseStatusCode {
+    // Unknown response code
+    RESPONSE_STATUS_CODE_UNSPECIFIED = 0;
+    // Success
+    OK = 1;
+    // Failure
+    ERROR = 2;
+  }
+
+  // Status code.
+  optional ResponseStatusCode response_status_code = 1;
+
+  // Error message.
+  optional string error_message = 2;
+}
