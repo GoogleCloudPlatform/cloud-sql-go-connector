@@ -29,6 +29,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
+	"cloud.google.com/go/cloudsqlconn/internal/mdx"
 	"golang.org/x/oauth2"
 	apiopt "google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
@@ -333,6 +334,7 @@ type dialConfig struct {
 	ipType       string
 	tcpKeepAlive time.Duration
 	useIAMAuthN  bool
+	mdxReq       mdx.MetadataExchangeRequest
 }
 
 // DialOptions turns a list of DialOption instances into an DialOption.
@@ -400,5 +402,36 @@ func WithAutoIP() DialOption {
 func WithDialIAMAuthN(b bool) DialOption {
 	return func(cfg *dialConfig) {
 		cfg.useIAMAuthN = b
+	}
+}
+
+// Indicates the socket-level protocol used by the database client, useful for
+// the MySQL caching_sha2_password, which detects the socket type as part
+// of the authentication protocol.
+type MdxClientProtocol int32
+
+const (
+	MdxClientProtocol_TCP MdxClientProtocol = 1
+	// TLS socket over TCP, used in the connectors which pass an already
+	// connected TCP socket with a complete handshake to the mysql driver.
+	MdxClientProtocol_TLS MdxClientProtocol = 2
+	// Unix Domain socket connection, used for connections through the Auth
+	// Proxy Client's unix sockets.
+	MdxClientProtocol_UDS MdxClientProtocol = 3
+)
+
+// WithMdxClientProtcol returns a DialOption that configures the MDX protocol
+// to use a unix socket
+func WithMdxClientProtcol(p MdxClientProtocol) DialOption {
+	return func(cfg *dialConfig) {
+		cfg.mdxReq.ClientProtocolType = new(mdx.MetadataExchangeRequest_ClientProtocolType)
+		switch p {
+		case MdxClientProtocol_TCP:
+			*cfg.mdxReq.ClientProtocolType = mdx.MetadataExchangeRequest_TCP
+		case MdxClientProtocol_UDS:
+			*cfg.mdxReq.ClientProtocolType = mdx.MetadataExchangeRequest_UDS
+		case MdxClientProtocol_TLS:
+			*cfg.mdxReq.ClientProtocolType = mdx.MetadataExchangeRequest_TLS
+		}
 	}
 }

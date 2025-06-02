@@ -38,6 +38,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
+	"cloud.google.com/go/cloudsqlconn/internal/mdx"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
@@ -426,6 +427,13 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		d.removeCached(ctx, cn, c, err)
 		_ = tlsConn.Close() // best effort close attempt
 		return nil, errtype.NewDialError("handshake failed", cn.String(), err)
+	}
+
+	// Send MDX if the client protocol type was set.
+	if cfg.mdxReq.GetClientProtocolType() != mdx.MetadataExchangeRequest_CLIENT_PROTOCOL_TYPE_UNSPECIFIED {
+		mdxConn := cloudsql.NewMDXConn(tlsConn, cn.String(), d.logger)
+		mdxConn.WriteMDX(ctx, &cfg.mdxReq)
+		mdxConn.ReadMDX(ctx)
 	}
 
 	latency := time.Since(startTime).Milliseconds()
