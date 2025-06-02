@@ -38,26 +38,27 @@ import (
 type Option func(d *dialerConfig)
 
 type dialerConfig struct {
-	rsaKey                 *rsa.PrivateKey
-	sqladminOpts           []apiopt.ClientOption
-	dialOpts               []DialOption
-	dialFunc               func(ctx context.Context, network, addr string) (net.Conn, error)
-	refreshTimeout         time.Duration
-	useIAMAuthN            bool
-	logger                 debug.ContextLogger
-	lazyRefresh            bool
-	clientUniverseDomain   string
-	quotaProject           string
-	authCredentials        *auth.Credentials
-	iamLoginTokenProvider  auth.TokenProvider
-	useragents             []string
-	setAdminAPIEndpoint    bool
-	setCredentials         bool
-	setHTTPClient          bool
-	setTokenSource         bool
-	setIAMAuthNTokenSource bool
-	resolver               instance.ConnectionNameResolver
-	failoverPeriod         time.Duration
+	rsaKey                   *rsa.PrivateKey
+	sqladminOpts             []apiopt.ClientOption
+	dialOpts                 []DialOption
+	dialFunc                 func(ctx context.Context, network, addr string) (net.Conn, error)
+	refreshTimeout           time.Duration
+	useIAMAuthN              bool
+	logger                   debug.ContextLogger
+	lazyRefresh              bool
+	clientUniverseDomain     string
+	quotaProject             string
+	authCredentials          *auth.Credentials
+	iamLoginTokenProvider    auth.TokenProvider
+	useragents               []string
+	setAdminAPIEndpoint      bool
+	setCredentials           bool
+	setHTTPClient            bool
+	setTokenSource           bool
+	setIAMAuthNTokenSource   bool
+	resolver                 instance.ConnectionNameResolver
+	failoverPeriod           time.Duration
+	metadataExchangeDisabled bool
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -328,6 +329,16 @@ func WithFailoverPeriod(f time.Duration) Option {
 	}
 }
 
+// WithDisableMetadataExchange enables or disables the dialer from sending the
+// metadata exchange message to the instance on each connection. This
+// is necessary for MySQL instances with caching_sha2_passwords. Metadata Exchange
+// is enabled by default for instances that accept MDX.
+func WithDisableMetadataExchange() Option {
+	return func(cfg *dialerConfig) {
+		cfg.metadataExchangeDisabled = true
+	}
+}
+
 type debugLoggerWithoutContext struct {
 	logger debug.Logger
 }
@@ -374,10 +385,11 @@ func WithLazyRefresh() Option {
 type DialOption func(d *dialConfig)
 
 type dialConfig struct {
-	dialFunc     func(ctx context.Context, network, addr string) (net.Conn, error)
-	ipType       string
-	tcpKeepAlive time.Duration
-	useIAMAuthN  bool
+	dialFunc              func(ctx context.Context, network, addr string) (net.Conn, error)
+	ipType                string
+	tcpKeepAlive          time.Duration
+	useIAMAuthN           bool
+	mdxClientProtocolType string
 }
 
 // DialOptions turns a list of DialOption instances into an DialOption.
@@ -445,5 +457,15 @@ func WithAutoIP() DialOption {
 func WithDialIAMAuthN(b bool) DialOption {
 	return func(cfg *dialConfig) {
 		cfg.useIAMAuthN = b
+	}
+}
+
+// WithMdxClientProtocolType controls client protocol type is sent to the server
+// in the metadata exchange request. This may be one of cloudsql.TLS cloudsql.TCP
+// or cloudsql.UDS. If this is empty, it will be omitted from the MDX request.
+// This is important for MySQL clients that use caching_sha2_password.
+func WithMdxClientProtocolType(s string) DialOption {
+	return func(cfg *dialConfig) {
+		cfg.mdxClientProtocolType = s
 	}
 }

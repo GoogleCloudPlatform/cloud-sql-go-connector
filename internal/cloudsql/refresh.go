@@ -41,6 +41,10 @@ const (
 	// AutoIP selects public IP if available and otherwise selects private
 	// IP.
 	AutoIP = "AutoIP"
+
+	TCP = "tcp"
+	UDS = "uds"
+	TLS = "tls"
 )
 
 // metadata contains information about a Cloud SQL instance needed to create

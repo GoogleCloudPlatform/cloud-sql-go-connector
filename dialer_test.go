@@ -135,6 +135,25 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	)
 }
 
+func TestDialerCanConnectToInstanceWithMdx(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+	)
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+	})
+
+	testSuccessfulDial(
+		context.Background(), t, d,
+		inst.String(),
+		WithMdxClientProtocolType(cloudsql.TCP),
+	)
+}
+
 func TestDialWithAdminAPIErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance(
 		"my-project", "my-region", "my-instance",

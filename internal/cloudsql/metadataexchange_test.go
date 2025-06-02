@@ -96,7 +96,7 @@ func TestReadMDX(t *testing.T) {
 	t.Run("no MDX response", func(t *testing.T) {
 		fakeConn := newFakeConn([]byte("not mdx"))
 		mdxConn := NewMDXConn(fakeConn, cn, logger)
-		err := mdxConn.ReadMDX(ctx)
+		_, err := mdxConn.ReadMDX(ctx)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -120,7 +120,7 @@ func TestReadMDX(t *testing.T) {
 
 		fakeConn := newFakeConn(msg)
 		mdxConn := NewMDXConn(fakeConn, cn, logger)
-		err = mdxConn.ReadMDX(ctx)
+		_, err = mdxConn.ReadMDX(ctx)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

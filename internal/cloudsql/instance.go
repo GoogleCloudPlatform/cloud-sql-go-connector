@@ -182,6 +182,8 @@ type ConnectionInfo struct {
 	// It is used to validate the server identity of the CAS instances.
 	DNSName    string
 	Expiration time.Time
+	// Features of the MDX protocol supported by this database
+	MetadataExchangeSupport []string
 
 	addrs map[string]string
 }
