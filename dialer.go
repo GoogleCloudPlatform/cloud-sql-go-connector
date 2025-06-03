@@ -338,7 +338,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		trace.AddDialerID(d.dialerID),
 	)
 	defer func() {
-		go trace.RecordDialError(context.Background(), icn, d.dialerID, err)
+		trace.RecordDialError(context.Background(), icn, d.dialerID, err)
 		endDial(err)
 	}()
 	cn, err := d.resolver.Resolve(ctx, icn)
@@ -429,14 +429,12 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	}
 
 	latency := time.Since(startTime).Milliseconds()
-	go func() {
-		n := atomic.AddUint64(c.openConnsCount, 1)
-		trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
-		trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
-	}()
+	n := c.openConnsCount.Add(1)
+	trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
+	trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
 
 	closeFunc := func() {
-		n := atomic.AddUint64(c.openConnsCount, ^uint64(0)) // c.openConnsCount = c.openConnsCount - 1
+		n := c.openConnsCount.Add(^uint64(0)) // c.openConnsCount = c.openConnsCount - 1
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
 	}
 	errFunc := func(err error) {
@@ -571,25 +569,36 @@ func (d *Dialer) Warmup(ctx context.Context, icn string, opts ...DialOption) err
 // newInstrumentedConn initializes an instrumentedConn that on closing will
 // decrement the number of open connects and record the result.
 func newInstrumentedConn(conn net.Conn, closeFunc func(), errFunc func(error), dialerID, connName string) *instrumentedConn {
-	return &instrumentedConn{
-		Conn:      conn,
-		closeFunc: closeFunc,
-		errFunc:   errFunc,
-		dialerID:  dialerID,
-		connName:  connName,
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &instrumentedConn{
+		Conn:         conn,
+		closeFunc:    closeFunc,
+		errFunc:      errFunc,
+		dialerID:     dialerID,
+		connName:     connName,
+		reportTicker: time.NewTicker(5 * time.Second),
+		stopReporter: cancel,
 	}
+
+	go c.report(ctx)
+
+	return c
 }
 
 // instrumentedConn wraps a net.Conn and invokes closeFunc when the connection
 // is closed.
 type instrumentedConn struct {
 	net.Conn
-	closeFunc func()
-	errFunc   func(error)
-	mu        sync.RWMutex
-	closed    bool
-	dialerID  string
-	connName  string
+	closeFunc    func()
+	errFunc      func(error)
+	mu           sync.RWMutex
+	closed       bool
+	dialerID     string
+	connName     string
+	bytesRead    atomic.Int64
+	bytesWritten atomic.Int64
+	reportTicker *time.Ticker
+	stopReporter func()
 }
 
 // Read delegates to the underlying net.Conn interface and records number of
@@ -597,7 +606,7 @@ type instrumentedConn struct {
 func (i *instrumentedConn) Read(b []byte) (int, error) {
 	bytesRead, err := i.Conn.Read(b)
 	if err == nil {
-		go trace.RecordBytesReceived(context.Background(), int64(bytesRead), i.connName, i.dialerID)
+		i.bytesRead.Add(int64(bytesRead))
 	} else {
 		i.errFunc(err)
 	}
@@ -609,7 +618,7 @@ func (i *instrumentedConn) Read(b []byte) (int, error) {
 func (i *instrumentedConn) Write(b []byte) (int, error) {
 	bytesWritten, err := i.Conn.Write(b)
 	if err == nil {
-		go trace.RecordBytesSent(context.Background(), int64(bytesWritten), i.connName, i.dialerID)
+		i.bytesWritten.Add(int64(bytesWritten))
 	} else {
 		i.errFunc(err)
 	}
@@ -629,12 +638,29 @@ func (i *instrumentedConn) Close() error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.closed = true
-	err := i.Conn.Close()
-	if err != nil {
-		return err
+	i.stopReporter()
+	i.reportCounters()
+	i.closeFunc()
+	return i.Conn.Close()
+}
+
+func (i *instrumentedConn) reportCounters() {
+	bytesRead := i.bytesRead.Swap(0)
+	bytesWritten := i.bytesWritten.Swap(0)
+	trace.RecordBytesReceived(context.Background(), bytesRead, i.connName, i.dialerID)
+	trace.RecordBytesSent(context.Background(), bytesWritten, i.connName, i.dialerID)
+}
+
+func (i *instrumentedConn) report(ctx context.Context) {
+	defer i.reportTicker.Stop()
+	for {
+		select {
+		case <-i.reportTicker.C:
+			i.reportCounters()
+		case <-ctx.Done():
+			return
+		}
 	}
-	go i.closeFunc()
-	return nil
 }
 
 // Close closes the Dialer; it prevents the Dialer from refreshing the information

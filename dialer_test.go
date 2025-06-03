@@ -1024,13 +1024,13 @@ func TestDialerFailsDnsTxtRecordMissing(t *testing.T) {
 }
 
 type changingResolver struct {
-	stage *int32
+	stage atomic.Int32
 }
 
 func (r *changingResolver) Resolve(_ context.Context, name string) (instance.ConnName, error) {
 	// For TestDialerFailoverOnInstanceChange
 	if name == "update.example.com" {
-		if atomic.LoadInt32(r.stage) == 0 {
+		if r.stage.Load() == 0 {
 			return instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "update.example.com")
 		}
 		return instance.ParseConnNameWithDomainName("my-project:my-region:my-instance2", "update.example.com")
@@ -1054,9 +1054,7 @@ func TestDialerUpdatesAutomaticallyAfterDnsChange(t *testing.T) {
 		"my-project", "my-region", "my-instance2",
 		mock.WithDNS("update.example.com"),
 	)
-	r := &changingResolver{
-		stage: new(int32),
-	}
+	r := &changingResolver{}
 
 	d := setupDialer(t, setupConfig{
 		skipServer: true,
@@ -1084,7 +1082,7 @@ func TestDialerUpdatesAutomaticallyAfterDnsChange(t *testing.T) {
 		"update.example.com",
 	)
 	stop1()
-	atomic.StoreInt32(r.stage, 1)
+	r.stage.Store(1)
 
 	time.Sleep(1 * time.Second)
 	instCn, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "update.example.com")

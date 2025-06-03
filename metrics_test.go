@@ -172,7 +172,6 @@ func TestDialerWithMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
 	}
-	defer conn.Close()
 	// dial the good instance again to check the counter
 	conn2, err := d.Dial(context.Background(), "my-project:my-region:my-instance")
 	if err != nil {
@@ -194,7 +193,6 @@ func TestDialerWithMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("conn.Write failed: %v", err)
 	}
-	defer conn2.Close()
 	// dial a bogus instance
 	_, err = d.Dial(context.Background(), "my-project:my-region:notaninstance")
 	if err == nil {
@@ -205,6 +203,12 @@ func TestDialerWithMetrics(t *testing.T) {
 
 	// success metrics
 	wantLastValueMetric(t, "cloudsqlconn/open_connections", spy.data(), 2)
+
+	conn.Close()
+	conn2.Close()
+
+	time.Sleep(10 * time.Millisecond) // allow exporter a chance to run
+
 	wantDistributionMetric(t, "cloudsqlconn/dial_latency", spy.data())
 	wantCountMetric(t, "cloudsqlconn/refresh_success_count", spy.data())
 	wantSumMetric(t, "cloudsqlconn/bytes_sent", spy.data())

@@ -63,9 +63,7 @@ func TestMonitoredCache_purgeClosedConns(t *testing.T) {
 
 func TestMonitoredCache_checkDomainName_instanceChanged(t *testing.T) {
 	cn, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "update.example.com")
-	r := &changingResolver{
-		stage: new(int32),
-	}
+	r := &changingResolver{}
 	c := newMonitoredCache(context.TODO(),
 		&spyConnectionInfoCache{},
 		cn,
@@ -81,7 +79,7 @@ func TestMonitoredCache_checkDomainName_instanceChanged(t *testing.T) {
 		t.Fatal("got cache closed, want cache open")
 	}
 	// update the domain name
-	atomic.StoreInt32(r.stage, 1)
+	r.stage.Store(1)
 
 	// wait for the resolver to run
 	time.Sleep(100 * time.Millisecond)
@@ -93,11 +91,9 @@ func TestMonitoredCache_checkDomainName_instanceChanged(t *testing.T) {
 
 func TestMonitoredCache_Close(t *testing.T) {
 	cn, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "update.example.com")
-	var closeFuncCalls int32
+	var closeFuncCalls atomic.Int32
 
-	r := &changingResolver{
-		stage: new(int32),
-	}
+	r := &changingResolver{}
 
 	c := newMonitoredCache(context.TODO(),
 		&spyConnectionInfoCache{},
@@ -107,29 +103,32 @@ func TestMonitoredCache_Close(t *testing.T) {
 		&testLog{t: t},
 	)
 	inc := func() {
-		atomic.AddInt32(&closeFuncCalls, 1)
+		closeFuncCalls.Add(1)
 	}
 
 	c.mu.Lock()
 	// set up the state as if there were 2 open connections.
 	c.openConns = []*instrumentedConn{
 		{
-			closed:    false,
-			closeFunc: inc,
-			Conn:      &mockConn{},
+			closed:       false,
+			closeFunc:    inc,
+			stopReporter: func() {},
+			Conn:         &mockConn{},
 		},
 		{
-			closed:    false,
-			closeFunc: inc,
-			Conn:      &mockConn{},
+			closed:       false,
+			closeFunc:    inc,
+			stopReporter: func() {},
+			Conn:         &mockConn{},
 		},
 		{
-			closed:    true,
-			closeFunc: inc,
-			Conn:      &mockConn{},
+			closed:       true,
+			closeFunc:    inc,
+			stopReporter: func() {},
+			Conn:         &mockConn{},
 		},
 	}
-	*c.openConnsCount = 2
+	c.openConnsCount.Store(2)
 	c.mu.Unlock()
 
 	c.Close()
@@ -138,7 +137,7 @@ func TestMonitoredCache_Close(t *testing.T) {
 	}
 	// wait for closeFunc() to be called.
 	time.Sleep(100 * time.Millisecond)
-	if got := atomic.LoadInt32(&closeFuncCalls); got != 2 {
+	if got := closeFuncCalls.Load(); got != 2 {
 		t.Fatalf("got %d, want 2", got)
 	}
 

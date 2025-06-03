@@ -27,7 +27,7 @@ import (
 // monitoredCache is a wrapper around a connectionInfoCache that tracks the
 // number of connections to the associated instance.
 type monitoredCache struct {
-	openConnsCount *uint64
+	openConnsCount atomic.Uint64
 	cn             instance.ConnName
 	resolver       instance.ConnectionNameResolver
 	logger         debug.ContextLogger
@@ -53,7 +53,6 @@ func newMonitoredCache(
 	logger debug.ContextLogger) *monitoredCache {
 
 	c := &monitoredCache{
-		openConnsCount:      new(uint64),
 		closedCh:            make(chan struct{}),
 		cn:                  cn,
 		resolver:            resolver,
@@ -98,13 +97,13 @@ func (c *monitoredCache) Close() error {
 		c.domainNameTicker.Stop()
 	}
 
-	if atomic.LoadUint64(c.openConnsCount) > 0 {
+	if c.openConnsCount.Load() > 0 {
 		for _, socket := range c.openConns {
 			if !socket.isClosed() {
 				_ = socket.Close() // force socket closed, ok to ignore error.
 			}
 		}
-		atomic.StoreUint64(c.openConnsCount, 0)
+		c.openConnsCount.Store(0)
 	}
 
 	return c.connectionInfoCache.Close()
