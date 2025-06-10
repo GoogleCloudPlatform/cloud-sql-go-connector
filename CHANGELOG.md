@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.17.1...v1.17.2) (2025-06-10)
+
+
+### Bug Fixes
+
+* reduce the number of memory allocations and the latency overhead. ([#983](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/983)) ([cb641f2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/cb641f223ebfe408d7162e8f50b0ac1e439dfe18))
+
 ## [1.17.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.17.0...v1.17.1) (2025-05-21)
 
 
