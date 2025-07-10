@@ -5,17 +5,17 @@ go 1.23.0
 require (
 	cloud.google.com/go/auth v0.16.2
 	cloud.google.com/go/auth/oauth2adapt v0.2.8
-	github.com/go-sql-driver/mysql v1.9.2
+	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v4 v4.18.3
 	github.com/jackc/pgx/v5 v5.7.5
-	github.com/microsoft/go-mssqldb v1.8.2
+	github.com/microsoft/go-mssqldb v1.9.2
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.41.0
 	golang.org/x/oauth2 v0.30.0
 	golang.org/x/time v0.12.0
-	google.golang.org/api v0.236.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250528174236-200df99c418a
+	google.golang.org/api v0.241.0
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822
 	google.golang.org/grpc v1.73.0
 )
 
