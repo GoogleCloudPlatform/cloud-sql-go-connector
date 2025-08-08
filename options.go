@@ -131,9 +131,11 @@ func WithDefaultDialOptions(opts ...DialOption) Option {
 // WithTokenSource returns an Option that specifies an OAuth2 token source to be
 // used as the basis for authentication.
 //
-// When Auth IAM AuthN is enabled, use WithIAMAuthNTokenSources to set the token
+// When Auth IAM AuthN is enabled, use WithIAMAuthNTokenSources or WithIAMAuthNCredentials to set the token
 // source for login tokens separately from the API client token source.
-// WithTokenSource should not be used with WithIAMAuthNTokenSources.
+//
+// You may only use one of the following options:
+// WithIAMAuthNCredentials, WithIAMAuthNTokenSources, WithCredentials, WithTokenSource
 func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
 		d.setTokenSource = true
@@ -153,15 +155,58 @@ func WithTokenSource(s oauth2.TokenSource) Option {
 //
 //  1. https://www.googleapis.com/auth/sqlservice.login.
 //
-// Prefer this option over WithTokenSource when using IAM AuthN which does not
-// distinguish between the two token sources. WithIAMAuthNTokenSources should
-// not be used with WithTokenSource.
+// Prefer this option over WithTokenSource or WithCredentials when using IAM AuthN which does not
+// distinguish between the two token sources.
+//
+// You may only use one of the following options:
+// WithIAMAuthNCredentials, WithIAMAuthNTokenSources, WithCredentials, WithTokenSource
 func WithIAMAuthNTokenSources(apiTS, iamLoginTS oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
 		d.setIAMAuthNTokenSource = true
 		d.setCredentials = true
 		d.iamLoginTokenProvider = oauth2adapt.TokenProviderFromTokenSource(iamLoginTS)
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(apiTS))
+	}
+}
+
+// WithCredentials returns an Option that specifies an OAuth2 token source to be
+// used as the basis for authentication.
+//
+// When Auth IAM AuthN is enabled, use WithIAMAuthNTokenSources to set the token
+// source for login tokens separately from the API client token source.
+//
+// You may only use one of the following options:
+// WithIAMAuthNCredentials, WithIAMAuthNTokenSources, WithCredentials, WithTokenSource
+func WithCredentials(c *auth.Credentials) Option {
+	return func(d *dialerConfig) {
+		d.setTokenSource = true
+		d.setCredentials = true
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithAuthCredentials(c))
+	}
+}
+
+// WithIAMAuthNCredentials sets the oauth2.TokenSource for the API client and a
+// second token source for IAM AuthN login tokens. The API client token source
+// should have the following scopes:
+//
+//  1. https://www.googleapis.com/auth/sqlservice.admin, and
+//  2. https://www.googleapis.com/auth/cloud-platform
+//
+// The IAM AuthN token source on the other hand should only have:
+//
+//  1. https://www.googleapis.com/auth/sqlservice.login.
+//
+// Prefer this option over WithTokenSource or WithCredentials when using IAM AuthN which does not
+// distinguish between the two token sources.
+//
+// You may only use one of the following options:
+// WithIAMAuthNCredentials, WithIAMAuthNTokenSources, WithCredentials, WithTokenSource
+func WithIAMAuthNCredentials(apiCreds, iamCreds *auth.Credentials) Option {
+	return func(d *dialerConfig) {
+		d.setIAMAuthNTokenSource = true
+		d.setCredentials = true
+		d.iamLoginTokenProvider = iamCreds
+		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithAuthCredentials(apiCreds))
 	}
 }
 

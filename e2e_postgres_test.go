@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/auth"
+	"cloud.google.com/go/auth/credentials"
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
@@ -749,19 +751,25 @@ func TestPostgresV4Hook(t *testing.T) {
 // removeAuthEnvVar retrieves an OAuth2 token and a path to a service account key
 // and then unsets GOOGLE_APPLICATION_CREDENTIALS. It returns a cleanup function
 // that restores the original setup.
-func removeAuthEnvVar(t *testing.T) (*oauth2.Token, string, func()) {
+func removeAuthEnvVar(t *testing.T) (*oauth2.Token, *auth.Credentials, string, func()) {
 	ts, err := google.DefaultTokenSource(context.Background(),
 		"https://www.googleapis.com/auth/cloud-platform",
 	)
 	if err != nil {
 		t.Errorf("failed to resolve token source: %v", err)
 	}
+
+	creds, err := credentials.DetectDefault(&credentials.DetectOptions{Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}})
+	if err != nil {
+		t.Errorf("failed to resolve auth credentials: %v", err)
+	}
+
 	tok, err := ts.Token()
 	if err != nil {
 		t.Errorf("failed to get token: %v", err)
 	}
 	if ipType == "private" {
-		return tok, "", func() {}
+		return tok, creds, "", func() {}
 	}
 	path, ok := os.LookupEnv("GOOGLE_APPLICATION_CREDENTIALS")
 	if !ok {
@@ -770,7 +778,7 @@ func removeAuthEnvVar(t *testing.T) (*oauth2.Token, string, func()) {
 	if err := os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS"); err != nil {
 		t.Fatalf("failed to unset GOOGLE_APPLICATION_CREDENTIALS")
 	}
-	return tok, path, func() {
+	return tok, creds, path, func() {
 		os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path)
 	}
 }
@@ -798,7 +806,7 @@ func TestPostgresAuthentication(t *testing.T) {
 		creds = keyfile(t)
 	}
 	opts = addIPTypeOptions(opts)
-	tok, path, cleanup := removeAuthEnvVar(t)
+	tok, authCreds, path, cleanup := removeAuthEnvVar(t)
 	defer cleanup()
 
 	tcs := []struct {
@@ -810,6 +818,10 @@ func TestPostgresAuthentication(t *testing.T) {
 			opts: append(opts, cloudsqlconn.WithTokenSource(
 				oauth2.StaticTokenSource(tok),
 			)),
+		},
+		{
+			desc: "with auth credentials",
+			opts: append(opts, cloudsqlconn.WithCredentials(authCreds)),
 		},
 	}
 
