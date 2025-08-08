@@ -50,24 +50,47 @@ function e2e() {
   e2e_ci
 }
 
+# e2e_ci - Run end-to-end integration tests in the CI system.
+#   This assumes that the secrets in the env vars are already set.
 function e2e_ci() {
   go test -v -race -cover ./e2e_mysql_test.go ./e2e_postgres_test.go ./e2e_sqlserver_test.go | tee test_results.txt
 }
 
+# Download a tool using `go install`
+function get_golang_tool() {
+  name="$1"
+  github_repo="$2"
+  package=$3
+
+  # Download goimports tool
+  version=$(curl -s "https://api.github.com/repos/$github_repo/tags" | jq -r '.[].name' | head -n 1)
+  mkdir -p "$SCRIPT_DIR/.tools"
+  cmd="$SCRIPT_DIR/.tools/$name"
+  versioned_cmd="$SCRIPT_DIR/.tools/$name-$version"
+  if [[ ! -f "$versioned_cmd" ]] ; then
+    GOBIN="$SCRIPT_DIR/.tools" go install "$package@$version"
+    mv "$cmd" "$versioned_cmd"
+    if [[ -f "$cmd" ]] ; then
+      unlink "$cmd"
+    fi
+    ln -s "$versioned_cmd" "$cmd"
+  fi
+}
+
 ## fix - Fixes code format.
 function fix() {
+  # run code formatting
+  get_golang_tool 'goimports' 'golang/tools' 'golang.org/x/tools/cmd/goimports'
+  ".tools/goimports" -w .
   go mod tidy
   go fmt ./...
 }
 
 ## lint - runs the linters
 function lint() {
-  # run golangci-lint
-  mkdir -p "$SCRIPT_DIR/.tools"
-  if [[ ! -f "$SCRIPT_DIR/.tools/golangci-lint" ]] ; then
-    GOBIN="$SCRIPT_DIR/.tools" go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0
-  fi
-  "$SCRIPT_DIR/.tools/golangci-lint" run --timeout 3m
+  # run lint checks
+  get_golang_tool 'golangci-lint' 'golangci/golangci-lint' 'github.com/golangci/golangci-lint/v2/cmd/golangci-lint'
+  ".tools/golangci-lint" run --timeout 3m
 
   # Check the commit includes a go.mod that is fully
   # up to date.
@@ -77,10 +100,15 @@ function lint() {
   fi
 }
 
+# lint_ci runs lint in the CI build job
+function lint_ci() {
+  fix # run code format cleanup
+  git diff --exit-code # fail if anything changed
+  lint # run lint
+}
 
 # write_e2e_env - Loads secrets from the gcloud project and writes
 #     them to target/e2e.env to run e2e tests.
-#
 function write_e2e_env(){
   # All secrets used by the e2e tests in the form <env_name>=<secret_name>
   secret_vars=(
