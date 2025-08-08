@@ -29,10 +29,12 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/auth"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
+
 	"golang.org/x/oauth2"
 )
 
@@ -661,6 +663,40 @@ func TestTokenSourceWithIAMAuthN(t *testing.T) {
 			desc:    "when IAM AuthN token source is set without IAM AuthN",
 			opts:    []Option{WithIAMAuthNTokenSources(ts, ts)},
 			wantErr: true,
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			_, err := NewDialer(context.Background(), tc.opts...)
+			gotErr := err != nil
+			if tc.wantErr != gotErr {
+				t.Fatalf("err: want = %v, got = %v", tc.wantErr, gotErr)
+			}
+		})
+	}
+}
+
+func TestCredentialsWithIAMAuthN(t *testing.T) {
+	ts := &auth.Credentials{}
+	tcs := []struct {
+		desc    string
+		opts    []Option
+		wantErr bool
+	}{
+		{
+			desc:    "when token source is set with IAM AuthN",
+			opts:    []Option{WithCredentials(ts), WithIAMAuthN()},
+			wantErr: true,
+		},
+		{
+			desc:    "when IAM AuthN token source is set without IAM AuthN",
+			opts:    []Option{WithIAMAuthNCredentials(ts, ts)},
+			wantErr: true,
+		},
+		{
+			desc:    "when IAM AuthN token source is set with IAM AuthN",
+			opts:    []Option{WithIAMAuthNCredentials(ts, ts), WithIAMAuthN()},
+			wantErr: false,
 		},
 	}
 	for _, tc := range tcs {
