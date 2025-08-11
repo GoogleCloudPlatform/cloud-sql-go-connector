@@ -119,7 +119,7 @@ jobs:
         # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
         shell: bash
         run: |
-          go test -v -race -cover ./e2e_mysql_test.go ./e2e_postgres_test.go ./e2e_sqlserver_test.go | tee test_results.txt
+          ./build.sh e2e_ci
 
       - name: Convert test output to XML
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() }}
