@@ -133,7 +133,7 @@ function e2e_ci() {
 function get_golang_tool() {
   name="$1"
   github_repo="$2"
-  package=$3
+  package="$3"
 
   # Download goimports tool
   version=$(curl -s "https://api.github.com/repos/$github_repo/tags" | jq -r '.[].name' | head -n 1)
@@ -173,11 +173,18 @@ function lint() {
   fi
 }
 
-# lint_ci runs lint in the CI build job
+# lint_ci - runs lint in the CI build job, exiting with an error code if lint fails.
 function lint_ci() {
   fix # run code format cleanup
   git diff --exit-code # fail if anything changed
   lint # run lint
+}
+
+## deps - updates project dependencies to latest
+function deps() {
+  go get -u ./...
+  go get -t -u ./...
+  go mod tidy
 }
 
 # write_e2e_env - Loads secrets from the gcloud project and writes
