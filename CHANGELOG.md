@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.17.3...v1.18.0) (2025-08-12)
+
+
+### Features
+
+* Configure the connector with Google Auth Credentials. ([#997](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/997)) ([594e083](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/594e0834437e9541d61d10d7b137ae3d6d5210e5))
+
 ## [1.17.3](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.17.2...v1.17.3) (2025-07-10)
 
 
