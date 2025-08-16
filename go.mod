@@ -3,7 +3,7 @@ module cloud.google.com/go/cloudsqlconn
 go 1.23.0
 
 require (
-	cloud.google.com/go/auth v0.16.4
+	cloud.google.com/go/auth v0.16.5
 	cloud.google.com/go/auth/oauth2adapt v0.2.8
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
