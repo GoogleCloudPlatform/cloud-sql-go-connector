@@ -323,8 +323,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 }
 
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The
-// icn argument must be the instance's connection name, which is in the format
-// "project-name:region:instance-name".
+// icn argument may be the instance's connection name in the format
+// "project-name:region:instance-name" or a DNS name that resolves to an
+// instance connection name.
 func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn net.Conn, err error) {
 	select {
 	case <-d.closed:
@@ -346,8 +347,9 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		return nil, err
 	}
 	// Log if resolver changed the instance name input string.
-	if cn.String() != icn {
-		d.logger.Debugf(ctx, "resolved instance %s to %s", icn, cn)
+	resolvedICN := fmt.Sprintf("%s:%s:%s", cn.Project(), cn.Region(), cn.Name())
+	if resolvedICN != icn {
+		d.logger.Debugf(ctx, "resolved instance %s to %s", icn, resolvedICN)
 	}
 
 	cfg := d.defaultDialConfig
