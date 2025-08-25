@@ -346,10 +346,14 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	if err != nil {
 		return nil, err
 	}
+
 	// Log if resolver changed the instance name input string.
-	resolvedICN := fmt.Sprintf("%s:%s:%s", cn.Project(), cn.Region(), cn.Name())
-	if resolvedICN != icn {
-		d.logger.Debugf(ctx, "resolved instance %s to %s", icn, resolvedICN)
+	if cn.DomainName() != "" {
+		// icn is a domain name, which resolves to a actual icn
+		d.logger.Debugf(ctx, "resolved dns: %s", icn, cn.String())
+	} else if cn.String() != icn {
+		// icn was not a domain name, but the resolver changed it and cn != icn
+		d.logger.Debugf(ctx, "resolved instance connection string %s to %s", icn, cn.String())
 	}
 
 	cfg := d.defaultDialConfig
