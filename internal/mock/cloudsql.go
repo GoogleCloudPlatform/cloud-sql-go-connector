@@ -15,6 +15,7 @@
 package mock
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -25,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -338,4 +340,218 @@ func RotateCA(inst FakeCSQLInstance) {
 // RotateClientCA rotates only client CA certificates and keys.
 func RotateClientCA(inst FakeCSQLInstance) {
 	inst.certs.rotateClientCA()
+}
+
+// FailoverTestServer creates a mock server listening on port 3307
+// using TLS certificate validation like a real CloudSQL instance.
+type FailoverTestServer struct {
+	t  *testing.T
+	ln net.Listener
+	// The cancel function for the accept loop
+	cancel func()
+
+	// The context for connections
+	connCtx context.Context
+	// The cancel function for open connections
+	connCancel func()
+
+	activeInstance *FakeCSQLInstance
+
+	readBufLock sync.Mutex
+	readBuf     []byte
+}
+
+// NewFailoverTestServer creates a new test server.
+func NewFailoverTestServer(t *testing.T) *FailoverTestServer {
+	connCtx, connCancelFn := context.WithCancel(context.Background())
+	return &FailoverTestServer{
+		t:          t,
+		connCtx:    connCtx,
+		connCancel: connCancelFn,
+	}
+}
+
+// Start starts the test server up, to make sure that it is ready to go
+func (s *FailoverTestServer) Start(i *FakeCSQLInstance) {
+
+	ln, err := tls.Listen("tcp", ":3307", &tls.Config{
+		Certificates: i.certs.serverChain(i.useStandardTLSValidation),
+		ClientCAs:    i.certs.clientCAPool(),
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+	})
+	if err != nil {
+		s.t.Fatalf("failed to start listener: %v", err)
+	}
+	ctx, cancelFn := context.WithCancel(context.Background())
+
+	s.ln = ln
+	s.cancel = cancelFn
+	s.activeInstance = i
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				conn, aErr := ln.Accept()
+				if opErr, ok := aErr.(net.Error); ok {
+					if opErr.Timeout() {
+						continue
+					}
+					return
+				}
+				if aErr == io.EOF {
+					return
+				}
+				if aErr != nil {
+					s.t.Logf("Fake server accept error: %v", aErr)
+					return
+				}
+				go s.handleConnection(conn)
+			}
+		}
+	}()
+}
+
+// Stop closes the server socket, but leaves existing client sockets open.
+func (s *FailoverTestServer) Stop() {
+	s.cancel()
+	_ = s.ln.Close()
+	s.activeInstance = nil
+}
+
+// Close closes the server socket and client sockets.
+func (s *FailoverTestServer) Close() {
+	s.Stop()
+	s.connCancel()
+}
+
+// handleConnection handles a single client socket.
+func (s *FailoverTestServer) handleConnection(conn net.Conn) {
+	s.t.Logf("server: handled connection")
+	defer conn.Close()
+	r := bufio.NewReader(conn)
+	nameAtStart := s.activeInstance.name
+	for {
+		select {
+		case <-s.connCtx.Done():
+			s.t.Logf("server %v: context done", nameAtStart)
+			return
+		default:
+
+			l, _, rErr := r.ReadLine()
+			if rErr == io.EOF {
+				return
+			}
+			s.readBufLock.Lock()
+			s.readBuf = append(s.readBuf, l...)
+			s.readBufLock.Unlock()
+
+			var nameNow string
+			if s.activeInstance != nil {
+				nameNow = s.activeInstance.name
+			}
+
+			_, wErr := conn.Write([]byte(nameNow + "\n"))
+			if wErr != nil {
+				s.t.Logf("server: write error: %v", wErr)
+				return
+			}
+			s.t.Logf("server: handled read, %v", string(l))
+		}
+	}
+}
+
+// DbClient represents an open connection to the FailoverTestServer.
+// it sends a message every 2 seconds and reads the response until
+// Close() is called.
+type DbClient struct {
+	// The Id of this client for debugging ease
+	id string
+	// This channel is open until
+	C chan struct{}
+	// The connection that the dialer created
+	conn net.Conn
+	//
+	t          *testing.T
+	serverName string
+	mu         sync.Mutex
+	closed     bool
+	readCount  int
+	recv       []string
+}
+
+// NewDbClient creates a new client that sends and receives data from the
+// conn.
+func NewDbClient(t *testing.T, conn net.Conn, id string) *DbClient {
+	return &DbClient{
+		id:   id,
+		t:    t,
+		conn: conn,
+		C:    make(chan struct{}),
+	}
+}
+
+// Execute runs the loop to send and receive data from the client. This will
+// stop when ctx Context is canceled.
+func (c *DbClient) Execute(ctx context.Context) {
+	c.t.Logf("client %v: Starting", c.id)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	defer c.Close()
+	r := bufio.NewReader(c.conn)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.t.Logf("client %v: writing hello", c.id)
+			c.conn.Write([]byte(fmt.Sprintf("hello %s\n", c.id)))
+			data, _, err := r.ReadLine()
+			if err == io.EOF {
+				c.t.Logf("client %v: Connection closed", c.id)
+				return
+			}
+			if err != nil {
+				c.t.Logf("client %v: error %v", c.id, err)
+				return
+			}
+			c.mu.Lock()
+			c.readCount++
+			c.recv = append(c.recv, string(data))
+			c.mu.Unlock()
+			c.t.Logf("client %v: received %v", c.id, string(data))
+		}
+	}
+}
+
+// Close stops the send-receive loop and closes the socket.
+func (c *DbClient) Close() {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.t.Logf("client %v: Closing", c.id)
+	c.conn.Close()
+	close(c.C)
+	c.closed = true
+	c.mu.Unlock()
+}
+
+// Closed reports whether the client has been closed.
+func (c *DbClient) Closed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
+// Recv returns a copy of the messages received by the client.
+func (c *DbClient) Recv() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r := make([]string, len(c.recv))
+	copy(r, c.recv)
+	return r
 }

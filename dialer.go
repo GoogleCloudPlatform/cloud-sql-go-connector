@@ -754,7 +754,7 @@ func (d *Dialer) connectionInfoCache(
 			d.dialerID, useIAMAuthNDial,
 		)
 	}
-	c = newMonitoredCache(ctx, cache, cn, d.failoverPeriod, d.resolver, d.logger)
+	c = newMonitoredCache(cache, cn, d.failoverPeriod, d.resolver, d.logger)
 	d.cache[k] = c
 
 	return c, nil

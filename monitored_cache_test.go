@@ -35,13 +35,7 @@ func (l *testLog) Debugf(_ context.Context, f string, args ...interface{}) {
 
 func TestMonitoredCache_purgeClosedConns(t *testing.T) {
 	cn, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
-	c := newMonitoredCache(context.TODO(),
-		&spyConnectionInfoCache{},
-		cn,
-		10*time.Millisecond,
-		&fakeResolver{entries: map[string]instance.ConnName{"db.example.com": cn}},
-		&testLog{t: t},
-	)
+	c := newMonitoredCache(&spyConnectionInfoCache{}, cn, 10*time.Millisecond, &fakeResolver{entries: map[string]instance.ConnName{"db.example.com": cn}}, &testLog{t: t})
 
 	// Add connections
 	c.mu.Lock()
@@ -64,13 +58,7 @@ func TestMonitoredCache_purgeClosedConns(t *testing.T) {
 func TestMonitoredCache_checkDomainName_instanceChanged(t *testing.T) {
 	cn, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "update.example.com")
 	r := &changingResolver{}
-	c := newMonitoredCache(context.TODO(),
-		&spyConnectionInfoCache{},
-		cn,
-		10*time.Millisecond,
-		r,
-		&testLog{t: t},
-	)
+	c := newMonitoredCache(&spyConnectionInfoCache{}, cn, 10*time.Millisecond, r, &testLog{t: t})
 
 	// Dont' change the instance yet. Check that the connection is open.
 	// wait for the resolver to run
@@ -95,13 +83,7 @@ func TestMonitoredCache_Close(t *testing.T) {
 
 	r := &changingResolver{}
 
-	c := newMonitoredCache(context.TODO(),
-		&spyConnectionInfoCache{},
-		cn,
-		10*time.Millisecond,
-		r,
-		&testLog{t: t},
-	)
+	c := newMonitoredCache(&spyConnectionInfoCache{}, cn, 10*time.Millisecond, r, &testLog{t: t})
 	inc := func() {
 		closeFuncCalls.Add(1)
 	}
