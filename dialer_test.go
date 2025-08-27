@@ -413,7 +413,7 @@ func TestEngineVersionRemovesInvalidInstancesFromCache(t *testing.T) {
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[createKey(inst)] = newMonitoredCache(nil, spy, inst, 0, nil, nil)
+			d.cache[createKey(inst)] = newMonitoredCache(spy, inst, 0, nil, nil)
 
 			_, err = d.EngineVersion(context.Background(), tc.icn)
 			if err == nil {
@@ -561,7 +561,7 @@ func TestWarmupRemovesInvalidInstancesFromCache(t *testing.T) {
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[createKey(inst)] = newMonitoredCache(nil, spy, inst, 0, nil, nil)
+			d.cache[createKey(inst)] = newMonitoredCache(spy, inst, 0, nil, nil)
 
 			err = d.Warmup(context.Background(), tc.icn, tc.opts...)
 			if err == nil {
@@ -769,7 +769,7 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 			spy := &spyConnectionInfoCache{
 				connectInfoCalls: []connectionInfoResp{tc.resp},
 			}
-			d.cache[createKey(inst)] = newMonitoredCache(nil, spy, inst, 0, nil, nil)
+			d.cache[createKey(inst)] = newMonitoredCache(spy, inst, 0, nil, nil)
 
 			_, err = d.Dial(context.Background(), tc.icn, tc.opts...)
 			if err == nil {
@@ -819,7 +819,7 @@ func TestDialRefreshesExpiredCertificates(t *testing.T) {
 			},
 		},
 	}
-	d.cache[createKey(cn)] = newMonitoredCache(nil, spy, cn, 0, nil, nil)
+	d.cache[createKey(cn)] = newMonitoredCache(spy, cn, 0, nil, nil)
 
 	_, err = d.Dial(context.Background(), icn)
 	if !errors.Is(err, sentinel) {

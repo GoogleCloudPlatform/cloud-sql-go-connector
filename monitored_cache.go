@@ -45,7 +45,6 @@ type monitoredCache struct {
 }
 
 func newMonitoredCache(
-	ctx context.Context,
 	cache connectionInfoCache,
 	cn instance.ConnName,
 	failoverPeriod time.Duration,
@@ -62,17 +61,20 @@ func newMonitoredCache(
 	if cn.HasDomainName() {
 		c.domainNameTicker = time.NewTicker(failoverPeriod)
 		go func() {
+			dnCheckCtx, cancelFn := context.WithCancel(context.Background())
+			defer cancelFn()
 			for {
 				select {
 				case <-c.domainNameTicker.C:
 					c.purgeClosedConns()
-					c.checkDomainName(ctx)
+					c.checkDomainName(dnCheckCtx)
+				case <-dnCheckCtx.Done():
+					return
 				case <-c.closedCh:
 					return
 				}
 			}
 		}()
-
 	}
 
 	return c
