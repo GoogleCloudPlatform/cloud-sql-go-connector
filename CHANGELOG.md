@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.18.0...v1.18.1) (2025-08-27)
+
+
+### Bug Fixes
+
+* Use a new context for the domain name check loop. ([#1007](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1007)) ([908d0cf](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/908d0cf6a69fc37d56aea4823ff5b9dfc673dc42))
+
 ## [1.18.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.17.3...v1.18.0) (2025-08-12)
 
 
