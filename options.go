@@ -461,9 +461,10 @@ func WithDialIAMAuthN(b bool) DialOption {
 }
 
 // WithMdxClientProtocolType controls client protocol type is sent to the server
-// in the metadata exchange request. This may be one of cloudsql.TLS cloudsql.TCP
-// or cloudsql.UDS. If this is empty, it will be omitted from the MDX request.
+// in the metadata exchange request. This may be one of cloudsql.ClientProtocolTLS cloudsql.ClientProtocolTCP
+// or cloudsql.ClientProtocolUDS. If this is empty, it will be omitted from the MDX request.
 // This is important for MySQL clients that use caching_sha2_password.
+// Valid values: "tls" "tcp" "uds"
 func WithMdxClientProtocolType(s string) DialOption {
 	return func(cfg *dialConfig) {
 		cfg.mdxClientProtocolType = s

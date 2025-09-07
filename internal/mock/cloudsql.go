@@ -23,9 +23,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -318,11 +320,30 @@ func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 					t.Logf("Fake server accept error: %v", aErr)
 					return
 				}
-				_, wErr := conn.Write([]byte(i.name))
-				if wErr != nil {
-					t.Logf("Fake server write error: %v", wErr)
-				}
-				_ = conn.Close()
+
+				go func(c net.Conn) {
+					csqlBytes := make([]byte, 8)
+					c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+					_, rErr := c.Read(csqlBytes)
+					if errors.Is(err, os.ErrDeadlineExceeded) {
+						t.Logf("Read timeout")
+					} else if rErr != nil {
+						t.Logf("Fake server read error: %v", rErr)
+					}
+					var res []byte
+					if bytes.Compare(csqlBytes, []byte("CSQLMDEX")) == 0 {
+						// This is byte-level equivalent of
+						// mdx.MetadataExchangeResponse{Status:OK}
+						res = []byte("CSQLMDEX")
+						res = append(res, []byte{0x0, 0x0, 0x0, 0x2, 0x8, 0x1}...)
+					}
+					res = append(res, []byte(i.name)...)
+					_, wErr := c.Write(res)
+					if wErr != nil {
+						t.Logf("Fake server write error: %v", wErr)
+					}
+					_ = c.Close()
+				}(conn)
 			}
 		}
 	}()

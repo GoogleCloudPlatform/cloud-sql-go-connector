@@ -42,19 +42,23 @@ const (
 	// IP.
 	AutoIP = "AutoIP"
 
-	TCP = "tcp"
-	UDS = "uds"
-	TLS = "tls"
+	// ClientProtocolTCP The value for the TCP client protocol type for MDX.
+	ClientProtocolTCP = "tcp"
+	// ClientProtocolUDS The value for the UDS client protocol type for MDX.
+	ClientProtocolUDS = "uds"
+	// ClientProtocolTLS The value for the TLS client protocol type for MDX.
+	ClientProtocolTLS = "tls"
 )
 
 // metadata contains information about a Cloud SQL instance needed to create
 // connections.
 type metadata struct {
-	ipAddrs      map[string]string
-	serverCACert []*x509.Certificate
-	serverCAMode string
-	dnsName      string
-	version      string
+	ipAddrs            map[string]string
+	serverCACert       []*x509.Certificate
+	serverCAMode       string
+	dnsName            string
+	version            string
+	mdxProtocolSupport []string
 }
 
 // fetchMetadata uses the Cloud SQL Admin APIs get method to retrieve the
@@ -151,7 +155,7 @@ func fetchMetadata(
 	}
 
 	// Find a DNS name to use to validate the certificate from the dns_names field. Any
-	// name in the list may be used to validate the server TLS certificate.
+	// name in the list may be used to validate the server CLIENT_PROTOCOL_TLS certificate.
 	// Fall back to legacy dns_name field if necessary.
 	var serverName string
 	if len(db.DnsNames) > 0 {
@@ -162,18 +166,19 @@ func fetchMetadata(
 	}
 
 	m = metadata{
-		ipAddrs:      ipAddrs,
-		serverCACert: caCerts,
-		version:      db.DatabaseVersion,
-		dnsName:      serverName,
-		serverCAMode: db.ServerCaMode,
+		ipAddrs:            ipAddrs,
+		serverCACert:       caCerts,
+		version:            db.DatabaseVersion,
+		dnsName:            serverName,
+		serverCAMode:       db.ServerCaMode,
+		mdxProtocolSupport: db.MdxProtocolSupport,
 	}
 
 	return m, nil
 }
 
 // fetchEphemeralCert uses the Cloud SQL Admin API's createEphemeral method to
-// create a signed TLS certificate that authorized to connect via the Cloud SQL
+// create a signed ClientProtocolTLS certificate that authorized to connect via the Cloud SQL
 // instance's serverside proxy. The cert if valid for approximately one hour.
 func fetchEphemeralCert(
 	ctx context.Context,
@@ -354,7 +359,7 @@ func (c adminAPIClient) ConnectionInfo(
 	}
 
 	return NewConnectionInfo(
-		cn, md.dnsName, md.serverCAMode, md.version, md.ipAddrs, md.serverCACert, ec,
+		cn, md.dnsName, md.serverCAMode, md.version, md.ipAddrs, md.serverCACert, ec, md.mdxProtocolSupport,
 	), nil
 }
 

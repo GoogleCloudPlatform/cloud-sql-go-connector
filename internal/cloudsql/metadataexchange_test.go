@@ -1,3 +1,17 @@
+// Copyright 2025 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package cloudsql
 
 import (
@@ -43,129 +57,195 @@ func (c *fakeConn) SetDeadline(_ time.Time) error {
 	return nil
 }
 
-func newFakeConn(input []byte) *fakeConn {
+func newFakeConn(bytesToRead []byte) *fakeConn {
 	return &fakeConn{
-		r: bytes.NewReader(input),
+		r: bytes.NewReader(bytesToRead),
 		w: &bytes.Buffer{},
 	}
 }
 
-func TestNewMDXConn(t *testing.T) {
-	fakeConn := newFakeConn([]byte{})
-	logger := &testLogger{t: t}
-	cn := "my-instance"
-	mdxConn := NewMDXConn(fakeConn, cn, logger)
+func newMDXResponseBytes(data []byte) (*mdx.MetadataExchangeResponse, []byte) {
+	res := &mdx.MetadataExchangeResponse{
+		ResponseStatusCode: ptr(mdx.MetadataExchangeResponse_OK),
+	}
+	resBytes, err := proto.Marshal(res)
+	if err != nil {
+		panic(err)
+	}
+	msg := make([]byte, len(resBytes)+mdxHeaderLength)
+	copy(msg[:mdxSignatureLength], signature)
+	binary.BigEndian.PutUint32(msg[mdxSignatureLength:mdxHeaderLength], uint32(len(resBytes)))
+	copy(msg[mdxHeaderLength:], resBytes)
+	msg = append(msg, data...)
 
-	if mdxConn.Conn != fakeConn {
-		t.Errorf("expected Conn to be the fake connection")
-	}
-	if mdxConn.r == nil {
-		t.Errorf("expected buffered reader to be initialized")
-	}
-	if mdxConn.logger != logger {
-		t.Errorf("expected logger to be set")
-	}
-	if mdxConn.cn != cn {
-		t.Errorf("expected common name to be set")
-	}
+	return res, msg
 }
 
-func TestMDXConnRead(t *testing.T) {
-	input := []byte("hello world")
-	fakeConn := newFakeConn(input)
-	mdxConn := NewMDXConn(fakeConn, "", &testLogger{t: t})
+func newMDXRequestBytes(data []byte) (*mdx.MetadataExchangeRequest, []byte) {
+	req := &mdx.MetadataExchangeRequest{UserAgent: proto.String("hello")}
+	resBytes, err := proto.Marshal(req)
+	if err != nil {
+		panic(err)
+	}
+	msg := make([]byte, len(resBytes)+mdxHeaderLength)
+	copy(msg[:mdxSignatureLength], signature)
+	binary.BigEndian.PutUint32(msg[mdxSignatureLength:mdxHeaderLength], uint32(len(resBytes)))
+	copy(msg[mdxHeaderLength:], resBytes)
+	msg = append(msg, data...)
 
-	buf := make([]byte, len(input))
+	return req, msg
+}
+
+func TestMDXConn_NoRequest_NoResponse_Read(t *testing.T) {
+	wantFirstRead := []byte("hello to db")
+
+	fakeConn := newFakeConn(wantFirstRead)
+	mdxConn := NewMDXConn(fakeConn, "", nil, &testLogger{t: t})
+
+	buf := make([]byte, len(wantFirstRead))
 	n, err := mdxConn.Read(buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if n != len(input) {
-		t.Fatalf("expected to read %d bytes, but got %d", len(input), n)
+	if n != len(wantFirstRead) {
+		t.Fatalf("expected to read %d bytes, but got %d", len(wantFirstRead), n)
 	}
-	if !bytes.Equal(buf, input) {
-		t.Fatalf("expected to read %q, but got %q", input, buf)
+	if !bytes.Equal(buf, wantFirstRead) { // This line was the previous edit.
+		t.Fatalf("expected to read %q, but got %q", wantFirstRead, buf)
+	}
+	if mdxConn.HasMDXResponse() {
+		t.Fatalf("expected no MDX response, got response")
 	}
 }
 
-func TestReadMDX(t *testing.T) {
-	logger := &testLogger{t: t}
-	cn := "my-instance"
-	ctx := context.Background()
+func TestMDXConn_NoRequest_NoResponse_WriteRead(t *testing.T) {
+	wantFirstWrite := []byte("hello to db")
+	wantFirstRead := []byte("hello to client")
 
-	t.Run("no MDX response", func(t *testing.T) {
-		fakeConn := newFakeConn([]byte("not mdx"))
-		mdxConn := NewMDXConn(fakeConn, cn, logger)
-		_, err := mdxConn.ReadMDX(ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if mdxConn.HasMDXResponse() {
-			t.Fatal("expected no mdx response")
-		}
-	})
+	fakeConn := newFakeConn(wantFirstRead)
+	mdxConn := NewMDXConn(fakeConn, "", nil, &testLogger{t: t})
 
-	t.Run("valid MDX response", func(t *testing.T) {
-		res := &mdx.MetadataExchangeResponse{
-			ResponseStatusCode: ptr(mdx.MetadataExchangeResponse_OK),
-		}
-		resBytes, err := proto.Marshal(res)
-		if err != nil {
-			t.Fatalf("failed to marshal proto: %v", err)
-		}
-		msg := make([]byte, len(resBytes)+mdxHeaderLength)
-		copy(msg[:mdxSignatureLength], signature)
-		binary.BigEndian.PutUint32(msg[mdxSignatureLength:mdxHeaderLength], uint32(len(resBytes)))
-		copy(msg[mdxHeaderLength:], resBytes)
+	assertWrite(t, mdxConn, wantFirstWrite, wantFirstWrite, fakeConn)
+	assertRead(t, wantFirstRead, mdxConn)
 
-		fakeConn := newFakeConn(msg)
-		mdxConn := NewMDXConn(fakeConn, cn, logger)
-		_, err = mdxConn.ReadMDX(ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !mdxConn.HasMDXResponse() {
-			t.Fatal("expected mdx response")
-		}
-		if *mdxConn.GetMDXResponse().ResponseStatusCode != mdx.MetadataExchangeResponse_OK {
-			t.Fatalf("expected server version %q, but got %q", mdx.MetadataExchangeResponse_OK, mdxConn.GetMDXResponse().ResponseStatusCode)
-		}
-	})
+	if mdxConn.HasMDXResponse() {
+		t.Fatalf("expected no MDX response, got response")
+	}
 }
 
-func TestWriteMDX(t *testing.T) {
-	logger := &testLogger{t: t}
-	cn := "my-instance"
-	ctx := context.Background()
+func TestMDXConn_NoRequest_NoResponse_ReadWrite(t *testing.T) {
+	wantFirstWrite := []byte("hello to db")
+	wantFirstRead := []byte("hello to client")
 
-	req := &mdx.MetadataExchangeRequest{
-		ClientProtocolType: ptr(mdx.MetadataExchangeRequest_TCP),
+	fakeConn := newFakeConn(wantFirstRead)
+	mdxConn := NewMDXConn(fakeConn, "", nil, &testLogger{t: t})
+
+	assertRead(t, wantFirstRead, mdxConn)
+	assertWrite(t, mdxConn, wantFirstWrite, wantFirstWrite, fakeConn)
+
+	if mdxConn.HasMDXResponse() {
+		t.Fatalf("expected no MDX response, got response")
 	}
+}
 
-	fakeConn := newFakeConn(nil)
-	mdxConn := NewMDXConn(fakeConn, cn, logger)
-	err := mdxConn.WriteMDX(ctx, req)
+func TestMDXConn_Request_NoResponse_ReadWrite(t *testing.T) {
+	wantFirstWrite := []byte("hello to db")
+	wantFirstRead := []byte("hello to client")
+	req, reqBytes := newMDXRequestBytes(wantFirstWrite)
+
+	fakeConn := newFakeConn(wantFirstRead)
+	mdxConn := NewMDXConn(fakeConn, "", req, &testLogger{t: t})
+
+	assertRead(t, wantFirstRead, mdxConn)
+	assertWrite(t, mdxConn, wantFirstWrite, reqBytes, fakeConn)
+
+	if mdxConn.HasMDXResponse() {
+		t.Fatalf("expected no MDX response, got response")
+	}
+}
+
+func TestMDXConn_Request_NoResponse_WriteRead(t *testing.T) {
+	wantFirstWrite := []byte("hello to db")
+	wantFirstRead := []byte("hello to client")
+	req, reqBytes := newMDXRequestBytes(wantFirstWrite)
+
+	fakeConn := newFakeConn(wantFirstRead)
+	mdxConn := NewMDXConn(fakeConn, "", req, &testLogger{t: t})
+
+	assertWrite(t, mdxConn, wantFirstWrite, reqBytes, fakeConn)
+	assertRead(t, wantFirstRead, mdxConn)
+
+	if mdxConn.HasMDXResponse() {
+		t.Fatalf("expected no MDX response, got response")
+	}
+}
+
+func TestMDXConn_Request_Response_WriteRead(t *testing.T) {
+	wantFirstWrite := []byte("hello to db")
+	wantFirstRead := []byte("hello to client")
+	req, reqBytes := newMDXRequestBytes(wantFirstWrite)
+	res, resBytes := newMDXResponseBytes(wantFirstRead)
+
+	fakeConn := newFakeConn(resBytes)
+	mdxConn := NewMDXConn(fakeConn, "", req, &testLogger{t: t})
+
+	assertWrite(t, mdxConn, wantFirstWrite, reqBytes, fakeConn)
+	assertRead(t, wantFirstRead, mdxConn)
+
+	if !mdxConn.HasMDXResponse() {
+		t.Fatalf("expected no MDX response, got response")
+	}
+	if *mdxConn.GetMDXResponse().ResponseStatusCode != *res.ResponseStatusCode {
+		t.Fatalf("expected status code %v, got %v",
+			res.ResponseStatusCode, mdxConn.GetMDXResponse().ResponseStatusCode)
+	}
+}
+
+func TestMDXConn_Request_Response_ReadWrite(t *testing.T) {
+	wantFirstWrite := []byte("hello to db")
+	wantFirstRead := []byte("hello to client")
+	req, reqBytes := newMDXRequestBytes(wantFirstWrite)
+	res, resBytes := newMDXResponseBytes(wantFirstRead)
+
+	fakeConn := newFakeConn(resBytes)
+	mdxConn := NewMDXConn(fakeConn, "", req, &testLogger{t: t})
+
+	assertRead(t, wantFirstRead, mdxConn)
+	assertWrite(t, mdxConn, wantFirstWrite, reqBytes, fakeConn)
+
+	if !mdxConn.HasMDXResponse() {
+		t.Fatalf("expected no MDX response, got response")
+	}
+	if *mdxConn.GetMDXResponse().ResponseStatusCode != *res.ResponseStatusCode {
+		t.Fatalf("expected status code %v, got %v",
+			res.ResponseStatusCode, mdxConn.GetMDXResponse().ResponseStatusCode)
+	}
+}
+
+func assertRead(t *testing.T, wantFirstRead []byte, mdxConn *MDXConn) {
+	buf := make([]byte, len(wantFirstRead))
+	n, err := mdxConn.Read(buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	// Verify the written data
-	written := fakeConn.w.Bytes()
-	if !bytes.HasPrefix(written, signature) {
-		t.Fatalf("expected signature prefix, but got %q", written)
+	if n != len(wantFirstRead) {
+		t.Fatalf("expected to read %d bytes, but got %d", len(wantFirstRead), n)
 	}
+	if !bytes.Equal(buf, wantFirstRead) { // This line was the previous edit.
+		t.Fatalf("expected to read %q, but got %q", wantFirstRead, buf)
+	}
+}
 
-	reqBytes, err := proto.Marshal(req)
+func assertWrite(t *testing.T, mdxConn *MDXConn, firstWrite []byte, wantWriteData []byte, fakeConn *fakeConn) {
+	// Write
+	n, err := mdxConn.Write(firstWrite)
 	if err != nil {
-		t.Fatalf("failed to marshal proto: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	expectedLen := uint32(len(reqBytes))
-	actualLen := binary.BigEndian.Uint32(written[8:12])
-	if actualLen != expectedLen {
-		t.Fatalf("expected length %d, but got %d", expectedLen, actualLen)
+	if n != len(firstWrite) {
+		t.Fatalf("expected to write %d bytes, but got %d", len(firstWrite), n)
 	}
-
-	if !bytes.HasSuffix(written, reqBytes) {
-		t.Fatalf("expected request bytes suffix, but got %q", written)
+	if !bytes.Equal(fakeConn.w.Bytes(), wantWriteData) {
+		t.Fatalf("expected signature prefix, but got %q", fakeConn.w.Bytes())
 	}
 }
