@@ -155,7 +155,7 @@ func fetchMetadata(
 	}
 
 	// Find a DNS name to use to validate the certificate from the dns_names field. Any
-	// name in the list may be used to validate the server CLIENT_PROTOCOL_TLS certificate.
+	// name in the list may be used to validate the server TLS certificate.
 	// Fall back to legacy dns_name field if necessary.
 	var serverName string
 	if len(db.DnsNames) > 0 {

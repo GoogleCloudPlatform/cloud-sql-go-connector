@@ -74,7 +74,7 @@ func (c *LazyRefreshCache) ConnectionInfo(
 	defer c.mu.Unlock()
 	// strip monotonic clock with UTC()
 	now := time.Now().UTC()
-	// Pad expiration with a buffer to give the client plenty of time to
+	// Pad expiration with a bufferPool to give the client plenty of time to
 	// establish a connection to the server with the certificate.
 	exp := c.cached.Expiration.UTC().Add(-refreshBuffer)
 	if !c.needsRefresh && now.Before(exp) {

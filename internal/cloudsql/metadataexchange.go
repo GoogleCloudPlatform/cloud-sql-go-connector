@@ -24,6 +24,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
@@ -31,11 +32,39 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const maxMessageSize = 16384
+const maxMessageSize = 16 * 1024
+const signatureStr = "CSQLMDEX"
+const mdxSignatureLength = len(signatureStr)
+const mdxHeaderLength = mdxSignatureLength + 4
 
-var signature = []byte("CSQLMDEX")
-var mdxSignatureLength = len(signature)
-var mdxHeaderLength = mdxSignatureLength + 4
+var (
+	signature = []byte(signatureStr)
+	buffPool  = newBufferPool()
+)
+
+type bufferPool struct {
+	pool sync.Pool
+}
+
+func newBufferPool() *bufferPool {
+	return &bufferPool{
+		pool: sync.Pool{
+			New: func() any {
+				buf := make([]byte, 0, maxMessageSize)
+				return &buf
+			},
+		},
+	}
+}
+
+func (b *bufferPool) get() *[]byte {
+	return b.pool.Get().(*[]byte)
+}
+
+func (b *bufferPool) put(buf *[]byte) {
+	*buf = (*buf)[:0]
+	b.pool.Put(buf)
+}
 
 // MDXConn holds the ClientProtocolTLS connection and additional connection metadata.
 type MDXConn struct {
@@ -113,7 +142,7 @@ func (c *MDXConn) readMDX() (*mdx.MetadataExchangeResponse, error) {
 		if errors.Is(err, os.ErrDeadlineExceeded) {
 			c.logger.Debugf(ctx, "MDX Read Timeout Error: error peeking first %d bytes for the MDX request: %v", l, err)
 			// Ignore IO timeout error. Assume that if no MDX was sent within 250ms following the
-			// CLIENT_PROTOCOL_TLS handshake, then there will be no MDX request, and the database client is waiting for
+			// TLS handshake, then there will be no MDX request, and the database client is waiting for
 			// the server to respond.
 			return nil, errtype.NewDialError(fmt.Sprintf("MDX Read Timeout Error: error peeking first %d bytes for the MDX request: %v", l, err), c.cn, err)
 		} else if err != nil {
@@ -129,8 +158,8 @@ func (c *MDXConn) readMDX() (*mdx.MetadataExchangeResponse, error) {
 
 	// Received a MDX signature, will read the response.
 	// Read the 12 byte mdx header from the stream
-	mdxHeaderBytes := make([]byte, mdxHeaderLength)
-	_, err := io.ReadFull(c.r, mdxHeaderBytes)
+	var mdxHeaderBytes [mdxHeaderLength]byte
+	_, err := io.ReadFull(c.r, mdxHeaderBytes[0:mdxHeaderLength])
 
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return nil, errtype.NewDialError("MDX Read Timeout: read response header", c.cn, err)
@@ -145,7 +174,9 @@ func (c *MDXConn) readMDX() (*mdx.MetadataExchangeResponse, error) {
 	}
 
 	// Read the MDX message
-	mdxBytes := make([]byte, msgLen)
+	buf := buffPool.get()
+	defer buffPool.put(buf)
+	mdxBytes := (*buf)[0:msgLen]
 	_, err = io.ReadFull(c.r, mdxBytes)
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return nil, errtype.NewDialError("MDX Read Timeout: read message", c.cn, err)
@@ -183,19 +214,24 @@ func (c *MDXConn) writeMDX(req *mdx.MetadataExchangeRequest) error {
 	ctx := context.Background()
 	c.logger.Debugf(ctx, "[%v] Writing MDX request, protocol:%v...", c.cn, req.ClientProtocolType)
 
-	resBytes, err := proto.Marshal(req)
+	buf := buffPool.get()
+	defer buffPool.put(buf)
+	mdxBytes := (*buf)[0:0]
+
+	resBytes, err := proto.MarshalOptions{}.MarshalAppend(mdxBytes, req)
 	if err != nil {
 		c.logger.Debugf(ctx, "[%v] proto.Marshal: error marshalling the MDX request: %v", c.cn, err)
 		return errtype.NewDialError("proto.Marshal: error marshalling the MDX request: %v", c.cn, err)
 	}
-	sig := make([]byte, 12)
+	var sig [12]byte
 	copy(sig[0:8], signature)
 	binary.BigEndian.PutUint32(sig[8:], uint32(len(resBytes)))
-	_, err = c.Conn.Write(sig)
+	_, err = c.Conn.Write(sig[:])
 	if err != nil {
 		c.logger.Debugf(ctx, "[%v] c.Conn.Write: error writing the MDX request: %v", c.cn, err)
 		return errtype.NewDialError("c.Conn.Write: error writing the MDX request: %v", c.cn, err)
 	}
+
 	_, err = c.Conn.Write(resBytes)
 	if err != nil {
 		c.logger.Debugf(ctx, "[%v] c.Conn.Write: error writing the MDX request: %v", c.cn, err)

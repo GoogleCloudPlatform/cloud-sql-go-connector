@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	// the refresh buffer is the amount of time before a refresh operation's
+	// the refresh bufferPool is the amount of time before a refresh operation's
 	// certificate expires that a new refresh operation begins.
 	refreshBuffer = 4 * time.Minute
 
@@ -262,9 +262,9 @@ func (c ConnectionInfo) TLSConfig() *tls.Config {
 		Certificates: []tls.Certificate{c.ClientCertificate},
 		RootCAs:      pool,
 		MinVersion:   tls.VersionTLS13,
-		// Replace entire default CLIENT_PROTOCOL_TLS verification with our custom CLIENT_PROTOCOL_TLS
+		// Replace entire default TLS verification with our custom TLS
 		// verification defined in verifyPeerCertificateFunc(). This allows the
-		// connector to gracefully and securely handle deviations from standard CLIENT_PROTOCOL_TLS
+		// connector to gracefully and securely handle deviations from standard TLS
 		// hostname validation in some existing Cloud SQL certificates.
 		InsecureSkipVerify:    true,
 		VerifyPeerCertificate: verifyPeerCertificateFunc(serverName, c.ConnectionName, pool),

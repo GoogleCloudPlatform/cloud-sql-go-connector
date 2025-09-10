@@ -332,6 +332,12 @@ func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 					}
 					var res []byte
 					if bytes.Compare(csqlBytes, []byte("CSQLMDEX")) == 0 {
+						mdxBytes, err := io.ReadAll(c)
+						if err != nil {
+							t.Logf("Error reading MDX message: %v", err)
+						}
+						t.Logf("Fake server received metadata exchange request: %v", mdxBytes)
+
 						// This is byte-level equivalent of
 						// mdx.MetadataExchangeResponse{Status:OK}
 						res = []byte("CSQLMDEX")

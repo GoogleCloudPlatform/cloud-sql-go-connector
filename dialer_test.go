@@ -64,7 +64,7 @@ func testSucessfulDialWithInstanceName(
 
 	data, err := io.ReadAll(conn)
 	if err != nil {
-		t.Fatalf("expected ReadAll to succeed, got error %v", err)
+		t.Fatalf("expected ReadAll to succeed, got error %v %v", data, err)
 	}
 	if string(data) != instanceName {
 		t.Fatalf(

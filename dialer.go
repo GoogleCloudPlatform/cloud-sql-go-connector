@@ -379,7 +379,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 
 	// If the client certificate has expired (as when the computer goes to
 	// sleep, and the refresh cycle cannot run), force a refresh immediately.
-	// The CLIENT_PROTOCOL_TLS handshake will not fail on an expired client certificate. It's
+	// The TLS handshake will not fail on an expired client certificate. It's
 	// not until the first read where the client cert error will be surfaced.
 	// So check that the certificate is valid before proceeding.
 	if !validClientCert(ctx, cn, d.logger, ci.Expiration) {
@@ -426,10 +426,10 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	tlsConn := tls.Client(conn, ci.TLSConfig())
 	err = tlsConn.HandshakeContext(ctx)
 	if err != nil {
-		// CLIENT_PROTOCOL_TLS handshake errors are fatal and require a refresh. Remove the instance
+		// TLS handshake errors are fatal and require a refresh. Remove the instance
 		// from the cache so that future calls to Dial() will block until the
 		// certificate is refreshed successfully.
-		d.logger.Debugf(ctx, "[%v] CLIENT_PROTOCOL_TLS handshake failed: %v", cn.String(), err)
+		d.logger.Debugf(ctx, "[%v] TLS handshake failed: %v", cn.String(), err)
 		d.removeCached(ctx, cn, c, err)
 		_ = tlsConn.Close() // best effort close attempt
 		return nil, errtype.NewDialError("handshake failed", cn.String(), err)
@@ -482,7 +482,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 func (d *Dialer) isTLSError(err error) bool {
 	if nErr, ok := err.(net.Error); ok {
 		return !nErr.Timeout() && // it's a permanent net error
-			strings.Contains(nErr.Error(), "tls") // it's a CLIENT_PROTOCOL_TLS-related error
+			strings.Contains(nErr.Error(), "tls") // it's a TLS-related error
 	}
 	return false
 }

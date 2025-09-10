@@ -43,7 +43,7 @@ function generate() {
   # Add the copyright header to the generated protobuf file
   pbFile="internal/mdx/metadata_exchange.pb.go"
   mv "${pbFile}" "${pbFile}.tmp"
-  cat > file <<EOF
+  cat > "${pbFile}" <<EOF
 // Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
