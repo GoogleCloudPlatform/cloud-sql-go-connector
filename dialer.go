@@ -235,7 +235,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			Scopes: []string{sqladmin.SqlserviceAdminScope},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to create default credentials: %v", err)
+			return nil, fmt.Errorf("failed to create default credentials: %w", err)
 		}
 		cfg.authCredentials = c
 		// create second set of credentials, scoped for IAM AuthN login only
@@ -243,7 +243,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			Scopes: []string{iamLoginScope},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to create scoped credentials: %v", err)
+			return nil, fmt.Errorf("failed to create scoped credentials: %w", err)
 		}
 		cfg.iamLoginTokenProvider = scoped.TokenProvider
 	}
@@ -265,7 +265,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			UniverseDomain: cfg.getClientUniverseDomain(),
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to create auth client: %v", err)
+			return nil, fmt.Errorf("failed to create auth client: %w", err)
 		}
 		// If callers have not provided an HTTPClient explicitly with
 		// WithHTTPClient, then use auth client
@@ -282,7 +282,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 
 	client, err := sqladmin.NewService(ctx, cfg.sqladminOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create sqladmin client: %v", err)
+		return nil, fmt.Errorf("failed to create sqladmin client: %w", err)
 	}
 
 	dc := dialConfig{

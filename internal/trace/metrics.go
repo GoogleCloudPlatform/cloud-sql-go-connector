@@ -137,7 +137,7 @@ func InitMetrics() error {
 			bytesSentView,
 			bytesReceivedView,
 		); rErr != nil {
-			registerErr = fmt.Errorf("failed to initialize metrics: %v", rErr)
+			registerErr = fmt.Errorf("failed to initialize metrics: %w", rErr)
 		}
 	})
 	return registerErr
