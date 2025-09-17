@@ -168,7 +168,7 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 
 	if got.MinVersion != tls.VersionTLS13 {
 		t.Fatalf(
-			"want TLS 1.3, got = %v", got.MinVersion,
+			"want CLIENT_PROTOCOL_TLS 1.3, got = %v", got.MinVersion,
 		)
 	}
 
@@ -413,14 +413,14 @@ func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
 
 	if got.ServerName != wantServerName {
 		t.Fatalf(
-			"ConnectInfo return unexpected server name in TLS Config, "+
+			"ConnectInfo return unexpected server name in CLIENT_PROTOCOL_TLS Config, "+
 				"want = %v, got = %v",
 			wantServerName, got.ServerName,
 		)
 	}
 	if got.MinVersion != tls.VersionTLS13 {
 		t.Fatalf(
-			"want TLS 1.3, got = %v", got.MinVersion,
+			"want CLIENT_PROTOCOL_TLS 1.3, got = %v", got.MinVersion,
 		)
 	}
 	if got.Certificates[0].Leaf != ci.ClientCertificate.Leaf {

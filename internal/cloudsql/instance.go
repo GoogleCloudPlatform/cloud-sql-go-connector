@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	// the refresh buffer is the amount of time before a refresh operation's
+	// the refresh bufferPool is the amount of time before a refresh operation's
 	// certificate expires that a new refresh operation begins.
 	refreshBuffer = 4 * time.Minute
 
@@ -182,6 +182,8 @@ type ConnectionInfo struct {
 	// It is used to validate the server identity of the CAS instances.
 	DNSName    string
 	Expiration time.Time
+	// Features of the MDX protocol supported by this database
+	MdxProtocolSupport []string
 
 	addrs map[string]string
 }
@@ -195,16 +197,18 @@ func NewConnectionInfo(
 	ipAddrs map[string]string,
 	serverCACert []*x509.Certificate,
 	clientCert tls.Certificate,
+	mdxProtocolSupport []string,
 ) ConnectionInfo {
 	return ConnectionInfo{
-		addrs:             ipAddrs,
-		ClientCertificate: clientCert,
-		ServerCACert:      serverCACert,
-		ServerCAMode:      serverCAMode,
-		Expiration:        clientCert.Leaf.NotAfter,
-		DBVersion:         version,
-		ConnectionName:    cn,
-		DNSName:           dnsName,
+		addrs:              ipAddrs,
+		ClientCertificate:  clientCert,
+		ServerCACert:       serverCACert,
+		ServerCAMode:       serverCAMode,
+		Expiration:         clientCert.Leaf.NotAfter,
+		DBVersion:          version,
+		ConnectionName:     cn,
+		DNSName:            dnsName,
+		MdxProtocolSupport: mdxProtocolSupport,
 	}
 }
 
@@ -235,7 +239,7 @@ func (c ConnectionInfo) Addr(ipType string) (string, error) {
 	return addr, nil
 }
 
-// TLSConfig constructs a TLS configuration for the given connection info.
+// TLSConfig constructs a ClientProtocolTLS configuration for the given connection info.
 func (c ConnectionInfo) TLSConfig() *tls.Config {
 	pool := x509.NewCertPool()
 	for _, caCert := range c.ServerCACert {
@@ -268,7 +272,7 @@ func (c ConnectionInfo) TLSConfig() *tls.Config {
 }
 
 // ConnectionInfo returns an IP address specified by ipType (i.e., public or
-// private) and a TLS config that can be used to connect to a Cloud SQL
+// private) and a ClientProtocolTLS config that can be used to connect to a Cloud SQL
 // instance.
 func (i *RefreshAheadCache) ConnectionInfo(ctx context.Context) (ConnectionInfo, error) {
 	op, err := i.refreshOperation(ctx)

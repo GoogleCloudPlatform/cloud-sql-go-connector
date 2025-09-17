@@ -127,15 +127,16 @@ func InstanceGetSuccess(i FakeCSQLInstance, ct int) *Request {
 			}
 
 			db := &sqladmin.ConnectSettings{
-				BackendType:     i.backendType,
-				DatabaseVersion: i.dbVersion,
-				DnsNames:        i.DNSNames,
-				DnsName:         i.DNSName,
-				IpAddresses:     ips,
-				Region:          i.region,
-				ServerCaCert:    &sqladmin.SslCert{Cert: string(certBytes)},
-				PscEnabled:      i.pscEnabled,
-				ServerCaMode:    i.serverCAMode,
+				BackendType:        i.backendType,
+				DatabaseVersion:    i.dbVersion,
+				DnsNames:           i.DNSNames,
+				DnsName:            i.DNSName,
+				IpAddresses:        ips,
+				Region:             i.region,
+				ServerCaCert:       &sqladmin.SslCert{Cert: string(certBytes)},
+				PscEnabled:         i.pscEnabled,
+				ServerCaMode:       i.serverCAMode,
+				MdxProtocolSupport: []string{"CLIENT_PROTOCOL_TYPE"},
 			}
 
 			b, err := db.MarshalJSON()

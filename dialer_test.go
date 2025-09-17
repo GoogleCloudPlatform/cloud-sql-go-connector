@@ -23,6 +23,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,8 +34,8 @@ import (
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
+	"cloud.google.com/go/cloudsqlconn/internal/mdx"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
-
 	"golang.org/x/oauth2"
 )
 
@@ -56,10 +57,14 @@ func testSucessfulDialWithInstanceName(
 		t.Fatalf("expected Dial to succeed, but got error: %v", err)
 	}
 	defer func() { _ = conn.Close() }()
+	_, err = conn.Write([]byte("hello world"))
+	if err != nil {
+		t.Fatalf("expected ReadAll to succeed, got error %v", err)
+	}
 
 	data, err := io.ReadAll(conn)
 	if err != nil {
-		t.Fatalf("expected ReadAll to succeed, got error %v", err)
+		t.Fatalf("expected ReadAll to succeed, got error %v %v", data, err)
 	}
 	if string(data) != instanceName {
 		t.Fatalf(
@@ -135,6 +140,25 @@ func TestDialerCanConnectToInstance(t *testing.T) {
 	)
 }
 
+func TestDialerCanConnectToInstanceWithMdx(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+	)
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+	})
+
+	testSuccessfulDial(
+		context.Background(), t, d,
+		inst.String(),
+		WithMdxClientProtocolType(cloudsql.ClientProtocolTCP),
+	)
+}
+
 func TestDialWithAdminAPIErrors(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance(
 		"my-project", "my-region", "my-instance",
@@ -200,7 +224,7 @@ func TestDialWithExpiredCertificate(t *testing.T) {
 
 	_, err := d.Dial(context.Background(), inst.String())
 	if err == nil {
-		t.Fatal("when TLS handshake fails, want = error, got = nil")
+		t.Fatal("when CLIENT_PROTOCOL_TLS handshake fails, want = error, got = nil")
 	}
 }
 
@@ -756,6 +780,7 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 					tls.Certificate{Leaf: &x509.Certificate{
 						NotAfter: time.Now().Add(time.Hour),
 					}},
+					nil,
 				),
 			},
 			opts: []DialOption{WithPublicIP()},
@@ -1431,9 +1456,13 @@ func TestDialerChecksSubjectAlternativeNameAndFallsBackToCN(t *testing.T) {
 			//  contain db2.example.com
 			//  Then the CN field check will succeed, because the instance connection
 			//  name matches.
-			_, err := d.Dial(
+			conn, err := d.Dial(
 				context.Background(), tc.icn,
 			)
+			if err != nil {
+				t.Fatal("Want no error. Got: ", err)
+			}
+			_, err = conn.Write([]byte("hello world"))
 			if err != nil {
 				t.Fatal("Want no error. Got: ", err)
 			}
@@ -1563,4 +1592,103 @@ type dialerTestLogger struct {
 
 func (l *dialerTestLogger) Debugf(f string, args ...interface{}) {
 	l.t.Logf(f, args...)
+}
+
+func TestNewMDXRequest(t *testing.T) {
+	tcp := mdx.MetadataExchangeRequest_TCP
+	uds := mdx.MetadataExchangeRequest_UDS
+	tlsRes := mdx.MetadataExchangeRequest_TLS
+
+	tcs := []struct {
+		desc                     string
+		ci                       cloudsql.ConnectionInfo
+		cfg                      dialConfig
+		metadataExchangeDisabled bool
+		want                     *mdx.MetadataExchangeRequest
+	}{
+		{
+			desc:                     "when metadata exchange is disabled",
+			metadataExchangeDisabled: true,
+			want:                     nil,
+		},
+		{
+			desc: "when metadata exchange support is empty",
+			ci: cloudsql.ConnectionInfo{
+				MdxProtocolSupport: []string{},
+			},
+			cfg: dialConfig{
+				mdxClientProtocolType: cloudsql.ClientProtocolTCP,
+			},
+			want: nil,
+		},
+		{
+			desc: "when client protocol type is empty",
+			ci: cloudsql.ConnectionInfo{
+				MdxProtocolSupport: []string{"CLIENT_PROTOCOL_TYPE"},
+			},
+			cfg: dialConfig{
+				mdxClientProtocolType: "",
+			},
+			want: nil,
+		},
+		{
+			desc: "when client protocol type is not supported",
+			ci: cloudsql.ConnectionInfo{
+				MdxProtocolSupport: []string{"CLIENT_PROTOCOL_TYPE"},
+			},
+			cfg: dialConfig{
+				mdxClientProtocolType: "unsupported",
+			},
+			want: nil,
+		},
+		{
+			desc: "when client protocol type is not in metadata",
+			ci: cloudsql.ConnectionInfo{
+				MdxProtocolSupport: []string{"OTHER_FEATURE"},
+			},
+			cfg: dialConfig{
+				mdxClientProtocolType: cloudsql.ClientProtocolTCP,
+			},
+			want: nil,
+		},
+		{
+			desc: "when client protocol is CLIENT_PROTOCOL_TCP",
+			ci: cloudsql.ConnectionInfo{
+				MdxProtocolSupport: []string{"CLIENT_PROTOCOL_TYPE"},
+			},
+			cfg: dialConfig{
+				mdxClientProtocolType: cloudsql.ClientProtocolTCP,
+			},
+			want: &mdx.MetadataExchangeRequest{ClientProtocolType: &tcp},
+		},
+		{
+			desc: "when client protocol is CLIENT_PROTOCOL_UDS",
+			ci: cloudsql.ConnectionInfo{
+				MdxProtocolSupport: []string{"CLIENT_PROTOCOL_TYPE"},
+			},
+			cfg: dialConfig{
+				mdxClientProtocolType: cloudsql.ClientProtocolUDS,
+			},
+			want: &mdx.MetadataExchangeRequest{ClientProtocolType: &uds},
+		},
+		{
+			desc: "when client protocol is CLIENT_PROTOCOL_TLS",
+			ci: cloudsql.ConnectionInfo{
+				MdxProtocolSupport: []string{"CLIENT_PROTOCOL_TYPE"},
+			},
+			cfg: dialConfig{
+				mdxClientProtocolType: cloudsql.ClientProtocolTLS,
+			},
+			want: &mdx.MetadataExchangeRequest{ClientProtocolType: &tlsRes},
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			got := newMDXRequest(tc.ci, tc.cfg, tc.metadataExchangeDisabled)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("want = %v, got = %v", tc.want, got)
+			}
+		})
+	}
 }

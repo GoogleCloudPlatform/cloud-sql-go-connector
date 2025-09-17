@@ -24,8 +24,8 @@ import (
 )
 
 // verifyPeerCertificateFunc creates a VerifyPeerCertificate function with the
-// custom TLS verification logic to gracefully and securely handle deviations
-// from standard TLS hostname verification in existing Cloud SQL instance
+// custom ClientProtocolTLS verification logic to gracefully and securely handle deviations
+// from standard ClientProtocolTLS hostname verification in existing Cloud SQL instance
 // server certificates.
 //
 // This is the verification algorithm:
@@ -43,7 +43,7 @@ import (
 //
 //     Reject the certificate if both the #2 SAN check and #3 CN checks fail.
 //
-// To summarize the deviations from standard TLS hostname verification:
+// To summarize the deviations from standard ClientProtocolTLS hostname verification:
 //
 // Historically, Cloud SQL creates server certificates with the instance name in
 // the Subject.CN field in the format "my-project:my-instance". The connector is
@@ -51,7 +51,7 @@ import (
 // dial matches the server certificate Subject.CN field. Thus, the Subject.CN
 // field for most Cloud SQL instances does not contain a well-formed DNS Name.
 //
-// The default Go TLS hostname verification TLSConfig.serverName may be compared
+// The default Go ClientProtocolTLS hostname verification TLSConfig.serverName may be compared
 // with the Subject.CN field if Subject.CN contains a well-formed DNS name.
 // So the Cloud SQL server certs break the standard hostname verification in Go.
 // See:

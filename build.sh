@@ -31,9 +31,82 @@ function clean() {
   fi
 }
 
+## generate - Generates all required files, before building
+function generate() {
+  get_protoc
+  PATH="${SCRIPT_DIR}/.tools/protoc/bin:$PATH" "${SCRIPT_DIR}/.tools/protoc/bin/protoc" \
+    --proto_path=. \
+    --go_out=. \
+    internal/mdx/metadata_exchange.proto \
+    --go_opt=paths=source_relative
+
+  # Add the copyright header to the generated protobuf file
+  pbFile="internal/mdx/metadata_exchange.pb.go"
+  mv "${pbFile}" "${pbFile}.tmp"
+  cat > "${pbFile}" <<EOF
+// Copyright 2025 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+EOF
+  cat "${pbFile}.tmp"  >> "${pbFile}"
+  rm "${pbFile}.tmp"
+}
+
+# Download the protoc tool if it's not already installed.
+function get_protoc() {
+  # Find the latest version of protoc
+  protoc_version=$(curl -s "https://api.github.com/repos/protocolbuffers/protobuf/releases/latest" | jq -r '.tag_name' | sed 's/v//')
+  proto_go_version=$(curl -s "https://api.github.com/repos/protocolbuffers/protobuf-go/releases/latest" | jq -r '.tag_name' | sed 's/v//')
+
+  mkdir -p "$SCRIPT_DIR/.tools"
+  versioned_cmd="$SCRIPT_DIR/.tools/protoc-$protoc_version"
+  if [[ -d "$versioned_cmd" ]] ; then
+    return
+  fi
+
+  os=$(uname -s | tr '[:upper:]' '[:lower:]')
+  arch=$(uname -m)
+  if [[ "$os" == "darwin" && "$arch" == "arm64" ]] ; then
+    protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-osx-aarch_64.zip"
+    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${arch}.tar.gz"
+  elif [[ "$os" == "linux" ]] ; then
+    protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-${os}-${arch}.zip"
+    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${arch}.tar.gz"
+  else
+    echo "Unsupported protoc platform : $os $arch"
+    exit 1
+  fi
+
+  echo "Downloading protoc v$protoc_version..."
+  curl -v -sSL "$protoc_url" -o protoc.zip
+  mkdir -p "$versioned_cmd"
+  unzip -o protoc.zip -d "$versioned_cmd"
+  rm -rf protoc.zip
+
+  echo "Downloading protoc-go v$proto_go_version..."
+  curl -v -sSL "$protoc_go_url" -o proto-go.tar.gz
+  mkdir -p "$versioned_cmd"
+  tar -zxf proto-go.tar.gz -C "$versioned_cmd/bin"
+  rm -rf proto-go.tar.gz
+
+  ln -sf "$versioned_cmd" ".tools/protoc"
+}
+
 ## build - Builds the project without running tests.
 function build() {
-   go build ./...
+  generate
+  go build ./...
 }
 
 ## test - Runs local unit tests.
@@ -184,4 +257,3 @@ fi
 cd "$SCRIPT_DIR"
 
 "$@"
-

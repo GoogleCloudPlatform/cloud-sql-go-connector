@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
+	"cloud.google.com/go/cloudsqlconn/internal/mdx"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
@@ -184,6 +186,10 @@ type Dialer struct {
 	// resolver converts instance names into DNS names.
 	resolver       instance.ConnectionNameResolver
 	failoverPeriod time.Duration
+
+	// metadataExchangeDisabled true when the dialer should never
+	// send MDX mdx requests.
+	metadataExchangeDisabled bool
 }
 
 var (
@@ -304,19 +310,20 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 
 	d := &Dialer{
-		closed:            make(chan struct{}),
-		cache:             make(map[cacheKey]*monitoredCache),
-		lazyRefresh:       cfg.lazyRefresh,
-		keyGenerator:      g,
-		refreshTimeout:    cfg.refreshTimeout,
-		sqladmin:          client,
-		logger:            cfg.logger,
-		defaultDialConfig: dc,
-		dialerID:          uuid.New().String(),
-		iamTokenProvider:  cfg.iamLoginTokenProvider,
-		dialFunc:          cfg.dialFunc,
-		resolver:          r,
-		failoverPeriod:    cfg.failoverPeriod,
+		closed:                   make(chan struct{}),
+		cache:                    make(map[cacheKey]*monitoredCache),
+		lazyRefresh:              cfg.lazyRefresh,
+		keyGenerator:             g,
+		refreshTimeout:           cfg.refreshTimeout,
+		sqladmin:                 client,
+		logger:                   cfg.logger,
+		defaultDialConfig:        dc,
+		dialerID:                 uuid.New().String(),
+		iamTokenProvider:         cfg.iamLoginTokenProvider,
+		dialFunc:                 cfg.dialFunc,
+		resolver:                 r,
+		failoverPeriod:           cfg.failoverPeriod,
+		metadataExchangeDisabled: cfg.metadataExchangeDisabled,
 	}
 
 	return d, nil
@@ -434,6 +441,14 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		return nil, errtype.NewDialError("handshake failed", cn.String(), err)
 	}
 
+	// Use tlsConn as the official connection
+	var netConn net.Conn = tlsConn
+	// Send MDX if the client protocol type was set.
+	mdxReq := newMDXRequest(ci, cfg, d.metadataExchangeDisabled)
+	if mdxReq != nil {
+		netConn = cloudsql.NewMDXConn(tlsConn, cn.String(), mdxReq, d.logger)
+	}
+
 	latency := time.Since(startTime).Milliseconds()
 	n := c.openConnsCount.Add(1)
 	trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
@@ -451,14 +466,14 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		}
 		d.logger.Debugf(ctx, "[%v] IO Error on Read or Write: %v", cn.String(), err)
 		if d.isTLSError(err) {
-			// TLS handshake errors are fatal. Remove the instance from the cache
+			// CLIENT_PROTOCOL_TLS handshake errors are fatal. Remove the instance from the cache
 			// so that future calls to Dial() will block until the certificate
 			// is refreshed successfully.
 			d.removeCached(ctx, cn, c, err)
-			_ = tlsConn.Close() // best effort close attempt
+			_ = netConn.Close() // best effort close attempt
 		}
 	}
-	iConn := newInstrumentedConn(tlsConn, closeFunc, errFunc, d.dialerID, cn.String())
+	iConn := newInstrumentedConn(netConn, closeFunc, errFunc, d.dialerID, cn.String())
 
 	// If this connection was opened using a Domain Name, then store it for later
 	// in case it needs to be forcibly closed.
@@ -467,6 +482,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		c.openConns = append(c.openConns, iConn)
 		c.mu.Unlock()
 	}
+	d.logger.Debugf(ctx, "dial successful")
 	return iConn, nil
 }
 func (d *Dialer) isTLSError(err error) bool {
@@ -764,4 +780,35 @@ func (d *Dialer) connectionInfoCache(
 	d.cache[k] = c
 
 	return c, nil
+}
+
+// newMDXRequest builds a metadata exchange request based on the connection
+// info and dialer configuration. It returns nil if metadata exchange is
+// disabled, not supported by the instance, or if the client protocol is not
+// specified or supported.
+func newMDXRequest(ci cloudsql.ConnectionInfo, cfg dialConfig, metadataExchangeDisabled bool) *mdx.MetadataExchangeRequest {
+	if metadataExchangeDisabled ||
+		len(ci.MdxProtocolSupport) == 0 ||
+		cfg.mdxClientProtocolType == "" {
+		return nil
+	}
+
+	var cpt mdx.MetadataExchangeRequest_ClientProtocolType
+	if slices.Contains(ci.MdxProtocolSupport, "CLIENT_PROTOCOL_TYPE") {
+		switch cfg.mdxClientProtocolType {
+		case cloudsql.ClientProtocolTCP:
+			cpt = mdx.MetadataExchangeRequest_TCP
+		case cloudsql.ClientProtocolUDS:
+			cpt = mdx.MetadataExchangeRequest_UDS
+		case cloudsql.ClientProtocolTLS:
+			cpt = mdx.MetadataExchangeRequest_TLS
+		default:
+			cpt = mdx.MetadataExchangeRequest_CLIENT_PROTOCOL_TYPE_UNSPECIFIED
+		}
+	}
+	if cpt == mdx.MetadataExchangeRequest_CLIENT_PROTOCOL_TYPE_UNSPECIFIED {
+		return nil
+	}
+
+	return &mdx.MetadataExchangeRequest{ClientProtocolType: &cpt}
 }
