@@ -103,7 +103,7 @@ func (r *DNSInstanceConnectionNameResolver) queryDNS(ctx context.Context, domain
 	records, err := r.dnsResolver.LookupTXT(ctx, domainName)
 	// If resolve failed and no records were found, return the error.
 	if err != nil {
-		return instance.ConnName{}, fmt.Errorf("unable to resolve TXT record for %q: %v", domainName, err)
+		return instance.ConnName{}, fmt.Errorf("unable to resolve TXT record for %q: %w", domainName, err)
 	}
 
 	// Process the records returning the first valid TXT record.
@@ -119,7 +119,7 @@ func (r *DNSInstanceConnectionNameResolver) queryDNS(ctx context.Context, domain
 		// Parse the target as a CN
 		cn, parseErr := instance.ParseConnNameWithDomainName(record, domainName)
 		if parseErr != nil {
-			perr = fmt.Errorf("unable to parse TXT for %q -> %q : %v", domainName, record, parseErr)
+			perr = fmt.Errorf("unable to parse TXT for %q -> %q : %w", domainName, record, parseErr)
 			continue
 		}
 		return cn, nil
