@@ -265,9 +265,13 @@ func (ct *TLSCertificates) serverChain(useStandardTLSValidation bool) []tls.Cert
 // CreateServerChain creates a legacy server certificate chain containing the
 // CN and SAN fields.
 func (ct *TLSCertificates) CreateServerChain(cn string, sans []string) []*x509.Certificate {
+	s := name(cn)
+	if cn == "" {
+		s = pkix.Name{}
+	}
 	cert := mustBuildSignedCertificate(
 		false,
-		name(cn),
+		s,
 		ct.serverKey,
 		ct.serverCaCert,
 		ct.serverCaKey,
@@ -278,9 +282,13 @@ func (ct *TLSCertificates) CreateServerChain(cn string, sans []string) []*x509.C
 // CreateCASServerChain creates a certificate chain containing the
 // CN and SAN fields.
 func (ct *TLSCertificates) CreateCASServerChain(cn string, sans []string) []*x509.Certificate {
+	s := name(cn)
+	if cn == "" {
+		s = pkix.Name{}
+	}
 	cert := mustBuildSignedCertificate(
 		false,
-		name(cn),
+		s,
 		ct.serverKey,
 		ct.serverIntermediateCaCert,
 		ct.serverIntermediateCaKey,
