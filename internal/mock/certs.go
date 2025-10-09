@@ -144,6 +144,13 @@ func mustBuildSignedCertificate(
 	issuerPrivateKey *rsa.PrivateKey,
 	notAfter time.Time,
 	subjectAlternativeNames []string) *x509.Certificate {
+	// If the SAN list is empty, ensure it's nil. An empty, non-nil slice
+	// can cause x509.CreateCertificate to generate a malformed SAN extension
+	// on some platforms, leading to parsing errors.
+	var sans []string
+	if len(subjectAlternativeNames) > 0 {
+		sans = subjectAlternativeNames
+	}
 
 	sn, err := rand.Int(rand.Reader, big.NewInt(1000))
 	if err != nil {
@@ -161,7 +168,7 @@ func mustBuildSignedCertificate(
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
-		DNSNames:              subjectAlternativeNames,
+		DNSNames:              sans,
 	}
 
 	certDerBytes, err := x509.CreateCertificate(rand.Reader, cert, issuerCert, &subjectPublicKey.PublicKey, issuerPrivateKey)
