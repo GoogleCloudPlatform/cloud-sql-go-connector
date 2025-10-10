@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"strings"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
@@ -121,6 +122,11 @@ func verifyPeerCertificateFunc(
 				}
 				return serverNameErr
 			}
+		}
+
+		// Log the SANs for debugging purposes.
+		if len(serverCert.DNSNames) > 0 {
+			fmt.Printf("Instance %q has certificate with SANs: %s\n", cn.String(), strings.Join(serverCert.DNSNames, ", "))
 		}
 
 		// All checks passed

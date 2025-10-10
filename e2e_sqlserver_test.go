@@ -55,9 +55,7 @@ func TestSqlServerHook(t *testing.T) {
 	requireSQLServerVars(t)
 
 	var opts []cloudsqlconn.Option
-	if ipType == "private" {
-		opts = append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
-	}
+	opts = append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
 
 	testConn := func(db *sql.DB) {
 		var now time.Time
