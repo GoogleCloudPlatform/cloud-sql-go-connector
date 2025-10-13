@@ -39,6 +39,10 @@ guide](./migration-guide.md).
 
 For a quick example, try out the Go Connector in a [Codelab][codelab].
 
+
+> [!IMPORTANT]
+> The connector is not compatible with Go version 1.24.8 and 1.25.2, this will break SAN verification
+
 ## Installation
 
 You can install this repo with `go get`:
