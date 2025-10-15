@@ -18,6 +18,7 @@ on:
   push:
     branches:
       - main
+      - feature/client-side-metrics
   schedule:
     - cron: "0 2 * * *"
 
