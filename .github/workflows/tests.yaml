@@ -185,11 +185,13 @@ jobs:
         # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
         shell: bash
         run: |
+          go env -w GOTOOLCHAIN=go1.25.0+auto
           go test -v -race -cover -short ./... | tee test_results.txt
       - name: Run tests (386)
         # 386 archs don't support race detector
         if: matrix.goarch == '386'
         run: |
+          go env -w GOTOOLCHAIN=go1.25.0+auto
           go test -v -cover -short ./...
       - name: Convert test output to XML
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() && matrix.goarch == '' }}
