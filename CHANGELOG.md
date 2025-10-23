@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.19.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.18.1...v1.19.0) (2025-10-23)
+
+
+### Features
+
+* Add support for the Metadata Exchange protocol ([#1011](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1011)) ([cea84c1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/cea84c150b10f49cdd3deca4eb940654e307d119))
+
+
+### Bug Fixes
+
+* add important message to readme that show incompatibility with c… ([#1028](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1028)) ([6b1d73a](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/6b1d73a9d9cdb3d2a1fd0ed1866fcf65123de620))
+* fix deps on go.mod and go.sum ([#1035](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1035)) ([b8d7eea](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/b8d7eea4a02fdd20efa298e0111d9039e1ed3749))
+* fix logmessage for usage with domain names ([#1006](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1006)) ([2832e33](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/2832e3357804a93b11036f002737694ee500bc7a))
+* update go and toolchain to 1.25.x ([#1036](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1036)) ([bd772ba](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/bd772ba2d45b600d30d759f967433c89aac91b53))
+* update renovate go contraint from 1.23 to 1.24 ([#1033](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1033)) ([de9d0e2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/de9d0e2e9515f263914bce5ec3b968dfc6ecc376))
+
 ## [1.18.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.18.0...v1.18.1) (2025-08-27)
 
 
