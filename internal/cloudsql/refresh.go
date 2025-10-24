@@ -139,6 +139,9 @@ func fetchMetadata(
 
 	// parse the server-side CA certificate
 	caCerts := []*x509.Certificate{}
+	if db.ServerCaCert == nil {
+		return metadata{}, errtype.NewRefreshError("instance does not have a server CA certificate", inst.String(), nil)
+	}
 	for b, rest := pem.Decode([]byte(db.ServerCaCert.Cert)); b != nil; b, rest = pem.Decode(rest) {
 		if b == nil {
 			return metadata{}, errtype.NewRefreshError("failed to decode valid PEM cert", inst.String(), nil)
