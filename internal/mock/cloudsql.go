@@ -74,6 +74,8 @@ type FakeCSQLInstance struct {
 	Cert *x509.Certificate
 	// certs holds all of the certificates for this instance
 	certs *TLSCertificates
+	// ServerCaCert is the server CA certificate for the mock instance.
+	ServerCaCert *sqladmin.SslCert
 }
 
 // String returns the instance connection name for the
@@ -229,7 +231,7 @@ func WithServerCAMode(serverCAMode string) FakeCSQLInstanceOption {
 // WithServerCaCert sets the ServerCaCert of the instance.
 func WithServerCaCert(c *sqladmin.SslCert) FakeCSQLInstanceOption {
 	return func(i *FakeCSQLInstance) {
-		i.serverCACert = c
+		i.ServerCaCert = c
 	}
 }
 
