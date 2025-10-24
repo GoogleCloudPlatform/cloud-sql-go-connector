@@ -229,7 +229,7 @@ func WithServerCAMode(serverCAMode string) FakeCSQLInstanceOption {
 // WithServerCaCert sets the ServerCaCert of the instance.
 func WithServerCaCert(c *sqladmin.SslCert) FakeCSQLInstanceOption {
 	return func(i *FakeCSQLInstance) {
-		i.ServerCaCert = c
+		i.serverCACert = c
 	}
 }
 
