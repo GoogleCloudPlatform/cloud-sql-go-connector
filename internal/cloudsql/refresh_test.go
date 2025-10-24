@@ -406,12 +406,10 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 				mock.NewFakeCSQLInstance(
 					cn.Project(), cn.Region(), cn.Name(),
 					mock.WithRegion("my-region"),
-					mock.WithCertSigner(func(_ *x509.Certificate, _ *rsa.PrivateKey) ([]byte, error) {
-						return []byte(""), nil
-					}),
+					mock.WithServerCACert(nil),
 				), 1),
-			wantErr: nil,
-			desc:    "When the server cert is empty",
+			wantErr: &errtype.RefreshError{},
+			desc:    "When the server CA cert is nil",
 		},
 		{
 			req: mock.InstanceGetSuccess(

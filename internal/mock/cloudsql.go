@@ -226,6 +226,13 @@ func WithServerCAMode(serverCAMode string) FakeCSQLInstanceOption {
 	}
 }
 
+// WithServerCaCert sets the ServerCaCert of the instance.
+func WithServerCaCert(c *sqladmin.SslCert) FakeCSQLInstanceOption {
+	return func(i *FakeCSQLInstance) {
+		i.ServerCaCert = c
+	}
+}
+
 // NewFakeCSQLInstance returns a CloudSQLInst object for configuring mocks.
 func NewFakeCSQLInstance(project, region, name string, opts ...FakeCSQLInstanceOption) FakeCSQLInstance {
 
