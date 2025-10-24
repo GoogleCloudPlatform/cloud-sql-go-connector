@@ -406,7 +406,7 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 				mock.NewFakeCSQLInstance(
 					cn.Project(), cn.Region(), cn.Name(),
 					mock.WithRegion("my-region"),
-					mock.WithServerCACert(nil),
+					mock.WithServerCaCert(nil),
 				), 1),
 			wantErr: &errtype.RefreshError{},
 			desc:    "When the server CA cert is nil",
