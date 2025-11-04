@@ -51,6 +51,7 @@ type dialerConfig struct {
 	authCredentials          *auth.Credentials
 	iamLoginTokenProvider    auth.TokenProvider
 	useragents               []string
+	applicationName          string
 	setAdminAPIEndpoint      bool
 	setCredentials           bool
 	setHTTPClient            bool
@@ -118,6 +119,13 @@ func WithCredentialsJSON(b []byte) Option {
 func WithUserAgent(ua string) Option {
 	return func(d *dialerConfig) {
 		d.useragents = append(d.useragents, ua)
+	}
+}
+
+// WithApplicationName returns an Option that sets the Application Name.
+func WithApplicationName(name string) Option {
+	return func(d *dialerConfig) {
+		d.applicationName = name
 	}
 }
 
