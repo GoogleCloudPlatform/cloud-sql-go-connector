@@ -24,8 +24,8 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
-	"google.golang.org/api/option"
 
+	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	cmexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
@@ -149,16 +149,20 @@ var DefaultExportInterval = 60 * time.Second
 
 // NewMetricRecorder creates a MetricRecorder. When the configuration is not
 // enabled, a null recorder is returned instead.
-func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cfg Config, opts ...option.ClientOption) MetricRecorder {
+func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitoring.MetricClient, cfg Config) MetricRecorder {
 	if !cfg.Enabled {
 		l.Debugf(ctx, "disabling built-in metrics")
+		return NullMetricRecorder{}
+	}
+	if cl == nil {
+		l.Debugf(ctx, "metric client is nil, disabling built-in metrics")
 		return NullMetricRecorder{}
 	}
 
 	eopts := []cmexporter.Option{
 		cmexporter.WithCreateServiceTimeSeries(),
 		cmexporter.WithProjectID(cfg.ResourceContainer),
-		cmexporter.WithMonitoringClientOptions(opts...),
+		cmexporter.WithMonitoringClient(cl),
 		cmexporter.WithMetricDescriptorTypeFormatter(func(m metricdata.Metrics) string {
 			return "cloudsql.googleapis.com/client/connector/" + m.Name
 		}),

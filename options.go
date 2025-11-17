@@ -38,8 +38,11 @@ import (
 type Option func(d *dialerConfig)
 
 type dialerConfig struct {
-	rsaKey                   *rsa.PrivateKey
-	sqladminOpts             []apiopt.ClientOption
+	rsaKey       *rsa.PrivateKey
+	sqladminOpts []apiopt.ClientOption
+	// clientOpts are options to configure any Google Cloud API client. They
+	// should not include any CloudSQL-specific configuration.
+	clientOpts               []apiopt.ClientOption
 	dialOpts                 []DialOption
 	dialFunc                 func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout           time.Duration

@@ -46,6 +46,7 @@ import (
 	"google.golang.org/api/option"
 
 	tel "cloud.google.com/go/cloudsqlconn/internal/tel"
+	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
@@ -203,8 +204,8 @@ type Dialer struct {
 	// disableBuiltInMetrics turns the internal metric export into a no-op.
 	disableBuiltInMetrics bool
 
-	// clientOpts are options for all Google Cloud API clients.
-	clientOpts []option.ClientOption
+	// mClient is used for built-in system metrics.
+	mClient *monitoring.MetricClient
 
 	// userAgent is the combined user agent string.
 	userAgent string
@@ -239,6 +240,13 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return nil, cfg.err
 		}
 	}
+	mClient, err := monitoring.NewMetricClient(ctx, cfg.clientOpts...)
+	if err != nil {
+		// Don't fail dialer initialization on metric client errors.
+		// Just disable metric collection below.
+		cfg.logger.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
+	}
+
 	if cfg.useIAMAuthN && cfg.setTokenSource && !cfg.setIAMAuthNTokenSource {
 		return nil, errUseIAMTokenSource
 	}
@@ -335,6 +343,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		keyGenerator:             g,
 		refreshTimeout:           cfg.refreshTimeout,
 		sqladmin:                 client,
+		mClient:                  mClient,
 		logger:                   cfg.logger,
 		defaultDialConfig:        dc,
 		dialerID:                 dialerID,
@@ -375,7 +384,7 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName) tel
 		ConnectorVersion:   versionString,
 		DatabaseEngineType: "DB-Engine-Type-Testing", // TODO: detect database engine type
 	}
-	mr := tel.NewMetricRecorder(ctx, d.logger, cfg, d.clientOpts...)
+	mr := tel.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
 	d.metricRecorders[inst] = mr
 	return mr
 }

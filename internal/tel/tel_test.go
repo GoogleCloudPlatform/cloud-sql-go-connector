@@ -22,12 +22,14 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	"github.com/google/go-cmp/cmp"
+	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	monitoringpb "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 )
 
@@ -38,6 +40,7 @@ type nullLogger struct {
 }
 
 func (n nullLogger) Debugf(_ context.Context, format string, args ...any) {
+	n.t.Helper()
 	n.t.Logf(format, args...)
 }
 
@@ -152,6 +155,24 @@ func setupMockServer(t *testing.T) (*mockServer, *grpc.ClientConn, func()) {
 	}
 }
 
+type nullTokenSource struct{}
+
+func (nullTokenSource) Token() (*oauth2.Token, error) {
+	return nil, nil
+}
+
+func TestMetricRecorderInitialization(t *testing.T) {
+	// nil metric client should return a null metric recorder
+	mr := tel.NewMetricRecorder(t.Context(), nullLogger{t}, nil, tel.Config{
+		Enabled:           true,
+		ResourceContainer: "my-cool-project",
+	})
+
+	if _, ok := mr.(tel.NullMetricRecorder); !ok {
+		t.Fatalf("got = %T, want = %T", mr, tel.NullMetricRecorder{})
+	}
+}
+
 func TestMetricRecorder(t *testing.T) {
 	tel.DefaultExportInterval = 100 * time.Millisecond
 	t.Cleanup(func() { tel.DefaultExportInterval = 60 * time.Second })
@@ -181,6 +202,11 @@ func TestMetricRecorder(t *testing.T) {
 	}
 	mock, conn, cleanup := setupMockServer(t)
 	t.Cleanup(cleanup)
+
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	tcs := []struct {
 		desc               string
@@ -274,7 +300,7 @@ func TestMetricRecorder(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.desc, func(t *testing.T) {
 			ctx := context.Background()
-			mr := tel.NewMetricRecorder(ctx, nullLogger{t}, tc.cfg, option.WithGRPCConn(conn))
+			mr := tel.NewMetricRecorder(ctx, nullLogger{t}, mClient, tc.cfg)
 
 			tc.action(ctx, mr, tc.attrs)
 
