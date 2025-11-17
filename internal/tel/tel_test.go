@@ -168,15 +168,15 @@ func TestMetricRecorder(t *testing.T) {
 	wantProject := "projects/myproject"
 	wantResourceType := "cloudsql.googleapis.com/InstanceClient"
 	wantResourceLabels := map[string]string{
-		"resource_container": "myproject",
-		"region":             "some-location",
-		"resource_id":        "some-instance",
-		"client_uid":         "some-uid",
-		"connector_type":     "go",
-		"connector_version":  "1.2.3",
-		"application_name":   "",
-		"client_region":      "",
-		"compute_platform":   "",
+		"resource_container":   "myproject",
+		"region":               "some-location",
+		"resource_id":          "some-instance",
+		"client_uid":           "some-uid",
+		"connector_type":       "go",
+		"connector_version":    "1.2.3",
+		"application_name":     "",
+		"client_region":        "",
+		"compute_platform":     "",
 		"database_engine_type": "",
 	}
 	mock, conn, cleanup := setupMockServer(t)
