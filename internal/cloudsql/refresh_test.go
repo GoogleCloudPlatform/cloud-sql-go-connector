@@ -406,6 +406,16 @@ func TestRefreshMetadataRefreshError(t *testing.T) {
 				mock.NewFakeCSQLInstance(
 					cn.Project(), cn.Region(), cn.Name(),
 					mock.WithRegion("my-region"),
+					mock.WithServerCaCert(nil),
+				), 1),
+			wantErr: &errtype.RefreshError{},
+			desc:    "When the server CA cert is nil",
+		},
+		{
+			req: mock.InstanceGetSuccess(
+				mock.NewFakeCSQLInstance(
+					cn.Project(), cn.Region(), cn.Name(),
+					mock.WithRegion("my-region"),
 					mock.WithCertSigner(func(_ *x509.Certificate, _ *rsa.PrivateKey) ([]byte, error) {
 						certPEM := &bytes.Buffer{}
 						pem.Encode(certPEM, &pem.Block{
