@@ -72,8 +72,8 @@ func connectWithPassword() (*sql.DB, error) {
 		if ipType == "PRIVATE" {
 			opts = append(opts, cloudsqlconn.WithPrivateIP())
 		} else if ipType == "PSC" {
-            opts = append(opts, cloudsqlconn.WithPSC())
-        }
+			opts = append(opts, cloudsqlconn.WithPSC())
+		}
 
 		// For pgx, we use pgx.ParseConfig then configure DialFunc
 		dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", dbUser, password, dbName)
@@ -112,8 +112,8 @@ func connectWithIAM() (*sql.DB, error) {
 		if ipType == "PRIVATE" {
 			opts = append(opts, cloudsqlconn.WithPrivateIP())
 		} else if ipType == "PSC" {
-            opts = append(opts, cloudsqlconn.WithPSC())
-        }
+			opts = append(opts, cloudsqlconn.WithPSC())
+		}
 
 		// For IAM with PG, password is not needed.
 		dsn := fmt.Sprintf("user=%s dbname=%s sslmode=disable", dbUser, dbName)

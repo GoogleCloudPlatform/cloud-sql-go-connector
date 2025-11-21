@@ -46,8 +46,8 @@ func connectWithPassword() (*sql.DB, error) {
 		if ipType == "PRIVATE" {
 			opts = append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
 		} else if ipType == "PSC" {
-            opts = append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPSC()))
-        }
+			opts = append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPSC()))
+		}
 
 		// Register the driver with options.
 		// Note: RegisterDriver handles dialer creation internally.

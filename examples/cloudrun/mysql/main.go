@@ -70,8 +70,8 @@ func connectWithPassword() (*sql.DB, error) {
 		if ipType == "PRIVATE" {
 			opts = append(opts, cloudsqlconn.WithPrivateIP())
 		} else if ipType == "PSC" {
-            opts = append(opts, cloudsqlconn.WithPSC())
-        }
+			opts = append(opts, cloudsqlconn.WithPSC())
+		}
 
 		mysql.RegisterDialContext("cloudsql-password",
 			func(ctx context.Context, addr string) (net.Conn, error) {
@@ -106,8 +106,8 @@ func connectWithIAM() (*sql.DB, error) {
 		if ipType == "PRIVATE" {
 			opts = append(opts, cloudsqlconn.WithPrivateIP())
 		} else if ipType == "PSC" {
-            opts = append(opts, cloudsqlconn.WithPSC())
-        }
+			opts = append(opts, cloudsqlconn.WithPSC())
+		}
 
 		mysql.RegisterDialContext("cloudsql-iam",
 			func(ctx context.Context, addr string) (net.Conn, error) {
