@@ -119,7 +119,6 @@ Deploy the container image to Cloud Run using the `gcloud run deploy` command.
 ```bash
 gcloud run deploy SERVICE_NAME \
   --image=REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/IMAGE_NAME \
-  --add-cloudsql-instances=INSTANCE_CONNECTION_NAME \
   --set-env-vars=DB_USER=DB_USER,DB_IAM_USER=DB_IAM_USER,DB_NAME=DB_NAME,DB_SECRET_NAME=DB_SECRET_NAME,INSTANCE_CONNECTION_NAME=INSTANCE_CONNECTION_NAME \
   --region=REGION \
   --update-secrets=DB_PASSWORD=DB_PASSWORD:latest
@@ -130,7 +129,6 @@ gcloud run deploy SERVICE_NAME \
 ```bash
 gcloud run deploy SERVICE_NAME \
   --image=REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/IMAGE_NAME \
-  --add-cloudsql-instances=INSTANCE_CONNECTION_NAME \
   --set-env-vars=DB_USER=DB_USER,DB_IAM_USER=DB_IAM_USER,DB_NAME=DB_NAME,DB_SECRET_NAME=DB_SECRET_NAME,INSTANCE_CONNECTION_NAME=INSTANCE_CONNECTION_NAME,IP_TYPE=PRIVATE \
   --network=VPC_NETWORK \
   --subnet=SUBNET_NAME \
@@ -144,7 +142,6 @@ gcloud run deploy SERVICE_NAME \
 ```bash
 gcloud run deploy SERVICE_NAME \
   --image=REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/IMAGE_NAME \
-  --add-cloudsql-instances=INSTANCE_CONNECTION_NAME \
   --set-env-vars=DB_USER=DB_USER,DB_NAME=DB_NAME,DB_SECRET_NAME=DB_SECRET_NAME,INSTANCE_CONNECTION_NAME=INSTANCE_CONNECTION_NAME \
   --region=REGION \
   --update-secrets=DB_PASSWORD=DB_PASSWORD:latest
@@ -155,7 +152,6 @@ gcloud run deploy SERVICE_NAME \
 ```bash
 gcloud run deploy SERVICE_NAME \
   --image=REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/IMAGE_name \
-  --add-cloudsql-instances=INSTANCE_CONNECTION_NAME \
   --set-env-vars=DB_USER=DB_USER,DB_NAME=DB_NAME,DB_SECRET_NAME=DB_SECRET_NAME,INSTANCE_CONNECTION_NAME=INSTANCE_CONNECTION_NAME,IP_TYPE=PRIVATE \
   --network=VPC_NETWORK \
   --subnet=SUBNET_NAME \
