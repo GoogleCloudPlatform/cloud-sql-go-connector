@@ -1,7 +1,7 @@
 # Use the official Golang image to create a build artifact.
 # This is based on Debian and sets the GOPATH to /go.
 # https://hub.docker.com/_/golang
-FROM golang:1.25 as builder
+FROM golang:1.25 AS builder
 
 # Create and change to the app directory.
 WORKDIR /app
@@ -19,13 +19,8 @@ COPY . .
 # CGO_ENABLED=0 builds a statically-linked binary.
 RUN CGO_ENABLED=0 GOOS=linux go build -v -o server
 
-# Use the official Alpine image for a lean production container.
-# https://hub.docker.com/_/alpine
-# https://docs.docker.com/develop/develop-images/multistage-build/#use-multi-stage-builds
-FROM alpine:latest
-
-# Install CA certificates for SSL/TLS connections
-RUN apk --no-cache add ca-certificates
+# Use gcr.io/distroless/static:nonroot image to run the application.
+FROM gcr.io/distroless/static:nonroot
 
 # Copy the binary to the production image from the builder stage.
 COPY --from=builder /app/server /server
