@@ -126,6 +126,7 @@ func WithUserAgent(ua string) Option {
 }
 
 // WithApplicationName returns an Option that sets the Application Name.
+// This is used to identify the application in metrics.
 func WithApplicationName(name string) Option {
 	return func(d *dialerConfig) {
 		d.applicationName = name

@@ -357,8 +357,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		applicationName:          cfg.applicationName,
 	}
 
-	// print dialer id to terminal for debugging purposes
-	fmt.Println("Cloud SQL Go Connector Dialer ID:", d.dialerID)
+	// log the Dialer ID
+	d.logger.Debugf(ctx, "Cloud SQL Go Connector Dialer ID: %s", d.dialerID)
 
 	return d, nil
 }
