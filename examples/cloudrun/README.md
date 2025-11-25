@@ -28,7 +28,7 @@ This file contains the core application logic for connecting to a Cloud SQL for 
 
 ## Lazy Instantiation
 
-In a Cloud Run service, global variables are initialized when the container instance starts up. The application instance then handles subsequent requests until the container is spun down.
+In a Cloud Run service, global variables are initialized when the container instance starts up. The application instance then handles subsequent requests until the container is stopped.
 
 The `Connector` (Dialer) and `sql.DB` objects are defined as global variables (initially set to `nil`) and are lazily instantiated (created only when needed) inside the request handlers using `sync.Once`.
 
