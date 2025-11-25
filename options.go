@@ -38,8 +38,11 @@ import (
 type Option func(d *dialerConfig)
 
 type dialerConfig struct {
-	rsaKey                   *rsa.PrivateKey
-	sqladminOpts             []apiopt.ClientOption
+	rsaKey       *rsa.PrivateKey
+	sqladminOpts []apiopt.ClientOption
+	// clientOpts are options to configure any Google Cloud API client. They
+	// should not include any CloudSQL-specific configuration.
+	clientOpts               []apiopt.ClientOption
 	dialOpts                 []DialOption
 	dialFunc                 func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout           time.Duration
@@ -51,6 +54,7 @@ type dialerConfig struct {
 	authCredentials          *auth.Credentials
 	iamLoginTokenProvider    auth.TokenProvider
 	useragents               []string
+	applicationName          string
 	setAdminAPIEndpoint      bool
 	setCredentials           bool
 	setHTTPClient            bool
@@ -118,6 +122,14 @@ func WithCredentialsJSON(b []byte) Option {
 func WithUserAgent(ua string) Option {
 	return func(d *dialerConfig) {
 		d.useragents = append(d.useragents, ua)
+	}
+}
+
+// WithApplicationName returns an Option that sets the Application Name.
+// This is used to identify the application in metrics.
+func WithApplicationName(name string) Option {
+	return func(d *dialerConfig) {
+		d.applicationName = name
 	}
 }
 
