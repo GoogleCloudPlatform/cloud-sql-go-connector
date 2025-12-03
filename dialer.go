@@ -801,6 +801,8 @@ func createKey(cn instance.ConnName) cacheKey {
 // connectionInfoCache is a helper function for returning the appropriate
 // connection info Cache in a threadsafe way. It will create a new cache,
 // modify the existing one, or leave it unchanged as needed.
+//
+// It returns a *monitoredCache, a bool indicating a cache hit, and an error.
 func (d *Dialer) connectionInfoCache(
 	ctx context.Context, cn instance.ConnName, useIAMAuthN *bool,
 ) (*monitoredCache, bool, error) {

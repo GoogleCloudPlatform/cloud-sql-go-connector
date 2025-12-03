@@ -77,7 +77,7 @@ const (
 type Config struct {
 	// Enabled specifies whether the metrics should be enabled.
 	Enabled bool
-	// Version is the version of the alloydbconn.Dialer.
+	// Version is the version of the cloudsqlconn.Dialer.
 	Version string
 	// Project id
 	ResourceContainer string
@@ -135,7 +135,7 @@ type Attributes struct {
 }
 
 // MetricRecorder defines the interface for recording metrics related to the
-// internal operations of alloydbconn.Dialer.
+// internal operations of cloudsqlconn.Dialer.
 type MetricRecorder interface {
 	RecordOpenConnection(context.Context, Attributes)
 	RecordClosedConnection(context.Context, Attributes)
@@ -145,7 +145,7 @@ type MetricRecorder interface {
 
 // DefaultExportInterval is the interval that the metric exporter runs. It
 // should always be 60s. This value is exposed as a var to faciliate testing.
-var DefaultExportInterval = 60 * time.Second
+const DefaultExportInterval = 60 * time.Second
 
 // NewMetricRecorder creates a MetricRecorder. When the configuration is not
 // enabled, a null recorder is returned instead.

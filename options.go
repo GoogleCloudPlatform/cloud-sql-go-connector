@@ -42,18 +42,19 @@ type dialerConfig struct {
 	sqladminOpts []apiopt.ClientOption
 	// clientOpts are options to configure any Google Cloud API client. They
 	// should not include any CloudSQL-specific configuration.
-	clientOpts               []apiopt.ClientOption
-	dialOpts                 []DialOption
-	dialFunc                 func(ctx context.Context, network, addr string) (net.Conn, error)
-	refreshTimeout           time.Duration
-	useIAMAuthN              bool
-	logger                   debug.ContextLogger
-	lazyRefresh              bool
-	clientUniverseDomain     string
-	quotaProject             string
-	authCredentials          *auth.Credentials
-	iamLoginTokenProvider    auth.TokenProvider
-	useragents               []string
+	clientOpts            []apiopt.ClientOption
+	dialOpts              []DialOption
+	dialFunc              func(ctx context.Context, network, addr string) (net.Conn, error)
+	refreshTimeout        time.Duration
+	useIAMAuthN           bool
+	logger                debug.ContextLogger
+	lazyRefresh           bool
+	clientUniverseDomain  string
+	quotaProject          string
+	authCredentials       *auth.Credentials
+	iamLoginTokenProvider auth.TokenProvider
+	useragents            []string
+	// TODO: Update to applicationID, which uses GCE VM Name, GKE Pod Name.
 	applicationName          string
 	setAdminAPIEndpoint      bool
 	setCredentials           bool
