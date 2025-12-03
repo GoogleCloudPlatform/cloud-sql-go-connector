@@ -353,6 +353,13 @@ func WithDisableMetadataExchange() Option {
 	}
 }
 
+// WithDisableBuiltInMetrics disables the built-in metrics for OpenTelemetry.
+func WithDisableBuiltInMetrics() Option {
+	return func(cfg *dialerConfig) {
+		cfg.disableBuiltInMetrics = true
+	}
+}
+
 type debugLoggerWithoutContext struct {
 	logger debug.Logger
 }
