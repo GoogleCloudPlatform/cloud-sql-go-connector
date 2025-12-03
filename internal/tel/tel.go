@@ -145,7 +145,7 @@ type MetricRecorder interface {
 
 // DefaultExportInterval is the interval that the metric exporter runs. It
 // should always be 60s. This value is exposed as a var to faciliate testing.
-const DefaultExportInterval = 60 * time.Second
+var DefaultExportInterval = 60 * time.Second
 
 // NewMetricRecorder creates a MetricRecorder. When the configuration is not
 // enabled, a null recorder is returned instead.
