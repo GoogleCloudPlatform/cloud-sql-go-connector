@@ -340,6 +340,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		closed:                   make(chan struct{}),
 		cache:                    make(map[cacheKey]*monitoredCache),
 		lazyRefresh:              cfg.lazyRefresh,
+		disableBuiltInMetrics:    cfg.disableBuiltInMetrics,
 		keyGenerator:             g,
 		refreshTimeout:           cfg.refreshTimeout,
 		sqladmin:                 client,

@@ -64,6 +64,7 @@ type dialerConfig struct {
 	resolver                 instance.ConnectionNameResolver
 	failoverPeriod           time.Duration
 	metadataExchangeDisabled bool
+	disableBuiltInMetrics    bool
 	// err tracks any dialer options that may have failed.
 	err error
 }
