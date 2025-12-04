@@ -353,7 +353,12 @@ func WithDisableMetadataExchange() Option {
 	}
 }
 
-// WithDisableBuiltInMetrics disables the built-in metrics for OpenTelemetry.
+// WithDisableBuiltInMetrics disables the internal metric export. By
+// default, the Dialer will report on its internal operations to the
+// cloudsql.googleapis.com system metric prefix. These metrics help Cloud SQL
+// improve performance and identify client connectivity problems. Presently,
+// these metrics aren't public, but will be made public in the future. To
+// disable this telemetry, provide this option when initializing a Dialer.
 func WithDisableBuiltInMetrics() Option {
 	return func(cfg *dialerConfig) {
 		cfg.disableBuiltInMetrics = true
