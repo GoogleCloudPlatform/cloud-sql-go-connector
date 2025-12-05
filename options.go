@@ -41,6 +41,9 @@ type Option func(d *dialerConfig)
 type dialerConfig struct {
 	rsaKey                   *rsa.PrivateKey
 	sqladminOpts             []apiopt.ClientOption
+	// clientOpts are options to configure any Google Cloud API client. They
+	// should not include any CloudSQL-specific configuration.
+	clientOpts               []apiopt.ClientOption
 	dialOpts                 []DialOption
 	dialFunc                 func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout           time.Duration
@@ -54,6 +57,8 @@ type dialerConfig struct {
 	iamLoginTokenProvider    auth.TokenProvider
 	apiTokenProvider         auth.TokenProvider
 	useragents               []string
+	// TODO: Update to applicationID, which uses GCE VM Name, GKE Pod Name.
+	applicationName          string
 	setAdminAPIEndpoint      bool
 	setCredentials           bool
 	setHTTPClient            bool
@@ -65,6 +70,7 @@ type dialerConfig struct {
 	dnsResolver              cloudsql.NetResolver
 	sqlDataDialer            sqldataclient.Dialer
 	sqlDataStreamTimeout     time.Duration
+	disableBuiltInMetrics    bool
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -131,6 +137,14 @@ func WithCredentialsJSON(b []byte) Option {
 func WithUserAgent(ua string) Option {
 	return func(d *dialerConfig) {
 		d.useragents = append(d.useragents, ua)
+	}
+}
+
+// WithApplicationName returns an Option that sets the Application Name.
+// This is used to identify the application in metrics.
+func WithApplicationName(name string) Option {
+	return func(d *dialerConfig) {
+		d.applicationName = name
 	}
 }
 
@@ -353,6 +367,18 @@ func WithFailoverPeriod(f time.Duration) Option {
 func WithDisableMetadataExchange() Option {
 	return func(cfg *dialerConfig) {
 		cfg.metadataExchangeDisabled = true
+	}
+}
+
+// WithDisableBuiltInMetrics disables the internal metric export. By
+// default, the Dialer will report on its internal operations to the
+// cloudsql.googleapis.com system metric prefix. These metrics help Cloud SQL
+// improve performance and identify client connectivity problems. Presently,
+// these metrics aren't public, but will be made public in the future. To
+// disable this telemetry, provide this option when initializing a Dialer.
+func WithDisableBuiltInMetrics() Option {
+	return func(cfg *dialerConfig) {
+		cfg.disableBuiltInMetrics = true
 	}
 }
 
