@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/instance"
+	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 )
 
 type testLog struct {
@@ -35,7 +36,8 @@ func (l *testLog) Debugf(_ context.Context, f string, args ...interface{}) {
 
 func TestMonitoredCache_purgeClosedConns(t *testing.T) {
 	cn, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
-	c := newMonitoredCache(&spyConnectionInfoCache{}, cn, 10*time.Millisecond, &fakeResolver{entries: map[string]instance.ConnName{"db.example.com": cn}}, &testLog{t: t})
+	r := cloudsql.NewDNSResolver(&mockNetResolver{txtEntries: map[string]string{"db.example.com": "my-project:my-region:my-instance"}})
+	c := newMonitoredCache(&spyConnectionInfoCache{}, cn, 10*time.Millisecond, r, &testLog{t: t})
 
 	// Add connections
 	c.mu.Lock()

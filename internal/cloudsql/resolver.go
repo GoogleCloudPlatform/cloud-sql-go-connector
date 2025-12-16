@@ -17,18 +17,11 @@ package cloudsql
 import (
 	"context"
 	"fmt"
-	"net"
 	"sort"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 )
-
-// DNSResolver uses the default net.Resolver to find
-// TXT records containing an instance name for a DNS record.
-var DNSResolver = &DNSInstanceConnectionNameResolver{
-	dnsResolver: net.DefaultResolver,
-}
 
 // DefaultResolver simply parses instance names.
 var DefaultResolver = &ConnNameResolver{}
@@ -44,19 +37,26 @@ func (r *ConnNameResolver) Resolve(_ context.Context, icn string) (instanceName 
 	return instance.ParseConnName(icn)
 }
 
-// netResolver groups the methods on net.Resolver that are used by the DNS
+// NetResolver groups the methods on net.Resolver that are used by the DNS
 // resolver implementation. This allows an application to replace the default
 // net.DefaultResolver with a custom implementation. For example: the
 // application may need to connect to a specific DNS server using a specially
 // configured instance of net.Resolver.
-type netResolver interface {
+type NetResolver interface {
 	LookupTXT(ctx context.Context, name string) ([]string, error)
+	LookupHost(ctx context.Context, name string) ([]string, error)
+}
+
+// NewDNSResolver returns a new DNSInstanceConnectionNameResolver with the
+// provided resolver.
+func NewDNSResolver(r NetResolver) *DNSInstanceConnectionNameResolver {
+	return &DNSInstanceConnectionNameResolver{dnsResolver: r}
 }
 
 // DNSInstanceConnectionNameResolver can resolve domain names into instance names using
 // TXT records in DNS. Implements InstanceConnectionNameResolver
 type DNSInstanceConnectionNameResolver struct {
-	dnsResolver netResolver
+	dnsResolver NetResolver
 }
 
 // Resolve returns the instance name, possibly using DNS. This will return an
