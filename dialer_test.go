@@ -1514,8 +1514,8 @@ func TestDialerChecksSubjectAlternativeNameAndFallsBackToCN(t *testing.T) {
 	d := setupDialer(t, setupConfig{
 		testInstance: inst,
 		reqs: []*mock.Request{
-			mock.InstanceGetSuccess(inst, 1),
-			mock.CreateEphemeralSuccess(inst, 1),
+			mock.InstanceGetSuccess(inst, 2),
+			mock.CreateEphemeralSuccess(inst, 2),
 		},
 
 		dialerOptions: []Option{
@@ -1526,8 +1526,7 @@ func TestDialerChecksSubjectAlternativeNameAndFallsBackToCN(t *testing.T) {
 			}),
 			WithTokenSource(mock.EmptyTokenSource{}),
 			WithDNSResolver(),
-		},
-	})
+		}})
 
 	tcs := []struct {
 		desc string
