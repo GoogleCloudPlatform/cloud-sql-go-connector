@@ -74,6 +74,13 @@ func testSucessfulDialWithInstanceName(
 	}
 }
 
+// withMockDNSResolver replaces  net.DefaultResolver with a mock resolver
+func withMockDNSResolver(r cloudsql.NetResolver) Option {
+	return func(d *dialerConfig) {
+		d.dnsResolver = r
+	}
+}
+
 // setupConfig holds all the configuration to use when setting up a dialer.
 type setupConfig struct {
 	testInstance  mock.FakeCSQLInstance
@@ -1017,15 +1024,23 @@ func TestDialerInitializesLazyCache(t *testing.T) {
 	}
 }
 
-type fakeResolver struct {
-	entries map[string]instance.ConnName
+type mockNetResolver struct {
+	txtEntries  map[string]string
+	hostEntries map[string]string
 }
 
-func (r *fakeResolver) Resolve(_ context.Context, name string) (instance.ConnName, error) {
-	if val, ok := r.entries[name]; ok {
-		return val, nil
+func (r *mockNetResolver) LookupTXT(_ context.Context, name string) ([]string, error) {
+	if val, ok := r.txtEntries[name]; ok {
+		return []string{val}, nil
 	}
-	return instance.ConnName{}, fmt.Errorf("no resolution for %q", name)
+	return nil, fmt.Errorf("no resolution for %q", name)
+}
+
+func (r *mockNetResolver) LookupHost(_ context.Context, name string) ([]string, error) {
+	if val, ok := r.hostEntries[name]; ok {
+		return []string{val}, nil
+	}
+	return nil, fmt.Errorf("no resolution for %q", name)
 }
 
 func TestDialerSuccessfullyDialsDnsTxtRecord(t *testing.T) {
@@ -1034,8 +1049,6 @@ func TestDialerSuccessfullyDialsDnsTxtRecord(t *testing.T) {
 		mock.WithDNSMapping("db.example.com", "INSTANCE", "CUSTOM_SAN"),
 		mock.WithDNSMapping("db2.example.com", "INSTANCE", "CUSTOM_SAN"),
 	)
-	wantName, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
-	wantName2, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db2.example.com")
 	// This will create 2 separate connectionInfoCache entries, one for
 	// each DNS name.
 	d := setupDialer(t, setupConfig{
@@ -1045,13 +1058,14 @@ func TestDialerSuccessfullyDialsDnsTxtRecord(t *testing.T) {
 			mock.CreateEphemeralSuccess(inst, 2),
 		},
 		dialerOptions: []Option{
-			WithTokenSource(mock.EmptyTokenSource{}),
-			WithResolver(&fakeResolver{
-				entries: map[string]instance.ConnName{
-					"db.example.com":  wantName,
-					"db2.example.com": wantName2,
+			withMockDNSResolver(&mockNetResolver{
+				txtEntries: map[string]string{
+					"db.example.com":  "my-project:my-region:my-instance",
+					"db2.example.com": "my-project:my-region:my-instance",
 				},
 			}),
+			WithDNSResolver(),
+			WithTokenSource(mock.EmptyTokenSource{}),
 		},
 	})
 
@@ -1065,7 +1079,86 @@ func TestDialerSuccessfullyDialsDnsTxtRecord(t *testing.T) {
 	)
 }
 
-func TestDialerFailsDnsTxtRecordMissing(t *testing.T) {
+func TestDialerSuccessfullyDialsDnsTxtRecordWithCustomARecords(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+		mock.WithDNSMapping("db.example.com", "INSTANCE", "CUSTOM_SAN"),
+		mock.WithDNSMapping("db2.example.com", "INSTANCE", "CUSTOM_SAN"),
+	)
+
+	// This will create 2 separate connectionInfoCache entries, one for
+	// each DNS name.
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 2),
+			mock.CreateEphemeralSuccess(inst, 2),
+		},
+		dialerOptions: []Option{
+			withMockDNSResolver(&mockNetResolver{
+				txtEntries: map[string]string{
+					"db.example.com":  "my-project:my-region:my-instance",
+					"db2.example.com": "my-project:my-region:my-instance",
+				},
+				hostEntries: map[string]string{
+					"db.example.com":  "127.0.0.1",
+					"db2.example.com": "127.0.0.2",
+				},
+			}),
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithDNSResolver(),
+		},
+	})
+
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"db.example.com",
+	)
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"db2.example.com",
+	)
+}
+
+func TestDialerFailsDnsTxtRecordWithInvalidCustomARecords(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+		mock.WithDNSMapping("db.example.com", "INSTANCE", "CUSTOM_SAN"),
+	)
+
+	// This will create 2 separate connectionInfoCache entries, one for
+	// each DNS name.
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			withMockDNSResolver(&mockNetResolver{
+				txtEntries: map[string]string{
+					"db.example.com": "my-project:my-region:my-instance",
+				},
+				hostEntries: map[string]string{
+					"db.example.com": "1.1.1.1",
+				},
+			}),
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithDNSResolver(),
+		},
+	})
+	ctx, cancelFn := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancelFn()
+	_, err := d.Dial(ctx, "db.example.com")
+	// Expect an error due to the timeout.
+	if err == nil {
+		t.Fatal("Dial should have failed due to bad IP address")
+	}
+	t.Log("timeout", err)
+
+}
+
+func TestDialerFailsDNSTxtRecordMissing(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance(
 		"my-project", "my-region", "my-instance",
 	)
@@ -1073,8 +1166,9 @@ func TestDialerFailsDnsTxtRecordMissing(t *testing.T) {
 		testInstance: inst,
 		reqs:         []*mock.Request{},
 		dialerOptions: []Option{
+			withMockDNSResolver(&mockNetResolver{}),
 			WithTokenSource(mock.EmptyTokenSource{}),
-			WithResolver(&fakeResolver{}),
+			WithDNSResolver(),
 		},
 	})
 	_, err := d.Dial(context.Background(), "doesnt-exist.example.com")
@@ -1104,6 +1198,10 @@ func (r *changingResolver) Resolve(ctx context.Context, name string) (instance.C
 		// TestDialerFailsDnsSrvRecordMissing
 		return instance.ConnName{}, fmt.Errorf("no resolution for %q", name)
 	}
+}
+
+func (r *changingResolver) LookupHost(ctx context.Context, host string) ([]string, error) {
+	return net.DefaultResolver.LookupHost(ctx, host)
 }
 
 func TestDialerUpdatesAutomaticallyAfterDnsChange(t *testing.T) {
@@ -1334,7 +1432,6 @@ func TestDialerChecksSubjectAlternativeNameAndSucceeds(t *testing.T) {
 				)
 			}
 
-			wantName, _ := instance.ParseConnNameWithDomainName(tc.icn, tc.dn)
 			d := setupDialer(t, setupConfig{
 				testInstance: inst,
 				reqs: []*mock.Request{
@@ -1342,13 +1439,13 @@ func TestDialerChecksSubjectAlternativeNameAndSucceeds(t *testing.T) {
 					mock.CreateEphemeralSuccess(inst, 1),
 				},
 				dialerOptions: []Option{
-					WithTokenSource(mock.EmptyTokenSource{}),
-					WithResolver(&fakeResolver{
-						entries: map[string]instance.ConnName{
-							"db.example.com":                   wantName,
-							"my-project:my-region:my-instance": wantName,
+					withMockDNSResolver(&mockNetResolver{
+						txtEntries: map[string]string{
+							"db.example.com": "my-project:my-region:my-instance",
 						},
 					}),
+					WithTokenSource(mock.EmptyTokenSource{}),
+					WithDNSResolver(),
 				},
 			})
 			dnOrIcn := tc.icn
@@ -1375,8 +1472,6 @@ func TestDialerChecksSubjectAlternativeNameAndFails(t *testing.T) {
 	)
 
 	// Resolve the dns name 'bad.example.com' to the the instance.
-	wantName, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "bad.example.com")
-
 	d := setupDialer(t, setupConfig{
 		testInstance: inst,
 		reqs: []*mock.Request{
@@ -1384,12 +1479,13 @@ func TestDialerChecksSubjectAlternativeNameAndFails(t *testing.T) {
 			mock.CreateEphemeralSuccess(inst, 1),
 		},
 		dialerOptions: []Option{
-			WithTokenSource(mock.EmptyTokenSource{}),
-			WithResolver(&fakeResolver{
-				entries: map[string]instance.ConnName{
-					"bad.example.com": wantName,
+			withMockDNSResolver(&mockNetResolver{
+				txtEntries: map[string]string{
+					"bad.example.com": "my-project:my-region:my-instance",
 				},
 			}),
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithDNSResolver(),
 		},
 	})
 
@@ -1415,25 +1511,22 @@ func TestDialerChecksSubjectAlternativeNameAndFallsBackToCN(t *testing.T) {
 	)
 
 	// resolve db.example.com to the same instance
-	wantName, _ := instance.ParseConnNameWithDomainName("myProject:myRegion:myInstance", "db.example.com")
-
 	d := setupDialer(t, setupConfig{
 		testInstance: inst,
 		reqs: []*mock.Request{
-			mock.InstanceGetSuccess(inst, 1),
-			mock.CreateEphemeralSuccess(inst, 1),
+			mock.InstanceGetSuccess(inst, 2),
+			mock.CreateEphemeralSuccess(inst, 2),
 		},
 
 		dialerOptions: []Option{
-			WithTokenSource(mock.EmptyTokenSource{}),
-			WithResolver(&fakeResolver{
-				entries: map[string]instance.ConnName{
-					"db.example.com":                wantName,
-					"myProject:myRegion:myInstance": wantName,
+			withMockDNSResolver(&mockNetResolver{
+				txtEntries: map[string]string{
+					"db.example.com": "myProject:myRegion:myInstance",
 				},
 			}),
-		},
-	})
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithDNSResolver(),
+		}})
 
 	tcs := []struct {
 		desc string

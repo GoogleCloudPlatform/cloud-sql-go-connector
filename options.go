@@ -59,6 +59,7 @@ type dialerConfig struct {
 	resolver                 instance.ConnectionNameResolver
 	failoverPeriod           time.Duration
 	metadataExchangeDisabled bool
+	dnsResolver              cloudsql.NetResolver
 	// err tracks any dialer options that may have failed.
 	err error
 }
@@ -315,7 +316,7 @@ func WithResolver(r instance.ConnectionNameResolver) Option {
 //   - Value: `my-project:region:my-instance` – This is the instance name
 func WithDNSResolver() Option {
 	return func(d *dialerConfig) {
-		d.resolver = cloudsql.DNSResolver
+		d.resolver = cloudsql.NewDNSResolver(d.dnsResolver)
 	}
 }
 

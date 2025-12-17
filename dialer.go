@@ -185,6 +185,7 @@ type Dialer struct {
 
 	// resolver converts instance names into DNS names.
 	resolver       instance.ConnectionNameResolver
+	dnsResolver    cloudsql.NetResolver
 	failoverPeriod time.Duration
 
 	// metadataExchangeDisabled true when the dialer should never
@@ -213,6 +214,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		logger:         nullLogger{},
 		useragents:     []string{userAgent},
 		failoverPeriod: cloudsql.FailoverPeriod,
+		dnsResolver:    net.DefaultResolver,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -321,6 +323,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		dialerID:                 uuid.New().String(),
 		iamTokenProvider:         cfg.iamLoginTokenProvider,
 		dialFunc:                 cfg.dialFunc,
+		dnsResolver:              cfg.dnsResolver,
 		resolver:                 r,
 		failoverPeriod:           cfg.failoverPeriod,
 		metadataExchangeDisabled: cfg.metadataExchangeDisabled,
@@ -407,6 +410,28 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		d.removeCached(ctx, cn, c, err)
 		return nil, err
 	}
+
+	// If the connector is configured with a custom DNS name, attempt to use
+	// that DNS name to connect to the instance. Fall back to the metadata IP
+	// address if the DNS name does not resolve to an IP address.
+	if cn.HasDomainName() {
+		addrs, err := d.dnsResolver.LookupHost(ctx, cn.DomainName())
+		if err != nil {
+			d.logger.Debugf(ctx,
+				"[%v] custom DNS name %q did not resolve to an IP address: %v, using %s from instance metadata",
+				cn.String(), cn.DomainName(), err, addr)
+		} else if len(addrs) == 0 {
+			d.logger.Debugf(ctx,
+				"[%v] custom DNS name %q resolved but returned no entries, using %s from instance metadata",
+				cn.String(), cn.DomainName(), addr)
+		} else {
+			d.logger.Debugf(ctx,
+				"[%v] custom DNS name %q resolved to %q, using it to connect",
+				cn.String(), cn.DomainName(), addrs[0])
+			addr = addrs[0]
+		}
+	}
+
 	addr = net.JoinHostPort(addr, serverProxyPort)
 	f := d.dialFunc
 	if cfg.dialFunc != nil {

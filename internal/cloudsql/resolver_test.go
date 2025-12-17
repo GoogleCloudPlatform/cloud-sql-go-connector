@@ -35,6 +35,10 @@ func (r *fakeResolver) LookupTXT(_ context.Context, name string) (addrs []string
 	return nil, fmt.Errorf("no resolution for %v", name)
 }
 
+func (r *fakeResolver) LookupHost(_ context.Context, name string) (addrs []string, err error) {
+	return nil, fmt.Errorf("no resolution for %v", name)
+}
+
 func TestDNSInstanceNameResolver_Lookup_Success_TxtRecord(t *testing.T) {
 	want, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
 
