@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.19.1...v1.20.0) (2026-01-12)
+
+
+### Features
+
+* Use configured DNS name to lookup instance IP address ([#1054](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1054)) ([976120e](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/976120e83581578423ffcb817b2a1b5244ced3d8)), closes [#1053](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1053)
+
 ## [1.19.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.19.0...v1.19.1) (2025-12-09)
 
 
