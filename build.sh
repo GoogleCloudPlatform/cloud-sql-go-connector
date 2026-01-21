@@ -17,7 +17,6 @@
 # Set SCRIPT_DIR to the current directory of this file.
 SCRIPT_DIR=$(cd -P "$(dirname "$0")" >/dev/null 2>&1 && pwd)
 SCRIPT_FILE="${SCRIPT_DIR}/$(basename "$0")"
-
 ##
 ## Local Development
 ##
@@ -82,12 +81,17 @@ function get_protoc() {
     protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${arch}.tar.gz"
   elif [[ "$os" == "linux" ]] ; then
     protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-${os}-${arch}.zip"
-    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${arch}.tar.gz"
+    if [[ "$arch" == "x86_64" ]] ; then
+	  goarch="amd64"
+    else
+	    goarch="$arch"
+    fi
+    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${goarch}.tar.gz"
   else
     echo "Unsupported protoc platform : $os $arch"
     exit 1
   fi
-
+  
   echo "Downloading protoc v$protoc_version..."
   curl -v -sSL "$protoc_url" -o protoc.zip
   mkdir -p "$versioned_cmd"
@@ -234,6 +238,10 @@ function write_e2e_env(){
     val=$(gcloud secrets versions access latest --project "$TEST_PROJECT" --secret="$secret_name")
     echo "export $env_var_name='$val'"
   done
+
+  echo "export MYSQL_USER_IAM='$(whoami)'"
+  echo "export POSTGRES_USER_IAM='$(whoami)@google.com'"
+
   } > "$1"
 
 }
