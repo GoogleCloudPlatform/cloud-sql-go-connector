@@ -34,16 +34,35 @@ function clean() {
 ## generate - Generates all required files, before building
 function generate() {
   get_protoc
+
+  # Generate MDX protos
   PATH="${SCRIPT_DIR}/.tools/protoc/bin:$PATH" "${SCRIPT_DIR}/.tools/protoc/bin/protoc" \
     --proto_path=. \
     --go_out=. \
     internal/mdx/metadata_exchange.proto \
     --go_opt=paths=source_relative
 
+  # Generate SqlDataService protos
+  PATH="${SCRIPT_DIR}/.tools/protoc/bin:$PATH" "${SCRIPT_DIR}/.tools/protoc/bin/protoc" \
+    --proto_path=. \
+    --go-grpc_out=.\
+    --go_out=. \
+    --go-grpc_opt=paths=source_relative \
+    --go_opt=paths=source_relative \
+    internal/csqlgrpc/sql_data_service.proto
+
+  # Reposition generated sources to the correct internal folder
+#  cp -r  "$SCRIPT_DIR/cloud.google.com/go/cloudsqlconn/internal" "$SCRIPT_DIR/"
+#  rm -rf "$SCRIPT_DIR/cloud.google.com"
+
   # Add the copyright header to the generated protobuf file
-  pbFile="internal/mdx/metadata_exchange.pb.go"
-  mv "${pbFile}" "${pbFile}.tmp"
-  cat > "${pbFile}" <<EOF
+  generated_pb_go=("internal/mdx/metadata_exchange.pb.go"
+    "internal/csqlgrpc/sql_data_service_grpc.pb.go"
+    "internal/csqlgrpc/sql_data_service.pb.go"
+    )
+  for pbFile in  "${generated_pb_go[@]}" ; do
+    mv "${pbFile}" "${pbFile}.tmp"
+    cat > "${pbFile}" <<EOF
 // Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -59,8 +78,9 @@ function generate() {
 // limitations under the License.
 
 EOF
-  cat "${pbFile}.tmp"  >> "${pbFile}"
-  rm "${pbFile}.tmp"
+    cat "${pbFile}.tmp"  >> "${pbFile}"
+    rm "${pbFile}.tmp"
+  done
 }
 
 # Download the protoc tool if it's not already installed.
@@ -80,9 +100,11 @@ function get_protoc() {
   if [[ "$os" == "darwin" && "$arch" == "arm64" ]] ; then
     protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-osx-aarch_64.zip"
     protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${arch}.tar.gz"
+    protoc_go_grpc_url="https://github.com/grpc/grpc-go/releases/download/cmd%2Fprotoc-gen-go-grpc%2Fv1.6.1/protoc-gen-go-grpc.v1.6.1.darwin.amd64.tar.gz"
   elif [[ "$os" == "linux" ]] ; then
     protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-${os}-${arch}.zip"
     protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${arch}.tar.gz"
+    protoc_go_grpc_url="https://github.com/grpc/grpc-go/releases/download/cmd%2Fprotoc-gen-go-grpc%2Fv1.6.1/protoc-gen-go-grpc.v1.6.1.linux.amd64.tar.gz"
   else
     echo "Unsupported protoc platform : $os $arch"
     exit 1
@@ -99,6 +121,12 @@ function get_protoc() {
   mkdir -p "$versioned_cmd"
   tar -zxf proto-go.tar.gz -C "$versioned_cmd/bin"
   rm -rf proto-go.tar.gz
+
+  echo "Downloading protoc-go-grpc v$proto_go_version..."
+  curl -v -sSL "$protoc_go_grpc_url" -o proto-go-grpc.tar.gz
+  mkdir -p "$versioned_cmd"
+  tar -zxf proto-go-grpc.tar.gz -C "$versioned_cmd/bin"
+  rm -rf proto-go-grpc.tar.gz
 
   ln -sf "$versioned_cmd" ".tools/protoc"
 }
