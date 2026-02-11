@@ -16,8 +16,6 @@ package cloudsqlconn
 
 import (
 	"context"
-	"net"
-	"net/netip"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -125,39 +123,4 @@ func TestMonitoredCache_Close(t *testing.T) {
 		t.Fatalf("got %d, want 2", got)
 	}
 
-}
-
-type mockConn struct {
-}
-
-func (m *mockConn) Read(_ []byte) (int, error) {
-	return 0, nil
-}
-
-func (m *mockConn) Write(_ []byte) (int, error) {
-	return 0, nil
-}
-
-func (m *mockConn) Close() error {
-	return nil
-}
-
-func (m *mockConn) LocalAddr() net.Addr {
-	return net.TCPAddrFromAddrPort(netip.MustParseAddrPort("127.0.0.1:3307"))
-}
-
-func (m *mockConn) RemoteAddr() net.Addr {
-	return net.TCPAddrFromAddrPort(netip.MustParseAddrPort("127.0.0.1:3307"))
-}
-
-func (m *mockConn) SetDeadline(_ time.Time) error {
-	return nil
-}
-
-func (m *mockConn) SetReadDeadline(_ time.Time) error {
-	return nil
-}
-
-func (m *mockConn) SetWriteDeadline(_ time.Time) error {
-	return nil
 }

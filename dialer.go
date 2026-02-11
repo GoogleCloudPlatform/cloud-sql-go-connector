@@ -48,9 +48,11 @@ import (
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	grpccreds "google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -157,10 +159,11 @@ func (c *dialerConfig) getClientUniverseDomain() string {
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
-	lock           sync.RWMutex
-	cache          map[cacheKey]*monitoredCache
-	keyGenerator   *keyGenerator
-	refreshTimeout time.Duration
+	lock               sync.RWMutex
+	cache              map[cacheKey]*monitoredCache
+	sqlDataConnAllowed map[cacheKey]bool
+	keyGenerator       *keyGenerator
+	refreshTimeout     time.Duration
 	// closed reports if the dialer has been closed.
 	closed chan struct{}
 
@@ -333,6 +336,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 
 	d := &Dialer{
 		closed:                   make(chan struct{}),
+		sqlDataConnAllowed:       make(map[cacheKey]bool),
 		cache:                    make(map[cacheKey]*monitoredCache),
 		lazyRefresh:              cfg.lazyRefresh,
 		keyGenerator:             g,
@@ -397,9 +401,37 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	// When using NoIP connections, there is no need to retrieve connection
 	// info and instead we may proceed immediately to connecting.
 	if cfg.connectionType == cloudsql.SQLData {
-		return d.connectNoIP(ctx, cn)
+		key := createKey(cn)
+		d.lock.RLock()
+		allowed, connInCache := d.sqlDataConnAllowed[key]
+		d.lock.RUnlock()
+		// if the cache an entry, and the cache entry says sqlDataService is not allowed
+		if connInCache && !allowed {
+			// fall back to AutoIP
+			cfg.connectionType = cloudsql.AutoIP
+		} else {
+			// Attempt to connect SqlDataService
+			sdcConn, sdcErr := d.connectSQLDataService(ctx, cn, cfg, startTime)
+			if sdcErr == nil {
+				// Connection succeeded, return the connection.
+				return sdcConn, nil
+			}
+			// Connection failed.
+
+			if !isPreconditionFailed(sdcErr) {
+				return nil, sdcErr
+			}
+			// sdcErr is a PreconditionFailed error. Fall back to auto-ip
+			// This is a streaming gRPC. The PreconditionFailed error usually occurs on the
+			// first read from the stream, not here.
+			cfg.connectionType = cloudsql.AutoIP
+		}
 	}
 
+	return d.connectInstanceIP(ctx, cn, cfg, startTime)
+}
+
+func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time) (conn net.Conn, err error) {
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
 	c, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
@@ -571,11 +603,18 @@ func (d *Dialer) initSQLDataClient() (csqlgrpc.SqlDataServiceClient, error) {
 	c = csqlgrpc.NewSqlDataServiceClient(sqlDataConn)
 	d.sqlDataConn = sqlDataConn
 	d.sqlDataClient = c
-
 	return c, nil
 }
 
-func (d *Dialer) connectNoIP(ctx context.Context, cn instance.ConnName) (conn net.Conn, err error) {
+func isSqlDataUnsupportedError(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.FailedPrecondition &&
+			strings.HasPrefix(s.Message(), "unsupported instance edition:")
+	}
+	return false
+}
+
+func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time) (conn net.Conn, err error) {
 	c, err := d.initSQLDataClient()
 	if err != nil {
 		return nil, err
@@ -604,10 +643,31 @@ func (d *Dialer) connectNoIP(ctx context.Context, cn instance.ConnName) (conn ne
 	if err != nil {
 		return nil, err
 	}
+
+	// This creates a fallback connection using AutoIP, and marks the connection
+	// as permanently needing to fallback to AutoIP
+	fb := func() (net.Conn, error) {
+		key := createKey(cn)
+		d.lock.Lock()
+		d.sqlDataConnAllowed[key] = false
+		d.lock.Unlock()
+		cfg.connectionType = cloudsql.AutoIP
+		return d.connectInstanceIP(ctx, cn, cfg, startTime)
+	}
+
 	// Assuming the connection is successful if Recv doesn't return an error
 	// immediately. The first message might not contain data, so we don't pass
 	// any initialData.
-	return newStreamConn(stream, cn, d.logger), nil
+	return &fallbackConn{
+		conn: &streamConn{
+			stream:     stream,
+			connName:   cn,
+			locationID: fmt.Sprintf("locations/%s", cn.Region()),
+			logger:     d.logger,
+		},
+		isFallbackError: isSqlDataUnsupportedError,
+		connectFallback: fb,
+	}, nil
 }
 
 // streamConn wraps the gRPC stream to implement net.Conn
@@ -618,15 +678,6 @@ type streamConn struct {
 	readBuf    []byte
 	readOffset int
 	logger     debug.ContextLogger
-}
-
-func newStreamConn(stream csqlgrpc.SqlDataService_StreamSqlDataClient, cn instance.ConnName, logger debug.ContextLogger) net.Conn {
-	return &streamConn{
-		stream:     stream,
-		connName:   cn,
-		locationID: fmt.Sprintf("locations/%s", cn.Region()),
-		logger:     logger,
-	}
 }
 
 func (c *streamConn) Read(b []byte) (n int, err error) {
@@ -1039,4 +1090,11 @@ func newMDXRequest(ci cloudsql.ConnectionInfo, cfg dialConfig, metadataExchangeD
 	}
 
 	return &mdx.MetadataExchangeRequest{ClientProtocolType: &cpt}
+}
+
+func isPreconditionFailed(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.FailedPrecondition
+	}
+	return false
 }
