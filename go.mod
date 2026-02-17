@@ -2,7 +2,7 @@ module cloud.google.com/go/cloudsqlconn
 
 go 1.24.11
 
-toolchain go1.25.5
+toolchain go1.26.0
 
 require (
 	cloud.google.com/go/auth v0.18.2
@@ -16,7 +16,7 @@ require (
 	golang.org/x/net v0.50.0
 	golang.org/x/oauth2 v0.35.0
 	golang.org/x/time v0.14.0
-	google.golang.org/api v0.266.0
+	google.golang.org/api v0.267.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57
 	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.11
