@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.20.0...v1.20.1) (2026-02-17)
+
+
+### Bug Fixes
+
+* bump golang.org/x/crypto in /examples/cloudrun/sqlserver ([#1046](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1046)) ([2191390](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/219139070bd2f0fac6b3b051d6f876f42c311bfb))
+
 ## [1.20.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.19.1...v1.20.0) (2026-01-12)
 
 
