@@ -234,7 +234,10 @@ function write_e2e_env(){
     val=$(gcloud secrets versions access latest --project "$TEST_PROJECT" --secret="$secret_name")
     echo "export $env_var_name='$val'"
   done
+  echo "export MYSQL_USER_IAM='$(whoami)'"
+  echo "export POSTGRES_USER_IAM='$(whoami)@google.com'"
   } > "$1"
+
 
 }
 
