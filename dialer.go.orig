@@ -35,22 +35,16 @@ import (
 	"cloud.google.com/go/auth"
 	"cloud.google.com/go/auth/credentials"
 	"cloud.google.com/go/auth/httptransport"
-	"cloud.google.com/go/auth/oauth2adapt"
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
-	"cloud.google.com/go/cloudsqlconn/internal/csqlgrpc"
 	"cloud.google.com/go/cloudsqlconn/internal/mdx"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
-	"google.golang.org/grpc"
-	grpccreds "google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/oauth"
-	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -197,14 +191,6 @@ type Dialer struct {
 	// metadataExchangeDisabled true when the dialer should never
 	// send MDX mdx requests.
 	metadataExchangeDisabled bool
-
-	tokenProvider   auth.TokenProvider
-	sqlDataEndpoint string
-
-	// sqlDataClientMu synchronizes access to the data conn and the client.
-	sqlDataClientMu sync.RWMutex
-	sqlDataConn     *grpc.ClientConn
-	sqlDataClient   csqlgrpc.SqlDataServiceClient
 }
 
 var (
@@ -223,13 +209,12 @@ func (nullLogger) Debugf(_ context.Context, _ string, _ ...interface{}) {}
 // RSA keypair is generated will be faster.
 func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg := &dialerConfig{
-		refreshTimeout:  cloudsql.RefreshTimeout,
-		dialFunc:        proxy.Dial,
-		logger:          nullLogger{},
-		useragents:      []string{userAgent},
-		failoverPeriod:  cloudsql.FailoverPeriod,
-		dnsResolver:     net.DefaultResolver,
-		sqlDataEndpoint: "sqladmin.googleapis.com",
+		refreshTimeout: cloudsql.RefreshTimeout,
+		dialFunc:       proxy.Dial,
+		logger:         nullLogger{},
+		useragents:     []string{userAgent},
+		failoverPeriod: cloudsql.FailoverPeriod,
+		dnsResolver:    net.DefaultResolver,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -303,9 +288,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 
 	dc := dialConfig{
-		connectionType: cloudsql.PublicIP,
-		tcpKeepAlive:   defaultTCPKeepAlive,
-		useIAMAuthN:    cfg.useIAMAuthN,
+		ipType:       cloudsql.PublicIP,
+		tcpKeepAlive: defaultTCPKeepAlive,
+		useIAMAuthN:  cfg.useIAMAuthN,
 	}
 	for _, opt := range cfg.dialOpts {
 		opt(&dc)
@@ -326,11 +311,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		r = cfg.resolver
 	}
 
-	tp := cfg.apiTokenProvider
-	if tp == nil && cfg.authCredentials != nil {
-		tp = cfg.authCredentials.TokenProvider
-	}
-
 	d := &Dialer{
 		closed:                   make(chan struct{}),
 		cache:                    make(map[cacheKey]*monitoredCache),
@@ -347,8 +327,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		resolver:                 r,
 		failoverPeriod:           cfg.failoverPeriod,
 		metadataExchangeDisabled: cfg.metadataExchangeDisabled,
-		tokenProvider:            tp,
-		sqlDataEndpoint:          cfg.sqlDataEndpoint,
 	}
 
 	return d, nil
@@ -374,7 +352,6 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		trace.RecordDialError(context.Background(), icn, d.dialerID, err)
 		endDial(err)
 	}()
-
 	cn, err := d.resolver.Resolve(ctx, icn)
 	if err != nil {
 		return nil, err
@@ -392,12 +369,6 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	cfg := d.defaultDialConfig
 	for _, opt := range opts {
 		opt(&cfg)
-	}
-
-	// When using NoIP connections, there is no need to retrieve connection
-	// info and instead we may proceed immediately to connecting.
-	if cfg.connectionType == cloudsql.SQLData {
-		return d.connectNoIP(ctx, cn)
 	}
 
 	var endInfo trace.EndSpanFunc
@@ -434,8 +405,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	var connectEnd trace.EndSpanFunc
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
 	defer func() { connectEnd(err) }()
-
-	addr, err := ci.Addr(cfg.connectionType)
+	addr, err := ci.Addr(cfg.ipType)
 	if err != nil {
 		d.removeCached(ctx, cn, c, err)
 		return nil, err
@@ -507,7 +477,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	latency := time.Since(startTime).Milliseconds()
 	n := c.openConnsCount.Add(1)
 	trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
-	trace.RecordDialLatency(ctx, cn.String(), d.dialerID, latency)
+	trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
 
 	closeFunc := func() {
 		n := c.openConnsCount.Add(^uint64(0)) // c.openConnsCount = c.openConnsCount - 1
@@ -540,172 +510,6 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	d.logger.Debugf(ctx, "dial successful")
 	return iConn, nil
 }
-
-func (d *Dialer) initSQLDataClient() (csqlgrpc.SqlDataServiceClient, error) {
-	d.sqlDataClientMu.RLock()
-	c := d.sqlDataClient
-	d.sqlDataClientMu.RUnlock()
-	if c != nil {
-		// client is already initialized. Return early.
-		return c, nil
-	}
-
-	// Client is nil. Initialize the client.
-	d.sqlDataClientMu.Lock()
-	defer d.sqlDataClientMu.Unlock()
-
-	if c := d.sqlDataClient; c != nil {
-		// Client was initialized between releasing the read lock and acquiring
-		// the write lock.
-		return c, nil
-	}
-
-	ts := oauth2adapt.TokenSourceFromTokenProvider(d.tokenProvider)
-	sqlDataConn, err := grpc.NewClient(d.sqlDataEndpoint,
-		grpc.WithTransportCredentials(grpccreds.NewClientTLSFromCert(nil, "")),
-		grpc.WithPerRPCCredentials(oauth.TokenSource{TokenSource: ts}),
-	)
-	if err != nil {
-		return nil, err
-	}
-	c = csqlgrpc.NewSqlDataServiceClient(sqlDataConn)
-	d.sqlDataConn = sqlDataConn
-	d.sqlDataClient = c
-
-	return c, nil
-}
-
-func (d *Dialer) connectNoIP(ctx context.Context, cn instance.ConnName) (conn net.Conn, err error) {
-	c, err := d.initSQLDataClient()
-	if err != nil {
-		return nil, err
-	}
-
-	ctx = metadata.AppendToOutgoingContext(ctx,
-		"x-goog-user-project", cn.Project(),
-		"x-goog-request-params", fmt.Sprintf("location_id=locations/%s", cn.Region()),
-	)
-	stream, err := c.StreamSqlData(ctx)
-	if err != nil {
-		return nil, err
-	}
-	err = stream.Send(&csqlgrpc.StreamSqlDataRequest{
-		LocationId: fmt.Sprintf("locations/%s", cn.Region()),
-		MessageType: &csqlgrpc.StreamSqlDataRequest_ConnectionSettings{
-			ConnectionSettings: &csqlgrpc.ConnectionSettings{
-				Target: &csqlgrpc.ConnectionSettings_InstanceId{
-					InstanceId: &csqlgrpc.InstanceId{
-						Instance: fmt.Sprintf("projects/%s/instances/%s", cn.Project(), cn.Name()),
-					},
-				},
-			},
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	// Assuming the connection is successful if Recv doesn't return an error
-	// immediately. The first message might not contain data, so we don't pass
-	// any initialData.
-	return newStreamConn(stream, cn, d.logger), nil
-}
-
-// streamConn wraps the gRPC stream to implement net.Conn
-type streamConn struct {
-	stream     csqlgrpc.SqlDataService_StreamSqlDataClient
-	connName   instance.ConnName
-	locationID string
-	readBuf    []byte
-	readOffset int
-	logger     debug.ContextLogger
-}
-
-func newStreamConn(stream csqlgrpc.SqlDataService_StreamSqlDataClient, cn instance.ConnName, logger debug.ContextLogger) net.Conn {
-	return &streamConn{
-		stream:     stream,
-		connName:   cn,
-		locationID: fmt.Sprintf("locations/%s", cn.Region()),
-		logger:     logger,
-	}
-}
-
-func (c *streamConn) Read(b []byte) (n int, err error) {
-	if c.readOffset < len(c.readBuf) {
-		n = copy(b, c.readBuf[c.readOffset:])
-		c.readOffset += n
-		return n, nil
-	}
-	// During read, ignore unknown messages. This will allow old clients to work correctly
-	// even if new clients introduce new messages.
-	msg, err := c.stream.Recv()
-	if err != nil {
-		// This could be io.EOF or a gRPC error
-		return 0, err
-	}
-
-	m, ok := msg.Type.(*csqlgrpc.StreamSqlDataResponse_Payload)
-	if !ok {
-		// Ignore unknown messages, treat them as a 0 length read to avoid unnecessary blocking.
-		// The caller will retry the read if appropriate.
-		c.logger.Debugf(context.Background(), "Received unknown message %v", msg)
-		return 0, nil
-	}
-	c.readBuf = m.Payload.Data
-	c.readOffset = 0
-	n = copy(b, c.readBuf)
-	c.readOffset = n
-	return n, nil
-}
-
-func (c *streamConn) Write(b []byte) (n int, err error) {
-	err = c.stream.Send(&csqlgrpc.StreamSqlDataRequest{
-		LocationId: c.locationID,
-		MessageType: &csqlgrpc.StreamSqlDataRequest_Payload{
-			Payload: &csqlgrpc.ClientPayload{
-				Data: b,
-			},
-		},
-	})
-	if err != nil {
-		return 0, err
-	}
-	return len(b), nil
-}
-
-func (c *streamConn) Close() error {
-	return c.stream.CloseSend()
-}
-
-func (c *streamConn) LocalAddr() net.Addr {
-	return localAddr{}
-}
-
-func (c *streamConn) RemoteAddr() net.Addr {
-	return remoteAddr{}
-}
-
-func (c *streamConn) SetDeadline(t time.Time) error {
-	return nil
-}
-
-func (c *streamConn) SetReadDeadline(t time.Time) error {
-	return nil
-}
-
-func (c *streamConn) SetWriteDeadline(t time.Time) error {
-	return nil
-}
-
-type localAddr struct{}
-
-func (la localAddr) Network() string { return "grpc" }
-func (la localAddr) String() string  { return "local" }
-
-type remoteAddr struct{}
-
-func (ra remoteAddr) Network() string { return "grpc" }
-func (ra remoteAddr) String() string  { return "remote" }
-
 func (d *Dialer) isTLSError(err error) bool {
 	if nErr, ok := err.(net.Error); ok {
 		return !nErr.Timeout() && // it's a permanent net error
@@ -920,13 +724,6 @@ func (d *Dialer) Close() error {
 	defer d.lock.Unlock()
 	for _, i := range d.cache {
 		i.Close()
-	}
-	if d.sqlDataConn != nil {
-		// Best effort close with debug logging of error
-		if err := d.sqlDataConn.Close(); err != nil {
-			d.logger.Debugf(context.Background(),
-				"failed to close SQL data connection: %v", err)
-		}
 	}
 	return nil
 }
