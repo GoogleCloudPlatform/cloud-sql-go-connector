@@ -155,7 +155,7 @@ jobs:
     strategy:
       matrix:
         goarch: ["", "386"]
-        go-version: ["1.24", "1.25"]
+        go-version: ["1.25", "1.26"]
       fail-fast: false
     permissions:
       contents: read
