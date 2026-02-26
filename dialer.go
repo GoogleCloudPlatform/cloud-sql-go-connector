@@ -623,7 +623,11 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 	ctx = metadata.AppendToOutgoingContext(ctx,
 		"x-goog-user-project", cn.Project(),
 		"x-goog-request-params", fmt.Sprintf("location_id=locations/%s", cn.Region()),
+		"x-stickiness-key", fmt.Sprintf("project=%s/instance=%s", cn.Project(), cn.Name()),
 	)
+	if md, ok := metadata.FromOutgoingContext(ctx); ok {
+		d.logger.Debugf(ctx, "Outgoing gRPC Metadata: %v", md)
+	}
 	stream, err := c.StreamSqlData(ctx)
 	if err != nil {
 		return nil, err
