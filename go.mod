@@ -1,8 +1,8 @@
 module cloud.google.com/go/cloudsqlconn
 
-go 1.24.11
+go 1.25.7
 
-toolchain go1.25.5
+toolchain go1.26.1
 
 require (
 	cloud.google.com/go/auth v0.18.2
@@ -11,14 +11,14 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v4 v4.18.3
 	github.com/jackc/pgx/v5 v5.8.0
-	github.com/microsoft/go-mssqldb v1.9.6
+	github.com/microsoft/go-mssqldb v1.9.8
 	go.opencensus.io v0.24.0
-	golang.org/x/net v0.50.0
-	golang.org/x/oauth2 v0.35.0
-	golang.org/x/time v0.14.0
-	google.golang.org/api v0.266.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57
-	google.golang.org/grpc v1.79.1
+	golang.org/x/net v0.51.0
+	golang.org/x/oauth2 v0.36.0
+	golang.org/x/time v0.15.0
+	google.golang.org/api v0.269.0
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260217215200-42d3e9bedb6d
+	google.golang.org/grpc v1.79.2
 	google.golang.org/protobuf v1.36.11
 )
 
