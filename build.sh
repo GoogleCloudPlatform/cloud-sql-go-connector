@@ -77,12 +77,16 @@ function get_protoc() {
 
   os=$(uname -s | tr '[:upper:]' '[:lower:]')
   arch=$(uname -m)
+  protoc_go_arch=$arch
+  if [[ "$protoc_go_arch" == "x86_64" ]] ; then
+    protoc_go_arch="amd64"
+  fi
   if [[ "$os" == "darwin" && "$arch" == "arm64" ]] ; then
     protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-osx-aarch_64.zip"
-    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${arch}.tar.gz"
+    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${protoc_go_arch}.tar.gz"
   elif [[ "$os" == "linux" ]] ; then
     protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-${os}-${arch}.zip"
-    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${arch}.tar.gz"
+    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${protoc_go_arch}.tar.gz"
   else
     echo "Unsupported protoc platform : $os $arch"
     exit 1
