@@ -835,5 +835,5 @@ func newMDXRequest(ci cloudsql.ConnectionInfo, cfg dialConfig, metadataExchangeD
 		return nil
 	}
 
-	return &mdx.MetadataExchangeRequest{ClientProtocolType: &cpt}
+	return mdx.MetadataExchangeRequest_builder{ClientProtocolType: &cpt}.Build()
 }
