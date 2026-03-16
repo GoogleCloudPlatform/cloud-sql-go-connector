@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-syntax = "proto3";
+edition = "2023";
 
 package mdx;
 option go_package = "internal/mdx";
@@ -39,13 +39,13 @@ message MetadataExchangeRequest {
   }
 
   // User agent from the connector sending the request.
-  optional string user_agent = 1;
+  string user_agent = 1;
 
   // Client protocol type, the network protocol used by the database driver to
   // connect, which can affect the database login protocol as it does in MySQL.
   // The client should set this field when the
   // ConnectSettings.mdx_protocol_support field contains CLIENT_PROTOCOL_TYPE.
-  optional ClientProtocolType client_protocol_type = 2;
+  ClientProtocolType client_protocol_type = 2;
 }
 
 // The response from the Cloud SQL instance back to the connector
@@ -62,8 +62,8 @@ message MetadataExchangeResponse {
   }
 
   // Status code.
-  optional ResponseStatusCode response_status_code = 1;
+  ResponseStatusCode response_status_code = 1;
 
   // Error message.
-  optional string error_message = 2;
+  string error_message = 2;
 }

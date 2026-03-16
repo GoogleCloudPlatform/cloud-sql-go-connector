@@ -1752,7 +1752,7 @@ func TestNewMDXRequest(t *testing.T) {
 			cfg: dialConfig{
 				mdxClientProtocolType: cloudsql.ClientProtocolTCP,
 			},
-			want: &mdx.MetadataExchangeRequest{ClientProtocolType: &tcp},
+			want: mdx.MetadataExchangeRequest_builder{ClientProtocolType: &tcp}.Build(),
 		},
 		{
 			desc: "when client protocol is CLIENT_PROTOCOL_UDS",
@@ -1762,7 +1762,7 @@ func TestNewMDXRequest(t *testing.T) {
 			cfg: dialConfig{
 				mdxClientProtocolType: cloudsql.ClientProtocolUDS,
 			},
-			want: &mdx.MetadataExchangeRequest{ClientProtocolType: &uds},
+			want: mdx.MetadataExchangeRequest_builder{ClientProtocolType: &uds}.Build(),
 		},
 		{
 			desc: "when client protocol is CLIENT_PROTOCOL_TLS",
@@ -1772,7 +1772,7 @@ func TestNewMDXRequest(t *testing.T) {
 			cfg: dialConfig{
 				mdxClientProtocolType: cloudsql.ClientProtocolTLS,
 			},
-			want: &mdx.MetadataExchangeRequest{ClientProtocolType: &tlsRes},
+			want: mdx.MetadataExchangeRequest_builder{ClientProtocolType: &tlsRes}.Build(),
 		},
 	}
 

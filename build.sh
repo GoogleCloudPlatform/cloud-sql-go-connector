@@ -34,14 +34,19 @@ function clean() {
 ## generate - Generates all required files, before building
 function generate() {
   get_protoc
+
+  pbFile="internal/mdx/metadata_exchange.pb.go"
+  # Delete the old MDX pb file
+  rm "$pbFile"
+
   PATH="${SCRIPT_DIR}/.tools/protoc/bin:$PATH" "${SCRIPT_DIR}/.tools/protoc/bin/protoc" \
     --proto_path=. \
     --go_out=. \
+    --go_opt=default_api_level=API_OPAQUE \
     internal/mdx/metadata_exchange.proto \
     --go_opt=paths=source_relative
 
   # Add the copyright header to the generated protobuf file
-  pbFile="internal/mdx/metadata_exchange.pb.go"
   mv "${pbFile}" "${pbFile}.tmp"
   cat > "${pbFile}" <<EOF
 // Copyright 2025 Google LLC
