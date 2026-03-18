@@ -6,6 +6,7 @@
 ### Bug Fixes
 
 * update dependencies to latest ([#1075](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1075)) ([cd61b59](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/cd61b599369c812e186add6a65bbca011332e04d))
+* Deprecate support for pgx v4. The pgx v4 library was declared end life by its maintainer as of July 2025. We will remove support for the Cloud SQL Connector in July 2026
 
 ## [1.20.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.20.0...v1.20.1) (2026-02-17)
 
