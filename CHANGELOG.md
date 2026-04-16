@@ -7,6 +7,10 @@
 
 * upgrade example go version to match minimum ([#1087](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1087)) ([c950a6c](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/c950a6c61b08c0c945b6604c2cb7ca0d4399c02d))
 
+### Bug Fixes
+
+* drop support for EOL pgxv4 driver ([#1085](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1085)) ([c950a6c](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/dbabe68264ff55e8cb2ae701dc6c18c3c37cc3e4))
+
 ## [1.20.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.20.1...v1.20.2) (2026-03-17)
 
 
