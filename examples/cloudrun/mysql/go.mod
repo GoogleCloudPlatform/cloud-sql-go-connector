@@ -1,6 +1,8 @@
 module cloud.google.com/go-cloudrun/mysql
 
-go 1.25.7
+go 1.24.0
+
+toolchain go1.24.3
 
 require (
 	cloud.google.com/go/cloudsqlconn v1.20.2
