@@ -7,7 +7,7 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.2.8
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.9.1
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/microsoft/go-mssqldb v1.9.8
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.53.0
