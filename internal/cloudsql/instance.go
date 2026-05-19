@@ -185,7 +185,7 @@ type ConnectionInfo struct {
 	// Features of the MDX protocol supported by this database
 	MdxProtocolSupport []string
 
-	addrs map[string]string
+	addrs map[string][]string
 }
 
 // NewConnectionInfo initializes a ConnectionInfo struct.
@@ -194,7 +194,7 @@ func NewConnectionInfo(
 	dnsName string,
 	serverCAMode string,
 	version string,
-	ipAddrs map[string]string,
+	ipAddrs map[string][]string,
 	serverCACert []*x509.Certificate,
 	clientCert tls.Certificate,
 	mdxProtocolSupport []string,
@@ -212,31 +212,60 @@ func NewConnectionInfo(
 	}
 }
 
-// Addr returns the IP address or DNS name for the given IP type.
+// Addr returns the first IP address or DNS name for the given IP type.
 func (c ConnectionInfo) Addr(ipType string) (string, error) {
 	var (
-		addr string
-		ok   bool
+		addrs []string
+		ok    bool
 	)
 	switch ipType {
 	case AutoIP:
 		// Try Public first
-		addr, ok = c.addrs[PublicIP]
-		if !ok {
+		addrs, ok = c.addrs[PublicIP]
+		if !ok || len(addrs) == 0 {
 			// Try Private second
-			addr, ok = c.addrs[PrivateIP]
+			addrs, ok = c.addrs[PrivateIP]
 		}
 	default:
-		addr, ok = c.addrs[ipType]
+		addrs, ok = c.addrs[ipType]
 	}
-	if !ok {
+	if !ok || len(addrs) == 0 {
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", ipType),
 			c.ConnectionName.String(),
 		)
 		return "", err
 	}
-	return addr, nil
+	return addrs[0], nil
+}
+
+// Addrs returns all IP addresses or DNS names for the given IP type.
+func (c ConnectionInfo) Addrs(ipType string) ([]string, error) {
+	var (
+		addrs []string
+		ok    bool
+	)
+	switch ipType {
+	case AutoIP:
+		// Try Public first
+		addrs, ok = c.addrs[PublicIP]
+		if !ok || len(addrs) == 0 {
+			// Try Private second
+			addrs, ok = c.addrs[PrivateIP]
+		}
+	default:
+		addrs, ok = c.addrs[ipType]
+	}
+	if !ok || len(addrs) == 0 {
+		err := errtype.NewConfigError(
+			fmt.Sprintf("instance does not have IP of type %q", ipType),
+			c.ConnectionName.String(),
+		)
+		return nil, err
+	}
+	cp := make([]string, len(addrs))
+	copy(cp, addrs)
+	return cp, nil
 }
 
 // TLSConfig constructs a ClientProtocolTLS configuration for the given connection info.

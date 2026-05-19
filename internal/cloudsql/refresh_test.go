@@ -67,23 +67,23 @@ func TestRefresh(t *testing.T) {
 		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
 	}
 
-	gotIP, ok := rr.addrs[PublicIP]
-	if !ok {
-		t.Fatal("metadata IP addresses did not include public address")
+	gotIP, err := rr.Addr(PublicIP)
+	if err != nil {
+		t.Fatalf("metadata IP addresses did not include public address: %v", err)
 	}
 	if wantPublicIP != gotIP {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPublicIP, gotIP)
 	}
-	gotIP, ok = rr.addrs[PrivateIP]
-	if !ok {
-		t.Fatal("metadata IP addresses did not include private address")
+	gotIP, err = rr.Addr(PrivateIP)
+	if err != nil {
+		t.Fatalf("metadata IP addresses did not include private address: %v", err)
 	}
 	if wantPrivateIP != gotIP {
 		t.Fatalf("metadata IP mismatch, want = %v, got = %v", wantPrivateIP, gotIP)
 	}
-	gotPSCDNS, ok := rr.addrs[PSC]
-	if !ok {
-		t.Fatal("metadata IP addresses did not include PSC endpoint")
+	gotPSCDNS, err := rr.Addr(PSC)
+	if err != nil {
+		t.Fatalf("metadata IP addresses did not include PSC endpoint: %v", err)
 	}
 	if wantDNS != gotPSCDNS {
 		t.Fatalf("metadata IP mismatch, want = %v. got = %v", wantDNS, gotPSCDNS)
@@ -512,5 +512,52 @@ func TestRefreshWithFailedEphemeralCertCall(t *testing.T) {
 		if !errors.As(err, &tc.wantErr) {
 			t.Errorf("[%v] PerformRefresh failed with unexpected error, want = %T, got = %v", i, tc.wantErr, err)
 		}
+	}
+}
+
+func TestRefreshPSCAutoDNS(t *testing.T) {
+	wantDNS1 := "abcde.12345.us-central1.sql-psc.goog"
+	wantDNS2 := "abcde.12345.us-central1.sql.goog"
+
+	cn := testInstanceConnName()
+	inst := mock.NewFakeCSQLInstance(
+		cn.Project(), cn.Region(), cn.Name(),
+		mock.WithPSC(true),
+		mock.WithDNSMapping(wantDNS2, "INSTANCE", "PRIVATE_SERVICE_CONNECT"),
+		mock.WithDNSMapping(wantDNS1, "INSTANCE", "PRIVATE_SERVICE_CONNECT"),
+	)
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	if err != nil {
+		t.Fatalf("failed to create test SQL admin service: %s", err)
+	}
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	r := newAdminAPIClient(nullLogger{}, client, RSAKey, nil, testDialerID)
+	rr, err := r.ConnectionInfo(context.Background(), cn, false)
+	if err != nil {
+		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
+	}
+
+	gotPSCDNS, err := rr.Addrs(PSC)
+	if err != nil {
+		t.Fatalf("metadata IP addresses did not include PSC endpoint: %v", err)
+	}
+
+	if len(gotPSCDNS) != 2 {
+		t.Fatalf("want 2 PSC DNS names, got %v", len(gotPSCDNS))
+	}
+	if gotPSCDNS[0] != wantDNS1 {
+		t.Errorf("want first PSC DNS name to be %q, got %q", wantDNS1, gotPSCDNS[0])
+	}
+	if gotPSCDNS[1] != wantDNS2 {
+		t.Errorf("want second PSC DNS name to be %q, got %q", wantDNS2, gotPSCDNS[1])
 	}
 }
