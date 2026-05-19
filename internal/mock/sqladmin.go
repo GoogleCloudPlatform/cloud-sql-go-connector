@@ -246,6 +246,32 @@ func CreateEphemeralSuccess(i FakeCSQLInstance, ct int) *Request {
 	return r
 }
 
+// ResolveConnectSettingsSuccess returns a Request that responds to the `connect.resolve` SQL Admin endpoint.
+func ResolveConnectSettingsSuccess(dnsName, location, connectionName string, ct int) *Request {
+	r := &Request{
+		reqMethod: http.MethodGet,
+		reqPath:   fmt.Sprintf("/sql/v1beta4/locations/%s/dns/%s:resolveConnectSettings", location, dnsName),
+		reqCt:     ct,
+		handle: func(resp http.ResponseWriter, _ *http.Request) {
+			db := &sqladmin.ConnectSettings{
+				BackendType:     "SECOND_GEN",
+				DatabaseVersion: "POSTGRES_14",
+				Region:          location,
+				ConnectionName:  connectionName,
+			}
+
+			b, err := db.MarshalJSON()
+			if err != nil {
+				http.Error(resp, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			resp.WriteHeader(http.StatusOK)
+			resp.Write(b)
+		},
+	}
+	return r
+}
+
 // NewSQLAdminService creates a SQL Admin API service backed by a mock HTTP
 // backend. Callers should use the cleanup function to close down the server. If
 // the cleanup function returns an error, a caller has not exercised all the
