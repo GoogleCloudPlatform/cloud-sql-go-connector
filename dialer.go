@@ -320,6 +320,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	var r instance.ConnectionNameResolver = cloudsql.DefaultResolver
 	if cfg.resolver != nil {
 		r = cfg.resolver
+	} else if cfg.useDnsNameResolver {
+		r = cloudsql.NewDNSResolver(cfg.dnsResolver, client)
 	}
 
 	tp := cfg.apiTokenProvider
@@ -493,45 +495,67 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
 	defer func() { connectEnd(err) }()
 
-	addr, err := ci.Addr(cfg.connectionType)
+	addrs, err := ci.Addrs(cfg.connectionType)
 	if err != nil {
 		d.removeCached(ctx, cn, c, err)
 		return nil, err
 	}
 
+	var targets []string
+
 	// If the connector is configured with a custom DNS name, attempt to use
 	// that DNS name to connect to the instance. Fall back to the metadata IP
 	// address if the DNS name does not resolve to an IP address.
 	if cn.HasDomainName() {
-		addrs, err := d.dnsResolver.LookupHost(ctx, cn.DomainName())
-		if err != nil {
-			d.logger.Debugf(ctx,
-				"[%v] custom DNS name %q did not resolve to an IP address: %v, using %s from instance metadata",
-				cn.String(), cn.DomainName(), err, addr)
-		} else if len(addrs) == 0 {
-			d.logger.Debugf(ctx,
-				"[%v] custom DNS name %q resolved but returned no entries, using %s from instance metadata",
-				cn.String(), cn.DomainName(), addr)
+		resolved, err := d.dnsResolver.LookupHost(ctx, cn.DomainName())
+		if err != nil || len(resolved) == 0 {
+			fallbackAddr := addrs[0]
+			if net.ParseIP(fallbackAddr) == nil {
+				if pIp, err2 := ci.Addr(cloudsql.PrivateIP); err2 == nil {
+					fallbackAddr = pIp
+				} else if pIp, err2 := ci.Addr(cloudsql.PublicIP); err2 == nil {
+					fallbackAddr = pIp
+				}
+			}
+			if err != nil {
+				d.logger.Debugf(ctx,
+					"[%v] custom DNS name %q did not resolve to an IP address: %v, using %s from instance metadata",
+					cn.String(), cn.DomainName(), err, fallbackAddr)
+			} else {
+				d.logger.Debugf(ctx,
+					"[%v] custom DNS name %q resolved but returned no entries, using %s from instance metadata",
+					cn.String(), cn.DomainName(), fallbackAddr)
+			}
+			targets = []string{fallbackAddr}
 		} else {
 			d.logger.Debugf(ctx,
 				"[%v] custom DNS name %q resolved to %q, using it to connect",
-				cn.String(), cn.DomainName(), addrs[0])
-			addr = addrs[0]
+				cn.String(), cn.DomainName(), resolved)
+			targets = resolved
 		}
+	} else {
+		targets = addrs
 	}
 
-	addr = net.JoinHostPort(addr, serverProxyPort)
 	f := d.dialFunc
 	if cfg.dialFunc != nil {
 		f = cfg.dialFunc
 	}
-	d.logger.Debugf(ctx, "[%v] Dialing %v", cn.String(), addr)
-	conn, err = f(ctx, "tcp", addr)
-	if err != nil {
-		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", cn.String(), addr, err)
+
+	var dialErr error
+	for _, target := range targets {
+		dialAddr := net.JoinHostPort(target, serverProxyPort)
+		d.logger.Debugf(ctx, "[%v] Dialing %v", cn.String(), dialAddr)
+		conn, dialErr = f(ctx, "tcp", dialAddr)
+		if dialErr == nil {
+			break
+		}
+		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", cn.String(), dialAddr, dialErr)
+	}
+	if dialErr != nil {
 		// refresh the instance info in case it caused the connection failure
 		c.ForceRefresh()
-		return nil, errtype.NewDialError("failed to dial", cn.String(), err)
+		return nil, errtype.NewDialError("failed to dial", cn.String(), dialErr)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {

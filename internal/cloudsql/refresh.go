@@ -21,6 +21,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"sort"
 	"strings"
 
 	"cloud.google.com/go/auth"
@@ -57,7 +58,7 @@ const (
 // metadata contains information about a Cloud SQL instance needed to create
 // connections.
 type metadata struct {
-	ipAddrs            map[string]string
+	ipAddrs            map[string][]string
 	serverCACert       []*x509.Certificate
 	serverCAMode       string
 	dnsName            string
@@ -100,13 +101,13 @@ func fetchMetadata(
 	}
 
 	// parse any ip addresses that might be used to connect
-	ipAddrs := make(map[string]string)
+	ipAddrs := make(map[string][]string)
 	for _, ip := range db.IpAddresses {
 		switch ip.Type {
 		case "PRIMARY":
-			ipAddrs[PublicIP] = ip.IpAddress
+			ipAddrs[PublicIP] = []string{ip.IpAddress}
 		case "PRIVATE":
-			ipAddrs[PrivateIP] = ip.IpAddress
+			ipAddrs[PrivateIP] = []string{ip.IpAddress}
 		}
 	}
 
@@ -114,23 +115,23 @@ func fetchMetadata(
 	// Note that we have to check for PSC enablement first because CAS instances also set the DnsName.
 	if db.PscEnabled {
 		// Search the dns_names field for the PSC DNS Name.
-		pscDNSName := ""
+		var pscDNSNames []string
 		for _, dnm := range db.DnsNames {
 			if dnm.Name != "" &&
 				dnm.ConnectionType == "PRIVATE_SERVICE_CONNECT" && dnm.DnsScope == "INSTANCE" {
-				pscDNSName = dnm.Name
-				break
+				pscDNSNames = append(pscDNSNames, dnm.Name)
 			}
 		}
 
 		// If the psc dns name was not found, use the legacy dns_name field
-		if pscDNSName == "" && db.DnsName != "" {
-			pscDNSName = db.DnsName
+		if len(pscDNSNames) == 0 && db.DnsName != "" {
+			pscDNSNames = append(pscDNSNames, db.DnsName)
 		}
 
 		// If the psc dns name was found, add it to the ipaddrs map.
-		if pscDNSName != "" {
-			ipAddrs[PSC] = pscDNSName
+		if len(pscDNSNames) > 0 {
+			sortPSCDNSNames(pscDNSNames)
+			ipAddrs[PSC] = pscDNSNames
 		}
 	}
 
@@ -381,4 +382,18 @@ func supportsAutoIAMAuthN(version string) error {
 	default:
 		return fmt.Errorf("%s does not support Auto IAM DB Authentication", version)
 	}
+}
+
+func sortPSCDNSNames(names []string) {
+	sort.SliceStable(names, func(i, j int) bool {
+		iIsPsc := strings.HasSuffix(names[i], ".sql-psc.goog")
+		jIsPsc := strings.HasSuffix(names[j], ".sql-psc.goog")
+		if iIsPsc && !jIsPsc {
+			return true // i comes first
+		}
+		if !iIsPsc && jIsPsc {
+			return false // j comes first
+		}
+		return false
+	})
 }

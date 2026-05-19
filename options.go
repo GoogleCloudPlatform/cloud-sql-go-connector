@@ -65,8 +65,10 @@ type dialerConfig struct {
 	dnsResolver              cloudsql.NetResolver
 	sqlDataDialer            sqldataclient.Dialer
 	sqlDataStreamTimeout     time.Duration
+	useDnsNameResolver       bool
 	// err tracks any dialer options that may have failed.
-	err error
+	err    error
+	client *sqladmin.Service
 }
 
 // WithOptions turns a list of Option's into a single Option.
@@ -332,7 +334,7 @@ func WithResolver(r instance.ConnectionNameResolver) Option {
 //   - Value: `my-project:region:my-instance` – This is the instance name
 func WithDNSResolver() Option {
 	return func(d *dialerConfig) {
-		d.resolver = cloudsql.NewDNSResolver(d.dnsResolver)
+		d.useDnsNameResolver = true
 	}
 }
 
@@ -424,6 +426,8 @@ type dialConfig struct {
 	tcpKeepAlive          time.Duration
 	useIAMAuthN           bool
 	mdxClientProtocolType string
+	// This will be set before options
+	client *sqladmin.Service
 }
 
 // DialOptions turns a list of DialOption instances into an DialOption.

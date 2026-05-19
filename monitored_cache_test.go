@@ -34,7 +34,7 @@ func (l *testLog) Debugf(_ context.Context, f string, args ...interface{}) {
 
 func TestMonitoredCache_purgeClosedConns(t *testing.T) {
 	cn, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
-	r := cloudsql.NewDNSResolver(&mockNetResolver{txtEntries: map[string]string{"db.example.com": "my-project:my-region:my-instance"}})
+	r := cloudsql.NewDNSResolver(&mockNetResolver{txtEntries: map[string]string{"db.example.com": "my-project:my-region:my-instance"}}, nil)
 	c := newMonitoredCache(&spyConnectionInfoCache{}, cn, 10*time.Millisecond, r, &testLog{t: t})
 
 	// Add connections

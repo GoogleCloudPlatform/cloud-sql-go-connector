@@ -779,9 +779,9 @@ func TestDialerRemovesInvalidInstancesFromCache(t *testing.T) {
 					"",
 					"GOOGLE_MANAGED_INTERNAL_CA",
 					"",
-					map[string]string{
+					map[string][]string{
 						// no public IP
-						cloudsql.PrivateIP: "10.0.0.1",
+						cloudsql.PrivateIP: {"10.0.0.1"},
 					},
 					nil,
 					tls.Certificate{Leaf: &x509.Certificate{
@@ -1041,6 +1041,10 @@ func (r *mockNetResolver) LookupHost(_ context.Context, name string) ([]string, 
 		return []string{val}, nil
 	}
 	return nil, fmt.Errorf("no resolution for %q", name)
+}
+
+func (r *mockNetResolver) LookupCNAME(_ context.Context, name string) (string, error) {
+	return "", fmt.Errorf("no CNAME resolution for %q", name)
 }
 
 func TestDialerSuccessfullyDialsDnsTxtRecord(t *testing.T) {
@@ -1783,5 +1787,85 @@ func TestNewMDXRequest(t *testing.T) {
 				t.Errorf("want = %v, got = %v", tc.want, got)
 			}
 		})
+	}
+}
+
+func TestDialerDnsResolutionFailureFallbackToPrivateIP(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+		mock.WithPrivateIP("127.0.0.2"),
+		mock.WithDNS("db.example.com"),
+	)
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			withMockDNSResolver(&mockNetResolver{
+				txtEntries: map[string]string{
+					"db.example.com": "my-project:my-region:my-instance",
+				},
+				// hostEntries is EMPTY! So LookupHost("db.example.com") will FAIL!
+			}),
+			WithDNSResolver(),
+			WithDefaultDialOptions(WithPrivateIP()), // Tell dialer to use Private IP type
+			WithTokenSource(mock.EmptyTokenSource{}),
+		},
+	})
+
+	// This should succeed because the dialer falls back to the private IP (10.0.0.1)
+	// when DNS lookup fails!
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"db.example.com",
+	)
+}
+
+func TestDialerPSCPSCFirst(t *testing.T) {
+	dnsPSC := "abcde.12345.us-central1.sql-psc.goog"
+	dnsReg := "abcde.12345.us-central1.sql.goog"
+
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+		mock.WithPSC(true),
+		mock.WithDNSMapping(dnsReg, "INSTANCE", "PRIVATE_SERVICE_CONNECT"),
+		mock.WithDNSMapping(dnsPSC, "INSTANCE", "PRIVATE_SERVICE_CONNECT"),
+	)
+
+	var attempts []string
+	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		attempts = append(attempts, host)
+		if host == dnsPSC {
+			return nil, errors.New("PSC resolution/connection failed")
+		}
+		if host == dnsReg {
+			return net.Dial(network, net.JoinHostPort("127.0.0.1", port))
+		}
+		return nil, fmt.Errorf("unexpected dial address: %s", addr)
+	}
+
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithDialFunc(dialFunc),
+		},
+	})
+
+	testSuccessfulDial(context.Background(), t, d, inst.String(), WithPSC())
+
+	wantAttempts := []string{dnsPSC, dnsReg}
+	if !reflect.DeepEqual(wantAttempts, attempts) {
+		t.Fatalf("unexpected dial attempts, want = %v, got = %v", wantAttempts, attempts)
 	}
 }

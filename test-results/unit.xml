@@ -1,0 +1,384 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="117" skipped="17">
+	<testsuite name="cloud.google.com/go/cloudsqlconn" tests="117" failures="0" errors="0" id="0" hostname="hessjc-test.c.googlers.com" skipped="17" time="84.632" timestamp="2026-06-16T18:07:58Z">
+		<properties>
+			<property name="coverage.statements.pct" value="77.40"></property>
+		</properties>
+		<testcase name="TestDialerWithSqlData" classname="cloud.google.com/go/cloudsqlconn" time="0.270"></testcase>
+		<testcase name="TestDialerWithSqlData_ConnectionFailure" classname="cloud.google.com/go/cloudsqlconn" time="0.150"></testcase>
+		<testcase name="TestDialerWithSqlData_StreamInterruption" classname="cloud.google.com/go/cloudsqlconn" time="0.130"></testcase>
+		<testcase name="TestDialerWithSqlData_ClientCancellation" classname="cloud.google.com/go/cloudsqlconn" time="0.110"></testcase>
+		<testcase name="TestDialerWithSqlData_ConcurrentConnections" classname="cloud.google.com/go/cloudsqlconn" time="0.090"></testcase>
+		<testcase name="TestDialerWithSqlData_HeadersAndSequence" classname="cloud.google.com/go/cloudsqlconn" time="0.070"></testcase>
+		<testcase name="TestDialerWithSqlData_LargePayload" classname="cloud.google.com/go/cloudsqlconn" time="1.440"></testcase>
+		<testcase name="TestDialerWithSqlDataTimeout" classname="cloud.google.com/go/cloudsqlconn" time="0.640"></testcase>
+		<testcase name="TestDialerWithSqlData_DialCancellation" classname="cloud.google.com/go/cloudsqlconn" time="0.120"></testcase>
+		<testcase name="TestDialerCanConnectToInstance" classname="cloud.google.com/go/cloudsqlconn" time="0.880"></testcase>
+		<testcase name="TestDialerCanConnectToInstanceWithMdx" classname="cloud.google.com/go/cloudsqlconn" time="1.750">
+			<system-out><![CDATA[    cloudsql.go:346: Error reading MDX message: read tcp 127.0.0.1:3307->127.0.0.1:38690: i/o timeout
+    cloudsql.go:348: Fake server received metadata exchange request: [0 0 0 2 16 1 104 101 108 108 111 32 119 111 114 108 100]]]></system-out>
+		</testcase>
+		<testcase name="TestDialWithAdminAPIErrors" classname="cloud.google.com/go/cloudsqlconn" time="1.530">
+			<system-out><![CDATA[2026/06/16 18:06:40 http: TLS handshake error from 127.0.0.1:47196: read tcp 127.0.0.1:39061->127.0.0.1:47196: use of closed network connection]]></system-out>
+		</testcase>
+		<testcase name="TestDialWithConfigurationErrors" classname="cloud.google.com/go/cloudsqlconn" time="1.610"></testcase>
+		<testcase name="TestDialWithExpiredCertificate" classname="cloud.google.com/go/cloudsqlconn" time="0.540"></testcase>
+		<testcase name="TestIAMAuthn" classname="cloud.google.com/go/cloudsqlconn" time="0.250"></testcase>
+		<testcase name="TestIAMAuthn/When_Credentials_are_provided_with_IAM_Authn_ENABLED" classname="cloud.google.com/go/cloudsqlconn" time="0.040"></testcase>
+		<testcase name="TestIAMAuthn/When_Credentials_are_provided_with_IAM_Authn_DISABLED" classname="cloud.google.com/go/cloudsqlconn" time="0.210"></testcase>
+		<testcase name="TestSQLServerFailsOnIAMAuthN" classname="cloud.google.com/go/cloudsqlconn" time="0.730"></testcase>
+		<testcase name="TestDialerWithCustomDialFunc" classname="cloud.google.com/go/cloudsqlconn" time="1.320"></testcase>
+		<testcase name="TestDialerEngineVersion" classname="cloud.google.com/go/cloudsqlconn" time="4.430"></testcase>
+		<testcase name="TestDialerEngineVersion/MYSQL_5_7" classname="cloud.google.com/go/cloudsqlconn" time="1.220"></testcase>
+		<testcase name="TestDialerEngineVersion/POSTGRES_14" classname="cloud.google.com/go/cloudsqlconn" time="1.050"></testcase>
+		<testcase name="TestDialerEngineVersion/SQLSERVER_2019_STANDARD" classname="cloud.google.com/go/cloudsqlconn" time="1.050"></testcase>
+		<testcase name="TestDialerEngineVersion/MYSQL_8_0_18" classname="cloud.google.com/go/cloudsqlconn" time="1.110"></testcase>
+		<testcase name="TestEngineVersionAvoidsDuplicateRefreshWithIAMAuthN" classname="cloud.google.com/go/cloudsqlconn" time="1.400"></testcase>
+		<testcase name="TestEngineVersionRemovesInvalidInstancesFromCache" classname="cloud.google.com/go/cloudsqlconn" time="0.110"></testcase>
+		<testcase name="TestEngineVersionRemovesInvalidInstancesFromCache/EngineVersion_on_a_bad_instance_URI" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestDialerUserAgent" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestWarmup" classname="cloud.google.com/go/cloudsqlconn" time="1.690"></testcase>
+		<testcase name="TestWarmup/Warmup_and_Dial_both_use_IAM_AuthN" classname="cloud.google.com/go/cloudsqlconn" time="0.140"></testcase>
+		<testcase name="TestWarmup/Warmup_uses_IAM_Authn,_Dial_does_not" classname="cloud.google.com/go/cloudsqlconn" time="0.070"></testcase>
+		<testcase name="TestWarmup/Warmup_uses_IAM_AuthN,_Dial_uses_global_setting" classname="cloud.google.com/go/cloudsqlconn" time="0.190"></testcase>
+		<testcase name="TestWarmupRemovesInvalidInstancesFromCache" classname="cloud.google.com/go/cloudsqlconn" time="0.200"></testcase>
+		<testcase name="TestWarmupRemovesInvalidInstancesFromCache/warmup_a_bad_instance_URI" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestDialDialerOptsConflicts" classname="cloud.google.com/go/cloudsqlconn" time="1.360"></testcase>
+		<testcase name="TestDialDialerOptsConflicts/dialer_opts_set_and_dial_uses_default" classname="cloud.google.com/go/cloudsqlconn" time="0.120"></testcase>
+		<testcase name="TestDialDialerOptsConflicts/dialer_and_dial_opts_are_the_same" classname="cloud.google.com/go/cloudsqlconn" time="0.220"></testcase>
+		<testcase name="TestDialDialerOptsConflicts/dialer_and_dial_opts_are_different" classname="cloud.google.com/go/cloudsqlconn" time="0.200"></testcase>
+		<testcase name="TestTokenSourceWithIAMAuthN" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestTokenSourceWithIAMAuthN/when_token_source_is_set_with_IAM_AuthN" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestTokenSourceWithIAMAuthN/when_IAM_AuthN_token_source_is_set_without_IAM_AuthN" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestCredentialsWithIAMAuthN" classname="cloud.google.com/go/cloudsqlconn" time="0.150"></testcase>
+		<testcase name="TestCredentialsWithIAMAuthN/when_token_source_is_set_with_IAM_AuthN" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestCredentialsWithIAMAuthN/when_IAM_AuthN_token_source_is_set_without_IAM_AuthN" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestCredentialsWithIAMAuthN/when_IAM_AuthN_token_source_is_set_with_IAM_AuthN" classname="cloud.google.com/go/cloudsqlconn" time="0.150"></testcase>
+		<testcase name="TestDialerRemovesInvalidInstancesFromCache" classname="cloud.google.com/go/cloudsqlconn" time="0.140"></testcase>
+		<testcase name="TestDialerRemovesInvalidInstancesFromCache/dialing_a_bad_instance_URI" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestDialerRemovesInvalidInstancesFromCache/specifying_an_invalid_IP_type" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestDialRefreshesExpiredCertificates" classname="cloud.google.com/go/cloudsqlconn" time="0.140"></testcase>
+		<testcase name="TestDialerSupportsOneOffDialFunction" classname="cloud.google.com/go/cloudsqlconn" time="1.140"></testcase>
+		<testcase name="TestDialerCloseReportsFriendlyError" classname="cloud.google.com/go/cloudsqlconn" time="0.080"></testcase>
+		<testcase name="TestDialerInitializesLazyCache" classname="cloud.google.com/go/cloudsqlconn" time="0.940"></testcase>
+		<testcase name="TestDialerSuccessfullyDialsDnsTxtRecord" classname="cloud.google.com/go/cloudsqlconn" time="1.490"></testcase>
+		<testcase name="TestDialerSuccessfullyDialsDnsTxtRecordWithCustomARecords" classname="cloud.google.com/go/cloudsqlconn" time="1.520"></testcase>
+		<testcase name="TestDialerFailsDnsTxtRecordWithInvalidCustomARecords" classname="cloud.google.com/go/cloudsqlconn" time="2.340">
+			<system-out><![CDATA[    dialer_test.go:1161: timeout dial error: failed to dial (connection name = "db.example.com -> my-project:my-region:my-instance"): dial tcp 1.1.1.1:3307: i/o timeout]]></system-out>
+		</testcase>
+		<testcase name="TestDialerFailsDNSTxtRecordMissing" classname="cloud.google.com/go/cloudsqlconn" time="0.630"></testcase>
+		<testcase name="TestDialerUpdatesAutomaticallyAfterDnsChange" classname="cloud.google.com/go/cloudsqlconn" time="3.240"></testcase>
+		<testcase name="TestDialerClosesOldConnectionsOpenAfterDnsChange" classname="cloud.google.com/go/cloudsqlconn" time="32.840">
+			<system-out><![CDATA[    monitored_cache_test.go:32: resolved domain name update.example.com to update.example.com -> my-project:my-region:my-instance
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance] Connection info added to cache
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance] Connection info refresh operation started
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance] Connection info refresh operation complete
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance] Current certificate expiration = 2026-06-16T19:07:07Z
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance] Connection info refresh operation scheduled at 2026-06-16T19:03:07Z (now + 56m0s)
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance] Now = 2026-06-16T18:07:07Z, Current cert expiration = 2026-06-16T19:07:07Z
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance] Cert is valid = true
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance] custom DNS name "update.example.com" did not resolve to an IP address: lookup update.example.com on 127.0.0.1:53: no such host, using 0.0.0.0 from instance metadata
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    cloudsql.go:467: server: handled connection
+    monitored_cache_test.go:32: dial successful
+    cloudsql.go:534: client c1: Starting
+    cloudsql.go:545: client c1: writing hello
+    cloudsql.go:496: server: handled read, hello c1
+    cloudsql.go:560: client c1: received my-instance
+    cloudsql.go:545: client c1: writing hello
+    cloudsql.go:496: server: handled read, hello c1
+    cloudsql.go:560: client c1: received my-instance
+    cloudsql.go:545: client c1: writing hello
+    cloudsql.go:496: server: handled read, hello c1
+    cloudsql.go:560: client c1: received my-instance
+    cloudsql.go:545: client c1: writing hello
+    cloudsql.go:496: server: handled read, hello c1
+    cloudsql.go:560: client c1: received my-instance
+    cloudsql.go:545: client c1: writing hello
+    cloudsql.go:496: server: handled read, hello c1
+    cloudsql.go:560: client c1: received my-instance
+    cloudsql.go:545: client c1: writing hello
+    cloudsql.go:496: server: handled read, hello c1
+    cloudsql.go:560: client c1: received my-instance
+    cloudsql.go:545: client c1: writing hello
+    cloudsql.go:496: server: handled read, hello c1
+    cloudsql.go:560: client c1: received my-instance
+    dialer_test.go:1337: Switching to instance2 server
+    dialer_test.go:1343: Updating DNS record
+    monitored_cache_test.go:32: domain name update.example.com changed from my-instance to my-instance2, closing all connections.
+    cloudsql.go:545: client c1: writing hello
+    monitored_cache_test.go:32: resolved domain name update.example.com to update.example.com -> my-project:my-region:my-instance2
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance2] Connection info added to cache
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance] IO Error on Read or Write: use of closed network connection
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance] IO Error on Read or Write: read tcp 127.0.0.1:49444->127.0.0.1:3307: use of closed network connection
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance2] Connection info refresh operation started
+    cloudsql.go:553: client c1: error read tcp 127.0.0.1:49444->127.0.0.1:3307: use of closed network connection
+    cloudsql.go:572: client c1: Closing
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance2] Connection info refresh operation complete
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance2] Current certificate expiration = 2026-06-16T19:07:24Z
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance2] Connection info refresh operation scheduled at 2026-06-16T19:03:24Z (now + 56m0s)
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance2] Now = 2026-06-16T18:07:24Z, Current cert expiration = 2026-06-16T19:07:24Z
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance2] Cert is valid = true
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance2] custom DNS name "update.example.com" did not resolve to an IP address: lookup update.example.com on 127.0.0.1:53: no such host, using 0.0.0.0 from instance metadata
+    monitored_cache_test.go:32: [update.example.com -> my-project:my-region:my-instance2] Dialing 0.0.0.0:3307
+    cloudsql.go:467: server: handled connection
+    monitored_cache_test.go:32: dial successful
+    cloudsql.go:534: client c2: Starting
+    cloudsql.go:545: client c2: writing hello
+    cloudsql.go:496: server: handled read, hello c2
+    cloudsql.go:560: client c2: received my-instance2
+    cloudsql.go:545: client c2: writing hello
+    cloudsql.go:496: server: handled read, hello c2
+    cloudsql.go:560: client c2: received my-instance2
+    cloudsql.go:545: client c2: writing hello
+    cloudsql.go:496: server: handled read, hello c2
+    cloudsql.go:560: client c2: received my-instance2
+    cloudsql.go:545: client c2: writing hello
+    cloudsql.go:496: server: handled read, hello c2
+    cloudsql.go:560: client c2: received my-instance2
+    cloudsql.go:545: client c2: writing hello
+    cloudsql.go:560: client c2: received my-instance2
+    cloudsql.go:496: server: handled read, hello c2
+    cloudsql.go:545: client c2: writing hello
+    cloudsql.go:496: server: handled read, hello c2
+    cloudsql.go:560: client c2: received my-instance2
+    cloudsql.go:545: client c2: writing hello
+    cloudsql.go:496: server: handled read, hello c2
+    cloudsql.go:560: client c2: received my-instance2
+    cloudsql.go:572: client c2: Closing]]></system-out>
+		</testcase>
+		<testcase name="TestDialerChecksSubjectAlternativeNameAndSucceeds" classname="cloud.google.com/go/cloudsqlconn" time="4.270"></testcase>
+		<testcase name="TestDialerChecksSubjectAlternativeNameAndSucceeds/domainName_DnsName_older" classname="cloud.google.com/go/cloudsqlconn" time="1.100"></testcase>
+		<testcase name="TestDialerChecksSubjectAlternativeNameAndSucceeds/domainName_DnsNames_newer" classname="cloud.google.com/go/cloudsqlconn" time="1.310"></testcase>
+		<testcase name="TestDialerChecksSubjectAlternativeNameAndSucceeds/InstanceConnectionName_DnsName_older" classname="cloud.google.com/go/cloudsqlconn" time="0.770"></testcase>
+		<testcase name="TestDialerChecksSubjectAlternativeNameAndSucceeds/InstanceConnectionName_DnsNames_newer" classname="cloud.google.com/go/cloudsqlconn" time="1.090"></testcase>
+		<testcase name="TestDialerChecksSubjectAlternativeNameAndFails" classname="cloud.google.com/go/cloudsqlconn" time="0.960">
+			<system-out><![CDATA[    cloudsql.go:340: Fake server read error: remote error: tls: bad certificate
+    cloudsql.go:358: Fake server write error: remote error: tls: bad certificate]]></system-out>
+		</testcase>
+		<testcase name="TestDialerChecksSubjectAlternativeNameAndFallsBackToCN" classname="cloud.google.com/go/cloudsqlconn" time="0.680"></testcase>
+		<testcase name="TestDialerChecksSubjectAlternativeNameAndFallsBackToCN/Fallback_from_connect_with_Instance_Connection_Name" classname="cloud.google.com/go/cloudsqlconn" time="0.030"></testcase>
+		<testcase name="TestDialerChecksSubjectAlternativeNameAndFallsBackToCN/Fallback_from_connect_with_configured_domain_name" classname="cloud.google.com/go/cloudsqlconn" time="0.020"></testcase>
+		<testcase name="TestDialerRefreshesAfterRotateCACerts" classname="cloud.google.com/go/cloudsqlconn" time="5.480"></testcase>
+		<testcase name="TestDialerRefreshesAfterRotateCACerts/Rotating_Client_CA_causes_error_on_read,_then_refresh" classname="cloud.google.com/go/cloudsqlconn" time="1.280">
+			<system-out><![CDATA[    dialer_test.go:1626: First attempt...
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info added to cache
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation started
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation complete
+    dialer_test.go:1691: [my-project:my-region:my-instance] Current certificate expiration = 2026-06-16T19:07:45Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation scheduled at 2026-06-16T19:03:45Z (now + 56m0s)
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:45Z, Current cert expiration = 2026-06-16T19:07:45Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    dialer_test.go:1691: dial successful
+    dialer_test.go:1631: First attempt OK. Resetting client cert.
+    dialer_test.go:1647: Second attempt should fail...
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:46Z, Current cert expiration = 2026-06-16T19:07:45Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    dialer_test.go:1691: dial successful
+    cloudsql.go:340: Fake server read error: tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "crypto/rsa: verification error" while trying to verify candidate authority certificate "Google Cloud SQL Signing CA foo:baz")
+    dialer_test.go:1691: [my-project:my-region:my-instance] IO Error on Read or Write: remote error: tls: unknown certificate authority
+    dialer_test.go:1691: [my-project:my-region:my-instance] Removing connection info from cache: remote error: tls: unknown certificate authority
+    cloudsql.go:358: Fake server write error: tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "crypto/rsa: verification error" while trying to verify candidate authority certificate "Google Cloud SQL Signing CA foo:baz")
+    dialer_test.go:1664: got error on read as expected: remote error: tls: unknown certificate authority
+    dialer_test.go:1672: Second attempt done
+    dialer_test.go:1675: Third attempt...
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info added to cache
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation started
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation complete
+    dialer_test.go:1691: [my-project:my-region:my-instance] Current certificate expiration = 2026-06-16T19:07:46Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation scheduled at 2026-06-16T19:03:46Z (now + 56m0s)
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:46Z, Current cert expiration = 2026-06-16T19:07:46Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    dialer_test.go:1691: dial successful
+    dialer_test.go:1680: Third attempt OK.]]></system-out>
+		</testcase>
+		<testcase name="TestDialerRefreshesAfterRotateCACerts/Rotating_all_CAs_causes_error_on_dial,_then_refresh" classname="cloud.google.com/go/cloudsqlconn" time="1.360">
+			<system-out><![CDATA[    dialer_test.go:1626: First attempt...
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info added to cache
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation started
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation complete
+    dialer_test.go:1691: [my-project:my-region:my-instance] Current certificate expiration = 2026-06-16T19:07:47Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation scheduled at 2026-06-16T19:03:47Z (now + 56m0s)
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:47Z, Current cert expiration = 2026-06-16T19:07:47Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    dialer_test.go:1691: dial successful
+    dialer_test.go:1631: First attempt OK. Resetting client cert.
+    dialer_test.go:1647: Second attempt should fail...
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:47Z, Current cert expiration = 2026-06-16T19:07:47Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    cloudsql.go:340: Fake server read error: remote error: tls: bad certificate
+    dialer_test.go:1691: [my-project:my-region:my-instance] TLS handshake failed: dial error: failed to verify certificate (connection name = "my-project:my-region:my-instance"): tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "crypto/rsa: verification error" while trying to verify candidate authority certificate "Google Cloud SQL Intermediate CA")
+    cloudsql.go:358: Fake server write error: remote error: tls: bad certificate
+    dialer_test.go:1691: [my-project:my-region:my-instance] Removing connection info from cache: dial error: failed to verify certificate (connection name = "my-project:my-region:my-instance"): tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "crypto/rsa: verification error" while trying to verify candidate authority certificate "Google Cloud SQL Intermediate CA")
+    dialer_test.go:1651: got error on dial as expected: dial error: handshake failed (connection name = "my-project:my-region:my-instance"): dial error: failed to verify certificate (connection name = "my-project:my-region:my-instance"): tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "crypto/rsa: verification error" while trying to verify candidate authority certificate "Google Cloud SQL Intermediate CA")
+    dialer_test.go:1672: Second attempt done
+    dialer_test.go:1675: Third attempt...
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info added to cache
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation started
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation complete
+    dialer_test.go:1691: [my-project:my-region:my-instance] Current certificate expiration = 2026-06-16T19:07:47Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation scheduled at 2026-06-16T19:03:47Z (now + 56m0s)
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:47Z, Current cert expiration = 2026-06-16T19:07:47Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    dialer_test.go:1691: dial successful
+    dialer_test.go:1680: Third attempt OK.]]></system-out>
+		</testcase>
+		<testcase name="TestDialerRefreshesAfterRotateCACerts/Rotating_Client_CA_with_lazy_refresh_causes_error_on_read" classname="cloud.google.com/go/cloudsqlconn" time="1.240">
+			<system-out><![CDATA[    dialer_test.go:1626: First attempt...
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info added to cache
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation started
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation complete
+    dialer_test.go:1691: [my-project:my-region:my-instance] Current certificate expiration = 2026-06-16T19:07:48Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:48Z, Current cert expiration = 2026-06-16T19:07:48Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    dialer_test.go:1691: dial successful
+    dialer_test.go:1631: First attempt OK. Resetting client cert.
+    dialer_test.go:1647: Second attempt should fail...
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info is still valid, using cached info
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:48Z, Current cert expiration = 2026-06-16T19:07:48Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    dialer_test.go:1691: dial successful
+    cloudsql.go:340: Fake server read error: tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "crypto/rsa: verification error" while trying to verify candidate authority certificate "Google Cloud SQL Signing CA foo:baz")
+    cloudsql.go:358: Fake server write error: tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "crypto/rsa: verification error" while trying to verify candidate authority certificate "Google Cloud SQL Signing CA foo:baz")
+    dialer_test.go:1691: [my-project:my-region:my-instance] IO Error on Read or Write: remote error: tls: unknown certificate authority
+    dialer_test.go:1691: [my-project:my-region:my-instance] Removing connection info from cache: remote error: tls: unknown certificate authority
+    dialer_test.go:1664: got error on read as expected: remote error: tls: unknown certificate authority
+    dialer_test.go:1672: Second attempt done
+    dialer_test.go:1675: Third attempt...
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info added to cache
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation started
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation complete
+    dialer_test.go:1691: [my-project:my-region:my-instance] Current certificate expiration = 2026-06-16T19:07:48Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:48Z, Current cert expiration = 2026-06-16T19:07:48Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    dialer_test.go:1691: dial successful
+    dialer_test.go:1680: Third attempt OK.]]></system-out>
+		</testcase>
+		<testcase name="TestDialerRefreshesAfterRotateCACerts/Rotating_all_CAs_with_lazy_refresh_causes_error_on_dial" classname="cloud.google.com/go/cloudsqlconn" time="1.590">
+			<system-out><![CDATA[    dialer_test.go:1626: First attempt...
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info added to cache
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation started
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation complete
+    dialer_test.go:1691: [my-project:my-region:my-instance] Current certificate expiration = 2026-06-16T19:07:49Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:49Z, Current cert expiration = 2026-06-16T19:07:49Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    dialer_test.go:1691: dial successful
+    dialer_test.go:1631: First attempt OK. Resetting client cert.
+    dialer_test.go:1647: Second attempt should fail...
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info is still valid, using cached info
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:50Z, Current cert expiration = 2026-06-16T19:07:49Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    dialer_test.go:1691: [my-project:my-region:my-instance] TLS handshake failed: dial error: failed to verify certificate (connection name = "my-project:my-region:my-instance"): tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "crypto/rsa: verification error" while trying to verify candidate authority certificate "Google Cloud SQL Intermediate CA")
+    dialer_test.go:1691: [my-project:my-region:my-instance] Removing connection info from cache: dial error: failed to verify certificate (connection name = "my-project:my-region:my-instance"): tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "crypto/rsa: verification error" while trying to verify candidate authority certificate "Google Cloud SQL Intermediate CA")
+    cloudsql.go:340: Fake server read error: remote error: tls: bad certificate
+    dialer_test.go:1651: got error on dial as expected: dial error: handshake failed (connection name = "my-project:my-region:my-instance"): dial error: failed to verify certificate (connection name = "my-project:my-region:my-instance"): tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "crypto/rsa: verification error" while trying to verify candidate authority certificate "Google Cloud SQL Intermediate CA")
+    dialer_test.go:1672: Second attempt done
+    dialer_test.go:1675: Third attempt...
+    cloudsql.go:358: Fake server write error: remote error: tls: bad certificate
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info added to cache
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation started
+    dialer_test.go:1691: [my-project:my-region:my-instance] Connection info refresh operation complete
+    dialer_test.go:1691: [my-project:my-region:my-instance] Current certificate expiration = 2026-06-16T19:07:50Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Now = 2026-06-16T18:07:50Z, Current cert expiration = 2026-06-16T19:07:50Z
+    dialer_test.go:1691: [my-project:my-region:my-instance] Cert is valid = true
+    dialer_test.go:1691: [my-project:my-region:my-instance] Dialing 0.0.0.0:3307
+    dialer_test.go:1691: dial successful
+    dialer_test.go:1680: Third attempt OK.]]></system-out>
+		</testcase>
+		<testcase name="TestNewMDXRequest" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestNewMDXRequest/when_metadata_exchange_is_disabled" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestNewMDXRequest/when_metadata_exchange_support_is_empty" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestNewMDXRequest/when_client_protocol_type_is_empty" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestNewMDXRequest/when_client_protocol_type_is_not_supported" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestNewMDXRequest/when_client_protocol_type_is_not_in_metadata" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestNewMDXRequest/when_client_protocol_is_CLIENT_PROTOCOL_TCP" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestNewMDXRequest/when_client_protocol_is_CLIENT_PROTOCOL_UDS" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestNewMDXRequest/when_client_protocol_is_CLIENT_PROTOCOL_TLS" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestDialerDnsResolutionFailureFallbackToPrivateIP" classname="cloud.google.com/go/cloudsqlconn" time="0.720"></testcase>
+		<testcase name="TestDialerPSCPSCFirst" classname="cloud.google.com/go/cloudsqlconn" time="1.370"></testcase>
+		<testcase name="TestFallbackConn_HappyPath" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestFallbackConn_BasicFallback" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestFallbackConn_WriteCachingFallback" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestFallbackConn_NonFallbackError" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestFallbackConn_CloseDuringFallback" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestKeyGenerator" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestKeyGenerator/by_default_a_key_is_generated" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestKeyGenerator/a_custom_key_skips_the_generator" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestKeyGenerator/lazy_generates_keys_on_first_request" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestKeyGeneratorErrors" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestKeyGeneratorErrors/generator_returns_errors" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestKeyGeneratorErrors/custom_keys_never_error" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestKeyGeneratorErrors/lazy_generation_returns_errors" classname="cloud.google.com/go/cloudsqlconn" time="0.000"></testcase>
+		<testcase name="TestDialerWithMetrics" classname="cloud.google.com/go/cloudsqlconn" time="4.050">
+			<system-out><![CDATA[    cloudsql.go:340: Fake server read error: read tcp 127.0.0.1:3307->127.0.0.1:56542: i/o timeout
+    cloudsql.go:340: Fake server read error: read tcp 127.0.0.1:3307->127.0.0.1:56544: i/o timeout]]></system-out>
+		</testcase>
+		<testcase name="TestMonitoredCache_purgeClosedConns" classname="cloud.google.com/go/cloudsqlconn" time="0.100"></testcase>
+		<testcase name="TestMonitoredCache_checkDomainName_instanceChanged" classname="cloud.google.com/go/cloudsqlconn" time="0.200">
+			<system-out><![CDATA[    monitored_cache_test.go:32: domain name update.example.com changed from my-instance to my-instance2, closing all connections.]]></system-out>
+		</testcase>
+		<testcase name="TestMonitoredCache_Close" classname="cloud.google.com/go/cloudsqlconn" time="0.100"></testcase>
+		<testcase name="TestMySQLDriver" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_mysql_test.go:68: skipping MySQL integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestMySQLDriverPSC" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_mysql_test.go:156: skipping MySQL integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresPgxPoolConnect" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:100: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresCASConnect" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:152: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresConnectWithQuotaProject" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:204: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresCustomerCASConnect" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:256: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresMCPConnect" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:308: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresSANDomainConnect" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:360: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresSANBadDomainCausesConnectError" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:413: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresPgxPoolConnectDomainName" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:469: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresConnectWithIAMUser" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:519: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresConnectWithLazyRefresh" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:562: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresEngineVersion" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:607: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresV5Hook" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:667: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresV4Hook" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:725: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestPostgresAuthentication" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_postgres_test.go:800: skipping Postgres integration tests]]></skipped>
+		</testcase>
+		<testcase name="TestSqlServerHook" classname="cloud.google.com/go/cloudsqlconn" time="0.000">
+			<skipped message="Skipped"><![CDATA[    e2e_sqlserver_test.go:53: skipping SqlServer integration tests]]></skipped>
+		</testcase>
+	</testsuite>
+</testsuites>
