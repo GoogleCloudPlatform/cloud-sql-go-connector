@@ -42,6 +42,10 @@ const (
 	// IP.
 	AutoIP = "AutoIP"
 
+	// SQLData is for access through the SQL Data endpoint and does not require
+	// a dataplane network path.
+	SQLData = "SQLData"
+
 	// ClientProtocolTCP The value for the TCP client protocol type for MDX.
 	ClientProtocolTCP = "tcp"
 	// ClientProtocolUDS The value for the UDS client protocol type for MDX.
@@ -286,7 +290,7 @@ type adminAPIClient struct {
 	// key is used to generate the client certificate
 	key    *rsa.PrivateKey
 	client *sqladmin.Service
-	// tp is the TokenProvider used for IAM DB AuthN.
+	// tp is the tokenProvider used for IAM DB AuthN.
 	tp auth.TokenProvider
 }
 

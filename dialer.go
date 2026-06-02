@@ -40,11 +40,14 @@ import (
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/mdx"
+	"cloud.google.com/go/cloudsqlconn/internal/sqldataclient"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -151,10 +154,11 @@ func (c *dialerConfig) getClientUniverseDomain() string {
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
-	lock           sync.RWMutex
-	cache          map[cacheKey]*monitoredCache
-	keyGenerator   *keyGenerator
-	refreshTimeout time.Duration
+	lock               sync.RWMutex
+	cache              map[cacheKey]*monitoredCache
+	sqlDataConnAllowed map[cacheKey]bool
+	keyGenerator       *keyGenerator
+	refreshTimeout     time.Duration
 	// closed reports if the dialer has been closed.
 	closed chan struct{}
 
@@ -191,6 +195,11 @@ type Dialer struct {
 	// metadataExchangeDisabled true when the dialer should never
 	// send MDX mdx requests.
 	metadataExchangeDisabled bool
+
+	sqlDataDialer sqldataclient.Dialer
+
+	tokenProvider   auth.TokenProvider
+	sqlDataEndpoint string
 }
 
 var (
@@ -209,12 +218,14 @@ func (nullLogger) Debugf(_ context.Context, _ string, _ ...interface{}) {}
 // RSA keypair is generated will be faster.
 func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg := &dialerConfig{
-		refreshTimeout: cloudsql.RefreshTimeout,
-		dialFunc:       proxy.Dial,
-		logger:         nullLogger{},
-		useragents:     []string{userAgent},
-		failoverPeriod: cloudsql.FailoverPeriod,
-		dnsResolver:    net.DefaultResolver,
+		refreshTimeout:       cloudsql.RefreshTimeout,
+		dialFunc:             proxy.Dial,
+		logger:               nullLogger{},
+		useragents:           []string{userAgent},
+		failoverPeriod:       cloudsql.FailoverPeriod,
+		dnsResolver:          net.DefaultResolver,
+		sqlDataEndpoint:      "sqladmin.googleapis.com",
+		sqlDataStreamTimeout: 2 * time.Hour,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -288,9 +299,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 
 	dc := dialConfig{
-		ipType:       cloudsql.PublicIP,
-		tcpKeepAlive: defaultTCPKeepAlive,
-		useIAMAuthN:  cfg.useIAMAuthN,
+		connectionType: cloudsql.PublicIP,
+		tcpKeepAlive:   defaultTCPKeepAlive,
+		useIAMAuthN:    cfg.useIAMAuthN,
 	}
 	for _, opt := range cfg.dialOpts {
 		opt(&dc)
@@ -311,8 +322,21 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		r = cfg.resolver
 	}
 
+	tp := cfg.apiTokenProvider
+	if tp == nil && cfg.authCredentials != nil {
+		tp = cfg.authCredentials.TokenProvider
+	}
+
+	var sqlDataDialer sqldataclient.Dialer
+	if cfg.sqlDataDialer != nil {
+		sqlDataDialer = cfg.sqlDataDialer
+	} else {
+		sqlDataDialer = sqldataclient.NewGrpcDialer(cfg.sqlDataEndpoint, tp, cfg.quotaProject, cfg.logger, false, cfg.sqlDataStreamTimeout, strings.Join(cfg.useragents, " "))
+	}
+
 	d := &Dialer{
 		closed:                   make(chan struct{}),
+		sqlDataConnAllowed:       make(map[cacheKey]bool),
 		cache:                    make(map[cacheKey]*monitoredCache),
 		lazyRefresh:              cfg.lazyRefresh,
 		keyGenerator:             g,
@@ -327,6 +351,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		resolver:                 r,
 		failoverPeriod:           cfg.failoverPeriod,
 		metadataExchangeDisabled: cfg.metadataExchangeDisabled,
+		tokenProvider:            tp,
+		sqlDataEndpoint:          cfg.sqlDataEndpoint,
+		sqlDataDialer:            sqlDataDialer,
 	}
 
 	return d, nil
@@ -352,6 +379,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		trace.RecordDialError(context.Background(), icn, d.dialerID, err)
 		endDial(err)
 	}()
+
 	cn, err := d.resolver.Resolve(ctx, icn)
 	if err != nil {
 		return nil, err
@@ -371,6 +399,66 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		opt(&cfg)
 	}
 
+	// When using NoIP connections, there is no need to retrieve connection
+	// info and instead we may proceed immediately to connecting.
+	if cfg.connectionType == cloudsql.SQLData {
+		key := createKey(cn)
+		d.lock.RLock()
+		allowed, connInCache := d.sqlDataConnAllowed[key]
+		d.lock.RUnlock()
+		// if the cache an entry, and the cache entry says sqlDataService is not allowed
+		if connInCache && !allowed {
+			// fall back to AutoIP
+			cfg.connectionType = cloudsql.AutoIP
+		} else {
+			// Attempt to connect SqlDataService
+			sdcConn, sdcErr := d.connectSQLDataService(ctx, cn, cfg, startTime)
+			if sdcErr == nil {
+				// Connection succeeded, return the connection.
+				return sdcConn, nil
+			}
+			// Connection failed.
+
+			if !isPreconditionFailed(sdcErr) {
+				return nil, sdcErr
+			}
+			// sdcErr is a PreconditionFailed error. Fall back to auto-ip
+			// This is a streaming gRPC. The PreconditionFailed error usually occurs on the
+			// first read from the stream, not here.
+			cfg.connectionType = cloudsql.AutoIP
+		}
+	}
+
+	return d.connectInstanceIP(ctx, cn, cfg, startTime)
+}
+func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time) (net.Conn, error) {
+	conn, err := d.sqlDataDialer.ConnectSQLDataService(ctx, cn)
+	if err != nil {
+		return nil, err
+	}
+
+	// This creates a fallback connection using AutoIP, and marks the connection
+	// as permanently needing to fallback to AutoIP
+	fb := func() (net.Conn, error) {
+		key := createKey(cn)
+		d.lock.Lock()
+		d.sqlDataConnAllowed[key] = false
+		d.lock.Unlock()
+		cfg.connectionType = cloudsql.AutoIP
+		return d.connectInstanceIP(ctx, cn, cfg, startTime)
+	}
+
+	// Assuming the connection is successful if Recv doesn't return an error
+	// immediately. The first message might not contain data, so we don't pass
+	// any initialData.
+	return &fallbackConn{
+		conn:            conn,
+		isFallbackError: isSQLDataUnsupportedError,
+		connectFallback: fb,
+	}, nil
+
+}
+func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time) (conn net.Conn, err error) {
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
 	c, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
@@ -405,7 +493,8 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	var connectEnd trace.EndSpanFunc
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
 	defer func() { connectEnd(err) }()
-	addr, err := ci.Addr(cfg.ipType)
+
+	addr, err := ci.Addr(cfg.connectionType)
 	if err != nil {
 		d.removeCached(ctx, cn, c, err)
 		return nil, err
@@ -477,7 +566,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	latency := time.Since(startTime).Milliseconds()
 	n := c.openConnsCount.Add(1)
 	trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
-	trace.RecordDialLatency(ctx, icn, d.dialerID, latency)
+	trace.RecordDialLatency(ctx, cn.String(), d.dialerID, latency)
 
 	closeFunc := func() {
 		n := c.openConnsCount.Add(^uint64(0)) // c.openConnsCount = c.openConnsCount - 1
@@ -510,6 +599,15 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	d.logger.Debugf(ctx, "dial successful")
 	return iConn, nil
 }
+
+func isSQLDataUnsupportedError(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.FailedPrecondition &&
+			strings.HasPrefix(s.Message(), "unsupported instance edition:")
+	}
+	return false
+}
+
 func (d *Dialer) isTLSError(err error) bool {
 	if nErr, ok := err.(net.Error); ok {
 		return !nErr.Timeout() && // it's a permanent net error
@@ -725,6 +823,10 @@ func (d *Dialer) Close() error {
 	for _, i := range d.cache {
 		i.Close()
 	}
+	if err := d.sqlDataDialer.Close(); err != nil {
+		d.logger.Debugf(context.Background(),
+			"failed to close SQL data connection: %v", err)
+	}
 	return nil
 }
 
@@ -836,4 +938,11 @@ func newMDXRequest(ci cloudsql.ConnectionInfo, cfg dialConfig, metadataExchangeD
 	}
 
 	return mdx.MetadataExchangeRequest_builder{ClientProtocolType: &cpt}.Build()
+}
+
+func isPreconditionFailed(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.FailedPrecondition
+	}
+	return false
 }

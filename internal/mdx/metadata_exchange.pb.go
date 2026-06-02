@@ -406,7 +406,7 @@ const file_internal_mdx_metadata_exchange_proto_rawDesc = "" +
 	"\x12ResponseStatusCode\x12$\n" +
 	" RESPONSE_STATUS_CODE_UNSPECIFIED\x10\x00\x12\x06\n" +
 	"\x02OK\x10\x01\x12\t\n" +
-	"\x05ERROR\x10\x02B\x0eZ\finternal/mdxb\beditionsp\xe8\a"
+	"\x05ERROR\x10\x02B\x0eZ\finternal/mdxb\beditionsp\xe9\a"
 
 var file_internal_mdx_metadata_exchange_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_internal_mdx_metadata_exchange_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
