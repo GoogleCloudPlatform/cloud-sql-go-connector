@@ -125,7 +125,7 @@ function test() {
 
 ## e2e - Runs end-to-end integration tests.
 function e2e() {
-  if [[ ! -f .envrc ]] ; then
+  if [[ ! -s .envrc ]] ; then
     write_e2e_env .envrc
   fi
   source .envrc
@@ -177,7 +177,9 @@ function lint() {
   # Check the commit includes a go.mod that is fully
   # up to date.
   fix
-  if [[ -d "$SCRIPT_DIR/.git" ]] ; then
+  if which jj &>/dev/null && jj root &>/dev/null; then
+    echo "Skipping git diff check in jj repo"
+  elif [[ -d "$SCRIPT_DIR/.git" ]] ; then
     git diff --exit-code
   fi
 }
