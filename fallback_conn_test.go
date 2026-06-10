@@ -224,3 +224,68 @@ func TestFallbackConn_NonFallbackError(t *testing.T) {
 		t.Error("firstReadDone should be true after Read error")
 	}
 }
+
+func TestFallbackConn_CloseDuringFallback(t *testing.T) {
+	fallbackErr := errors.New("fallback needed")
+	primary := &mockConn{
+		readFunc: func(_ []byte) (int, error) {
+			return 0, fallbackErr
+		},
+	}
+
+	fallbackConnected := make(chan struct{})
+	fallbackClose := make(chan struct{})
+	secondaryClosed := false
+	secondary := &mockConn{
+		closeFunc: func() error {
+			secondaryClosed = true
+			return nil
+		},
+	}
+
+	fb := &fallbackConn{
+		conn: primary,
+		isFallbackError: func(err error) bool {
+			return err == fallbackErr
+		},
+		connectFallback: func() (net.Conn, error) {
+			close(fallbackConnected)
+			// Wait for close signal from test before returning
+			<-fallbackClose
+			return secondary, nil
+		},
+	}
+
+	// Start reading in a goroutine
+	errChan := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 10)
+		_, err := fb.Read(buf)
+		errChan <- err
+	}()
+
+	// Wait until connectFallback has been invoked
+	<-fallbackConnected
+
+	// Close the fallbackConn
+	if err := fb.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	// Signal connectFallback to return the secondary connection
+	close(fallbackClose)
+
+	// Wait for Read to return and check error
+	err := <-errChan
+	if err == nil {
+		t.Fatal("Read expected error, got nil")
+	}
+	if !errors.Is(err, net.ErrClosed) {
+		t.Errorf("Read got error %v, want %v", err, net.ErrClosed)
+	}
+
+	// Verify that the secondary connection was closed to prevent leakage
+	if !secondaryClosed {
+		t.Error("Secondary connection was not closed, leaking it!")
+	}
+}
