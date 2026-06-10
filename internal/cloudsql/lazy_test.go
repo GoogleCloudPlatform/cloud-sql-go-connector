@@ -143,7 +143,7 @@ func TestLazyRefreshCacheUpdateRefresh(t *testing.T) {
 	}
 
 	if got := spy.callCount(); got != 0 {
-		t.Fatal("auth.tokenProvider was called, but should not have been")
+		t.Fatal("auth.TokenProvider was called, but should not have been")
 	}
 
 	c.UpdateRefresh(ptr(true))
@@ -155,7 +155,7 @@ func TestLazyRefreshCacheUpdateRefresh(t *testing.T) {
 
 	if got, want := spy.callCount(), 1; got != want {
 		t.Fatalf(
-			"auth.tokenProvider call count, got = %v, want = %v",
+			"auth.TokenProvider call count, got = %v, want = %v",
 			got, want,
 		)
 	}
