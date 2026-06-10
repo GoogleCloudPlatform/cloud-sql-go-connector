@@ -431,6 +431,8 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 
 	return d.connectInstanceIP(ctx, cn, cfg, startTime)
 }
+
+// connectSQLDataService dials a connection through the SqlDataService.
 func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time) (net.Conn, error) {
 	conn, err := d.sqlDataDialer.ConnectSQLDataService(ctx, cn)
 	if err != nil {
@@ -456,8 +458,9 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 		isFallbackError: isSQLDataUnsupportedError,
 		connectFallback: fb,
 	}, nil
-
 }
+
+// connectInstanceIP dials the IP address of the instance using a normal net.Conn.
 func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time) (conn net.Conn, err error) {
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")

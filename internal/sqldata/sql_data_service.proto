@@ -125,8 +125,6 @@ message StreamSqlDataResponse {
 // Metadata from the server to the client about the session. The server will
 // always send this as the first message
 message SessionMetadata {
-
-
   // The features supported by the server for this session. This field is used
   // by the client to determine which features are available on the server.
   // The features supported by the server for this session.
@@ -153,8 +151,6 @@ message Ack {
 }
 // Indicates that the session is permanently ended.
 message TerminateSession {
-
-
   // The session termination status.
   google.rpc.Status status = 1;
 }
