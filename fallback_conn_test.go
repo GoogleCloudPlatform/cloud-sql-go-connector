@@ -66,12 +66,9 @@ func TestFallbackConn_HappyPath(t *testing.T) {
 		},
 	}
 
-	fb := &fallbackConn{
-		conn: primary,
-		isFallbackError: func(_ error) bool {
-			return false
-		},
-	}
+	fb := newFallbackConn(primary, func(_ error) bool {
+		return false
+	}, nil)
 
 	buf := make([]byte, 10)
 	n, err := fb.Read(buf)
@@ -85,8 +82,8 @@ func TestFallbackConn_HappyPath(t *testing.T) {
 		t.Errorf("Read got %q, want %q", buf[:n], expectedData)
 	}
 
-	if !fb.firstReadDone {
-		t.Error("firstReadDone should be true")
+	if fb.state != stateAfterFirstRead {
+		t.Error("state should be stateAfterFirstRead")
 	}
 }
 
@@ -106,15 +103,11 @@ func TestFallbackConn_BasicFallback(t *testing.T) {
 		},
 	}
 
-	fb := &fallbackConn{
-		conn: primary,
-		isFallbackError: func(err error) bool {
-			return err == fallbackErr
-		},
-		connectFallback: func() (net.Conn, error) {
-			return secondary, nil
-		},
-	}
+	fb := newFallbackConn(primary, func(err error) bool {
+		return err == fallbackErr
+	}, func() (net.Conn, error) {
+		return secondary, nil
+	})
 
 	buf := make([]byte, 20)
 	n, err := fb.Read(buf)
@@ -153,15 +146,11 @@ func TestFallbackConn_WriteCachingFallback(t *testing.T) {
 		},
 	}
 
-	fb := &fallbackConn{
-		conn: primary,
-		isFallbackError: func(err error) bool {
-			return err == fallbackErr
-		},
-		connectFallback: func() (net.Conn, error) {
-			return secondary, nil
-		},
-	}
+	fb := newFallbackConn(primary, func(err error) bool {
+		return err == fallbackErr
+	}, func() (net.Conn, error) {
+		return secondary, nil
+	})
 
 	// Write something first
 	writeData := []byte("hello")
@@ -198,17 +187,12 @@ func TestFallbackConn_NonFallbackError(t *testing.T) {
 		},
 	}
 
-	fb := &fallbackConn{
-		conn: primary,
-		isFallbackError: func(_ error) bool {
-			// This error should NOT trigger fallback
-			return false
-		},
-		connectFallback: func() (net.Conn, error) {
-			t.Fatal("connectFallback should not be called")
-			return nil, nil
-		},
-	}
+	fb := newFallbackConn(primary, func(_ error) bool {
+		return false
+	}, func() (net.Conn, error) {
+		t.Fatal("connectFallback should not be called")
+		return nil, nil
+	})
 
 	buf := make([]byte, 10)
 	_, err := fb.Read(buf)
@@ -219,9 +203,9 @@ func TestFallbackConn_NonFallbackError(t *testing.T) {
 		t.Errorf("Read got error %v, want %v", err, nonFallbackErr)
 	}
 
-	// firstReadDone should be true even on error
-	if !fb.firstReadDone {
-		t.Error("firstReadDone should be true after Read error")
+	// state should be stateAfterFirstRead even on error
+	if fb.state != stateAfterFirstRead {
+		t.Error("state should be stateAfterFirstRead after Read error")
 	}
 }
 
@@ -243,18 +227,14 @@ func TestFallbackConn_CloseDuringFallback(t *testing.T) {
 		},
 	}
 
-	fb := &fallbackConn{
-		conn: primary,
-		isFallbackError: func(err error) bool {
-			return err == fallbackErr
-		},
-		connectFallback: func() (net.Conn, error) {
-			close(fallbackConnected)
-			// Wait for close signal from test before returning
-			<-fallbackClose
-			return secondary, nil
-		},
-	}
+	fb := newFallbackConn(primary, func(err error) bool {
+		return err == fallbackErr
+	}, func() (net.Conn, error) {
+		close(fallbackConnected)
+		// Wait for close signal from test before returning
+		<-fallbackClose
+		return secondary, nil
+	})
 
 	// Start reading in a goroutine
 	errChan := make(chan error, 1)

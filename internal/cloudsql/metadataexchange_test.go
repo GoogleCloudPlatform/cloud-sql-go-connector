@@ -82,9 +82,9 @@ func newMDXResponseBytes(data []byte) (*mdx.MetadataExchangeResponse, []byte) {
 }
 
 func newMDXRequestBytes(data []byte) (*mdx.MetadataExchangeRequest, []byte) {
-	req := &mdx.MetadataExchangeRequest{
+	req := mdx.MetadataExchangeRequest_builder{
 		UserAgent: proto.String("hello"),
-	}
+	}.Build()
 	resBytes, err := proto.Marshal(req)
 	if err != nil {
 		panic(err)

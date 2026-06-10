@@ -453,11 +453,7 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 	// Assuming the connection is successful if Recv doesn't return an error
 	// immediately. The first message might not contain data, so we don't pass
 	// any initialData.
-	return &fallbackConn{
-		conn:            conn,
-		isFallbackError: isSQLDataUnsupportedError,
-		connectFallback: fb,
-	}, nil
+	return newFallbackConn(conn, isSQLDataUnsupportedError, fb), nil
 }
 
 // connectInstanceIP dials the IP address of the instance using a normal net.Conn.

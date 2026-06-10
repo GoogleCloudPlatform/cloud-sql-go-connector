@@ -21,132 +21,188 @@ import (
 	"time"
 )
 
-// fallbackConn delegates to a GRPC stream connection, but if it fails with a specific error
-// it will retry connecting to a
-type fallbackConn struct {
-	// The state for handling fallback due to an error on the first read
-	mu            sync.RWMutex
-	firstReadDone bool
-	closed        bool
-	conn          net.Conn
-	writebuf      *bytes.Buffer
+type fallbackState int
 
-	// connFallback generates
+const (
+	stateBeforeFirstRead fallbackState = iota
+	stateDuringFirstRead
+	stateAfterFirstRead
+)
+
+// fallbackConn delegates to a GRPC stream connection, but if it fails with a specific error
+// it will retry connecting to a secondary connection.
+type fallbackConn struct {
+	mu       sync.Mutex
+	writeMu  sync.Mutex
+	cond     *sync.Cond
+	state    fallbackState
+	closed   bool
+	conn     net.Conn
+	writebuf *bytes.Buffer
+
 	isFallbackError func(error) bool
 	connectFallback func() (net.Conn, error)
 }
 
+func newFallbackConn(conn net.Conn, isFallbackError func(error) bool, connectFallback func() (net.Conn, error)) *fallbackConn {
+	fc := &fallbackConn{
+		conn:            conn,
+		isFallbackError: isFallbackError,
+		connectFallback: connectFallback,
+	}
+	fc.cond = sync.NewCond(&fc.mu)
+	return fc
+}
+
 func (c *fallbackConn) Read(b []byte) (int, error) {
-	// If the connection is closed, immediately return ErrClosed
-	c.mu.RLock()
-	if c.closed {
-		c.mu.RUnlock()
-		return 0, net.ErrClosed
-	}
-
-	// The first read completed successfully. do a normal read.
-	if c.firstReadDone {
-		defer c.mu.RUnlock()
-		return c.conn.Read(b)
-	}
-
-	// This is probably the first read, acquire the write lock until this method returns.
-	c.mu.RUnlock()
 	c.mu.Lock()
-
-	// recheck closed
 	if c.closed {
-		// Closed, return error.
 		c.mu.Unlock()
 		return 0, net.ErrClosed
 	}
 
-	// recheck first read
-	if c.firstReadDone {
-		// Not the first read, release state lock, then read and return the result.
+	if c.state == stateAfterFirstRead {
 		conn := c.conn
 		c.mu.Unlock()
 		return conn.Read(b)
 	}
 
-	// Do the first read.
-	defer c.mu.Unlock()
-	n, err := c.conn.Read(b)
-	c.firstReadDone = true
-
-	// If there is no error, or the error should not create a fallback connection,
-	// return the result of c.conn.Read()
-	if err == nil || !c.isFallbackError(err) {
-		return n, err
-	}
-
-	// Read failed and this should dial the fallback connection.
-	var newConn net.Conn
-	newConn, err = c.connectFallback()
-	if err != nil {
-		return 0, err
-	}
-
-	// Fallback connection succeeded. Send write buffer.
-	for c.writebuf != nil && c.writebuf.Len() > 0 {
-		_, err := c.writebuf.WriteTo(newConn)
-		if err != nil {
-			_ = newConn.Close()
-			return 0, err
+	if c.state == stateDuringFirstRead {
+		for c.state == stateDuringFirstRead {
+			c.cond.Wait()
 		}
+		if c.closed {
+			c.mu.Unlock()
+			return 0, net.ErrClosed
+		}
+		conn := c.conn
+		c.mu.Unlock()
+		return conn.Read(b)
 	}
 
-	// new conn is ready for reads.
-	c.conn = newConn
-	return c.conn.Read(b)
+	// stateBeforeFirstRead
+	c.state = stateDuringFirstRead
+	conn := c.conn
+	c.mu.Unlock()
 
+	n, err := conn.Read(b)
+
+	c.mu.Lock()
+	// Check if closed while we were reading
+	if c.closed {
+		c.state = stateAfterFirstRead
+		c.cond.Broadcast()
+		c.mu.Unlock()
+		return 0, net.ErrClosed
+	}
+
+	if err != nil && c.isFallbackError(err) {
+		c.mu.Unlock()
+
+		newConn, dialErr := c.connectFallback()
+
+		if dialErr != nil {
+			c.mu.Lock()
+			c.state = stateAfterFirstRead
+			c.cond.Broadcast()
+			c.mu.Unlock()
+			return 0, dialErr
+		}
+
+		c.writeMu.Lock()
+
+		c.mu.Lock()
+		if c.closed {
+			c.state = stateAfterFirstRead
+			c.cond.Broadcast()
+			c.mu.Unlock()
+			c.writeMu.Unlock()
+			newConn.Close()
+			return 0, net.ErrClosed
+		}
+
+		// Write cached bytes
+		var writeData []byte
+		if c.writebuf != nil {
+			writeData = c.writebuf.Bytes()
+		}
+
+		c.mu.Unlock()
+
+		if len(writeData) > 0 {
+			_, writeErr := newConn.Write(writeData)
+			if writeErr != nil {
+				newConn.Close()
+				c.mu.Lock()
+				c.state = stateAfterFirstRead
+				c.cond.Broadcast()
+				c.mu.Unlock()
+				c.writeMu.Unlock()
+				return 0, writeErr
+			}
+		}
+
+		c.mu.Lock()
+		if c.closed {
+			c.state = stateAfterFirstRead
+			c.cond.Broadcast()
+			c.mu.Unlock()
+			c.writeMu.Unlock()
+			newConn.Close()
+			return 0, net.ErrClosed
+		}
+
+		c.conn = newConn
+		c.state = stateAfterFirstRead
+		c.cond.Broadcast()
+		c.mu.Unlock()
+
+		c.writeMu.Unlock()
+
+		return newConn.Read(b)
+	}
+
+	// First read succeeded or failed with non-fallback error
+	c.state = stateAfterFirstRead
+	c.cond.Broadcast()
+	c.mu.Unlock()
+	return n, err
 }
 
 func (c *fallbackConn) Write(b []byte) (int, error) {
-	// Acquire the state read lock.
-	c.mu.RLock()
-	// Check closed
-	if c.closed {
-		c.mu.RUnlock()
-		return 0, net.ErrClosed
-	}
-	// Check if first read is done
-	if c.firstReadDone {
-		c.mu.RUnlock()
-		return c.conn.Write(b)
-	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 
-	// This is probably before the first read. Acquire the state write lock.
-	c.mu.RUnlock()
 	c.mu.Lock()
-
-	// recheck closed
 	if c.closed {
 		c.mu.Unlock()
 		return 0, net.ErrClosed
 	}
-	// recheck firstReadDone
-	if c.firstReadDone {
+
+	if c.state == stateAfterFirstRead {
 		conn := c.conn
-		// This is after the first read. Release the write lock before calling conn.Write().
 		c.mu.Unlock()
 		return conn.Write(b)
 	}
 
-	// Write to the conn
-	n, err := c.conn.Write(b)
+	// For both stateBeforeFirstRead and stateDuringFirstRead:
+	// We write to the current connection and cache the bytes.
+	conn := c.conn
+	c.mu.Unlock()
+
+	n, err := conn.Write(b)
 	if err != nil {
-		c.mu.Unlock()
 		return n, err
 	}
 
-	// Add bytes written to the write buffer
-	if c.writebuf == nil {
-		c.writebuf = bytes.NewBuffer(nil)
+	c.mu.Lock()
+	// Only cache if we are still not in stateAfterFirstRead
+	if c.state != stateAfterFirstRead {
+		if c.writebuf == nil {
+			c.writebuf = bytes.NewBuffer(nil)
+		}
+		c.writebuf.Write(b[:n])
 	}
-	c.writebuf.Write(b[:n])
-
-	// Return the result
 	c.mu.Unlock()
 	return n, err
 }
@@ -154,37 +210,55 @@ func (c *fallbackConn) Write(b []byte) (int, error) {
 func (c *fallbackConn) Close() error {
 	c.mu.Lock()
 	c.closed = true
+
+	if c.state == stateBeforeFirstRead {
+		c.state = stateAfterFirstRead
+		conn := c.conn
+		c.mu.Unlock()
+		return conn.Close()
+	}
+
+	if c.state == stateDuringFirstRead {
+		// Close the underlying connection to unblock the ongoing read
+		conn := c.conn
+		c.mu.Unlock()
+		return conn.Close()
+	}
+
+	// stateAfterFirstRead
 	conn := c.conn
 	c.mu.Unlock()
 	return conn.Close()
 }
 
 func (c *fallbackConn) LocalAddr() net.Addr {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.conn.LocalAddr()
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	return conn.LocalAddr()
 }
 
 func (c *fallbackConn) RemoteAddr() net.Addr {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.conn.RemoteAddr()
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	return conn.RemoteAddr()
 }
 
 func (c *fallbackConn) SetDeadline(t time.Time) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.conn.SetDeadline(t)
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	return conn.SetDeadline(t)
 }
 
 func (c *fallbackConn) SetReadDeadline(t time.Time) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.conn.SetReadDeadline(t)
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	return conn.SetReadDeadline(t)
 }
 
-func (c *fallbackConn) SetWriteDeadline(t time.Time) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.conn.SetWriteDeadline(t)
+func (c *fallbackConn) SetWriteDeadline(_ time.Time) error {
+	return nil
 }
