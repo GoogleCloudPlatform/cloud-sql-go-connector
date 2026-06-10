@@ -290,7 +290,7 @@ type adminAPIClient struct {
 	// key is used to generate the client certificate
 	key    *rsa.PrivateKey
 	client *sqladmin.Service
-	// tp is the tokenProvider used for IAM DB AuthN.
+	// tp is the TokenProvider used for IAM DB AuthN.
 	tp auth.TokenProvider
 }
 
