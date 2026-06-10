@@ -26,6 +26,7 @@ import (
 type fallbackConn struct {
 	// The state for handling fallback due to an error on the first read
 	mu            sync.RWMutex
+	firstReadOnce sync.Once
 	firstReadDone bool
 	conn          net.Conn
 	writebuf      *bytes.Buffer
@@ -36,85 +37,103 @@ type fallbackConn struct {
 }
 
 func (c *fallbackConn) Read(b []byte) (int, error) {
-	// If we already finished the first read, then return
-	c.mu.RLock()
-	if c.firstReadDone {
-		defer c.mu.RUnlock()
-		return c.conn.Read(b)
-	}
-	// This is the first read, acquire the write lock
-	c.mu.RUnlock()
-	c.mu.Lock()
-	conn := c.conn
-	firstReadDone := c.firstReadDone
-	c.mu.Unlock()
+	var ranOnce bool
+	var firstN int
+	var firstErr error
 
-	if firstReadDone {
-		return conn.Read(b)
-	}
+	c.firstReadOnce.Do(func() {
+		ranOnce = true
 
-	n, err := conn.Read(b)
-	c.firstReadDone = true
-	if err != nil && c.isFallbackError(err) {
-		return c.reconnectAndRead(b)
-	}
-	c.mu.Lock()
-	firstReadDone = true
-	c.mu.Unlock()
-	return n, err
-}
+		c.mu.RLock()
+		conn := c.conn
+		c.mu.RUnlock()
 
-func (c *fallbackConn) reconnectAndRead(b []byte) (int, error) {
-	// This only gets called during read, so the mutex already has a write lock
-	newConn, err := c.connectFallback()
-	if err != nil {
-		return 0, err
-	}
-	// Write cached write bytes
-	if c.writebuf != nil && c.writebuf.Len() > 0 {
-		_, err = c.writebuf.WriteTo(newConn)
-		if err != nil {
-			return 0, err
+		n, err := conn.Read(b)
+		if err != nil && c.isFallbackError(err) {
+			// Trigger fallback
+			var newConn net.Conn
+			newConn, err = c.connectFallback()
+			if err != nil {
+				c.mu.Lock()
+				c.firstReadDone = true
+				c.mu.Unlock()
+				firstErr = err
+				return
+			}
+
+			// Get and write cached bytes
+			c.mu.Lock()
+			var writeData []byte
+			if c.writebuf != nil {
+				writeData = c.writebuf.Bytes()
+			}
+			c.mu.Unlock()
+
+			if len(writeData) > 0 {
+				_, err = newConn.Write(writeData)
+				if err != nil {
+					newConn.Close()
+					c.mu.Lock()
+					c.firstReadDone = true
+					c.mu.Unlock()
+					firstErr = err
+					return
+				}
+			}
+
+			c.mu.Lock()
+			c.conn = newConn
+			c.firstReadDone = true
+			c.mu.Unlock()
+
+			firstN, firstErr = newConn.Read(b)
+			return
 		}
-	}
-	c.mu.Lock()
-	c.conn = newConn
-	c.mu.Unlock()
 
-	return newConn.Read(b)
+		c.mu.Lock()
+		c.firstReadDone = true
+		c.mu.Unlock()
+		firstN, firstErr = n, err
+	})
+
+	if ranOnce {
+		return firstN, firstErr
+	}
+
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+	return conn.Read(b)
 }
 
 func (c *fallbackConn) Write(b []byte) (int, error) {
-	// If we already finished the first read, then return
 	c.mu.RLock()
-	if c.firstReadDone {
-		defer c.mu.RUnlock()
-		return c.conn.Write(b)
-	}
-	// This write is before the first read, acquire the write lock
+	done := c.firstReadDone
 	c.mu.RUnlock()
-	c.mu.Lock()
-	conn := c.conn
-	firstReadDone := c.firstReadDone
-	c.mu.Unlock()
 
-	if firstReadDone {
+	if done {
+		c.mu.RLock()
+		conn := c.conn
+		c.mu.RUnlock()
 		return conn.Write(b)
 	}
-	n, err := conn.Write(b)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Re-check under write lock
+	if c.firstReadDone {
+		return c.conn.Write(b)
+	}
+
+	n, err := c.conn.Write(b)
 	if err != nil {
 		return n, err
 	}
-	// Cache bytes written to the socket
-
-	c.mu.Lock()
 	if c.writebuf == nil {
 		c.writebuf = bytes.NewBuffer(nil)
 	}
 	c.writebuf.Write(b[:n])
-	c.mu.Unlock()
 	return n, err
-
 }
 
 func (c *fallbackConn) Close() error {
