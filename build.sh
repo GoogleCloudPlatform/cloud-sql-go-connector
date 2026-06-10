@@ -77,9 +77,15 @@ function generate() {
   dest_file="$SCRIPT_DIR/internal/sqldatagrpc/sql_data_service_grpc.pb.go"
   mkdir -p "$SCRIPT_DIR/internal/sqldatagrpc"
   mv "$SCRIPT_DIR/internal/sqldata/sql_data_service_grpc.pb.go" "$dest_file"
-  sed -i '' 's|^package sqldata$|package sqldatagrpc\nimport sqldatapb "cloud.google.com/go/cloudsqlconn/internal/sqldata"|' "$dest_file"
-  sed -i '' 's/StreamSqlDataRequest/sqldatapb.StreamSqlDataRequest/' "$dest_file"
-  sed -i '' 's/StreamSqlDataResponse/sqldatapb.StreamSqlDataResponse/' "$dest_file"
+  if [[ $(uname) == "Darwin" ]] ; then
+    sed -i '' 's|^package sqldata$|package sqldatagrpc\nimport sqldatapb "cloud.google.com/go/cloudsqlconn/internal/sqldata"|' "$dest_file"
+    sed -i '' 's/StreamSqlDataRequest/sqldatapb.StreamSqlDataRequest/' "$dest_file"
+    sed -i '' 's/StreamSqlDataResponse/sqldatapb.StreamSqlDataResponse/' "$dest_file"
+  else
+    sed -i 's|^package sqldata$|package sqldatagrpc\nimport sqldatapb "cloud.google.com/go/cloudsqlconn/internal/sqldata"|' "$dest_file"
+    sed -i 's/StreamSqlDataRequest/sqldatapb.StreamSqlDataRequest/' "$dest_file"
+    sed -i 's/StreamSqlDataResponse/sqldatapb.StreamSqlDataResponse/' "$dest_file"
+  fi
 
   # Add the copyright header to the generated protobuf file
   for pbFile in  "${generated_pb_go[@]}" ; do
@@ -126,12 +132,12 @@ function get_protoc() {
   fi
   if [[ "$os" == "darwin" && "$arch" == "arm64" ]] ; then
     protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-osx-aarch_64.zip"
-    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${arch}.tar.gz"
-    protoc_go_grpc_url="https://github.com/grpc/grpc-go/releases/download/cmd%2Fprotoc-gen-go-grpc%2Fv${proto_grpc_go_version}/protoc-gen-go-grpc.v${proto_grpc_go_version}.${os}.${arch}.tar.gz"
+    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${protoc_go_arch}.tar.gz"
+    protoc_go_grpc_url="https://github.com/grpc/grpc-go/releases/download/cmd%2Fprotoc-gen-go-grpc%2Fv${proto_grpc_go_version}/protoc-gen-go-grpc.v${proto_grpc_go_version}.${os}.${protoc_go_arch}.tar.gz"
   elif [[ "$os" == "linux" ]] ; then
     protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-${os}-${arch}.zip"
-    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${arch}.tar.gz"
-    protoc_go_grpc_url="https://github.com/grpc/grpc-go/releases/download/cmd%2Fprotoc-gen-go-grpc%2Fv${proto_grpc_go_version}/protoc-gen-go-grpc.v${proto_grpc_go_version}.${os}.${arch}.tar.gz"
+    protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${protoc_go_arch}.tar.gz"
+    protoc_go_grpc_url="https://github.com/grpc/grpc-go/releases/download/cmd%2Fprotoc-gen-go-grpc%2Fv${proto_grpc_go_version}/protoc-gen-go-grpc.v${proto_grpc_go_version}.${os}.${protoc_go_arch}.tar.gz"
   else
     echo "Unsupported protoc platform : $os $arch"
     exit 1

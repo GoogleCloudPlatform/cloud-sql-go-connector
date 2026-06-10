@@ -51,27 +51,6 @@ service SqlDataService {
 
 // Message sent from the client to `SqlDataService`.
 message StreamSqlDataRequest {
-
-
-  // Deprecated: Use `StartSession.location_id` or `ContinueSession.location_id`
-  // instead. `location_id` is used to route the request to a specific region.
-  // Use the same region which was used to create the instance. Use the format
-  // `locations/{location}`, for example: `locations/us-central1`.
-  string location_id = 1;
-
-  // Deprecated: Use the `message` oneof instead. The type of message sent
-  // within the stream.
-  oneof message_type {
-    // Deprecated: Use `start_session` or `continue_session` instead.
-    // Parameters for establishing the connection. MUST be sent as the first
-    // message on the stream.
-    ConnectionSettings connection_settings = 2;
-
-    // Deprecated: Use `DataPacket` instead.
-    // Data to be forwarded to the database.
-    ClientPayload payload = 3;
-  }
-
   // Acknowledges data received by the client.
   Ack ack = 4;
 
@@ -90,24 +69,10 @@ message StreamSqlDataRequest {
   }
 }
 
-// Deprecated:  New schema structure. Initial connection parameters.
-message ConnectionSettings {
-  option deprecated = true;
-
-
-  // The target of the connection.
-  oneof target {
-    // The identifier of the Cloud SQL instance.
-    InstanceId instance_id = 1;
-  }
-}
-
 // Start a new session. The client must send this as the first message to the
 // server to start a new session. The client may immediately send Data messages
 // without waiting for a reply from the server.
 message StartSession {
-
-
   //`location_id` is used to route the
   // request to a specific region. Use the same region which was used to create
   // the instance. Use the format `locations/{location}`, for example:
@@ -126,8 +91,6 @@ message StartSession {
 // message to the server to reconnect to an existing session. The client may
 // immediately send Data messages without waiting for a reply from the server.
 message ContinueSession {
-
-
   //`location_id` is used to route the
   // request to a specific region. Use the same region which was used to create
   // the instance. Use the format `locations/{location}`, for example:
@@ -142,39 +105,8 @@ message ContinueSession {
   string session_id = 3;
 }
 
-// Deprecated:  New schema structure. The identifier of the Cloud SQL instance.
-message InstanceId {
-  option deprecated = true;
-
-
-  // Full resource name of the Cloud SQL instance, in the form:
-  // `projects/{project}/instances/{instance}`, for example:
-  // `projects/foo-project/instances/bar-instance`.
-  string instance = 1;
-}
-
-// Deprecated:  New schema structure. Wrapper for data being sent to the
-// database.
-message ClientPayload {
-  option deprecated = true;
-
-
-  // Raw data to be sent to the database. See the documentation for
-  // `StreamSqlData` for details on the expected wire format.
-  bytes data = 1;
-}
-
 // Message sent from SqlDataService back to the client.
 message StreamSqlDataResponse {
-
-
-  // Deprecated:  New schema structure. The type of the message received from
-  // `SqlDataService`.
-  oneof type {
-    // Raw data received from the database.
-    ServerPayload payload = 1;
-  }
-
   // Acknowledges data received by the server.
   Ack ack = 2;
   // A message from the server to the client.
@@ -189,17 +121,6 @@ message StreamSqlDataResponse {
     // attempt to reconnect.
     TerminateSession terminate_session = 5;
   }
-}
-
-// Deprecated:  New schema structure. Wrapper for data being received from the
-// database.
-message ServerPayload {
-  option deprecated = true;
-
-
-  // Raw data received from the database. See the documentation for
-  // `StreamSqlData` for details on the expected wire format.
-  bytes data = 1;
 }
 // Metadata from the server to the client about the session. The server will
 // always send this as the first message
