@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.21.2...v1.22.0) (2026-06-11)
+
+
+### Features
+
+* Support AI Developer Edition connections through the Cloud SQL Auth Proxy ([#1108](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1108)) ([116b2e5](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/116b2e54fd2b5c521eac20de20af35228e41829a))
+
 ## [1.21.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.21.1...v1.21.2) (2026-06-09)
 
 
