@@ -46,3 +46,5 @@ require (
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )
+
+replace google.golang.org/api => /usr/local/google/home/hessjc/projects/repo/build/go-client-sdk
