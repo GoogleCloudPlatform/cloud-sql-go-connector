@@ -196,23 +196,19 @@ func (c *MDXConn) readMDX() (*mdx.MetadataExchangeResponse, error) {
 
 // IsResponseOk returns true if a response was received and ResponseStatusCode == OK.
 func (c *MDXConn) IsResponseOk() bool {
-	return c.res.ResponseStatusCode != nil &&
-		*c.res.ResponseStatusCode == mdx.MetadataExchangeResponse_OK
+	return c.res.GetResponseStatusCode() == mdx.MetadataExchangeResponse_OK
 }
 
 // GetErrorMessage returns the ErrorMessage in the MDX Response.
 func (c *MDXConn) GetErrorMessage() string {
-	if c.res.ErrorMessage != nil {
-		return *c.res.ErrorMessage
-	}
-	return ""
+	return c.res.GetErrorMessage()
 }
 
 // writeMDX writes the MDX response back to the socket.
 func (c *MDXConn) writeMDX(req *mdx.MetadataExchangeRequest) error {
 	// ctx only used for debug logging
 	ctx := context.Background()
-	c.logger.Debugf(ctx, "[%v] Writing MDX request, protocol:%v...", c.cn, req.ClientProtocolType)
+	c.logger.Debugf(ctx, "[%v] Writing MDX request, protocol:%v...", c.cn, req.GetClientProtocolType())
 
 	buf := buffPool.get()
 	defer buffPool.put(buf)

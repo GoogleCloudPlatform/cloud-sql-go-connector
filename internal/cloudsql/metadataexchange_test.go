@@ -65,9 +65,9 @@ func newFakeConn(bytesToRead []byte) *fakeConn {
 }
 
 func newMDXResponseBytes(data []byte) (*mdx.MetadataExchangeResponse, []byte) {
-	res := &mdx.MetadataExchangeResponse{
+	res := mdx.MetadataExchangeResponse_builder{
 		ResponseStatusCode: ptr(mdx.MetadataExchangeResponse_OK),
-	}
+	}.Build()
 	resBytes, err := proto.Marshal(res)
 	if err != nil {
 		panic(err)
@@ -82,7 +82,9 @@ func newMDXResponseBytes(data []byte) (*mdx.MetadataExchangeResponse, []byte) {
 }
 
 func newMDXRequestBytes(data []byte) (*mdx.MetadataExchangeRequest, []byte) {
-	req := &mdx.MetadataExchangeRequest{UserAgent: proto.String("hello")}
+	req := mdx.MetadataExchangeRequest_builder{
+		UserAgent: proto.String("hello"),
+	}.Build()
 	resBytes, err := proto.Marshal(req)
 	if err != nil {
 		panic(err)
@@ -195,9 +197,9 @@ func TestMDXConn_Request_Response_WriteRead(t *testing.T) {
 	if !mdxConn.HasMDXResponse() {
 		t.Fatalf("expected no MDX response, got response")
 	}
-	if *mdxConn.GetMDXResponse().ResponseStatusCode != *res.ResponseStatusCode {
+	if mdxConn.GetMDXResponse().GetResponseStatusCode() != res.GetResponseStatusCode() {
 		t.Fatalf("expected status code %v, got %v",
-			res.ResponseStatusCode, mdxConn.GetMDXResponse().ResponseStatusCode)
+			res.GetResponseStatusCode(), mdxConn.GetMDXResponse().GetResponseStatusCode())
 	}
 }
 
@@ -216,9 +218,9 @@ func TestMDXConn_Request_Response_ReadWrite(t *testing.T) {
 	if !mdxConn.HasMDXResponse() {
 		t.Fatalf("expected no MDX response, got response")
 	}
-	if *mdxConn.GetMDXResponse().ResponseStatusCode != *res.ResponseStatusCode {
+	if mdxConn.GetMDXResponse().GetResponseStatusCode() != res.GetResponseStatusCode() {
 		t.Fatalf("expected status code %v, got %v",
-			res.ResponseStatusCode, mdxConn.GetMDXResponse().ResponseStatusCode)
+			res.GetResponseStatusCode(), mdxConn.GetMDXResponse().GetResponseStatusCode())
 	}
 }
 

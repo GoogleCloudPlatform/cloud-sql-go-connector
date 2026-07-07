@@ -44,12 +44,12 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: "1.25"
+          go-version: "1.26"
 
       - id: auth
         name: Authenticate to Google Cloud
@@ -155,7 +155,7 @@ jobs:
     strategy:
       matrix:
         goarch: ["", "386"]
-        go-version: ["1.24", "1.25"]
+        go-version: ["1.25","1.26"]
       fail-fast: false
     permissions:
       contents: read
@@ -166,9 +166,9 @@ jobs:
       GOARCH: ${{ matrix.goarch }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Setup Go ${{ matrix.go-version }}
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ matrix.go-version }}
       - id: auth
@@ -186,13 +186,19 @@ jobs:
         shell: bash
         run: |
           go env -w GOTOOLCHAIN=go1.25.0+auto
-          go test -v -race -cover -short ./... | tee test_results.txt
+          go test -v -race -coverprofile=coverage.txt -covermode=atomic -short ./... | tee test_results.txt
+          grep -v -E "\.pb\.go|/mock/" coverage.txt > coverage_filtered.txt
+          echo "=== Filtered Test Coverage ==="
+          go tool cover -func=coverage_filtered.txt
       - name: Run tests (386)
         # 386 archs don't support race detector
         if: matrix.goarch == '386'
         run: |
           go env -w GOTOOLCHAIN=go1.25.0+auto
-          go test -v -cover -short ./...
+          go test -v -coverprofile=coverage.txt -short ./...
+          grep -v -E "\.pb\.go|/mock/" coverage.txt > coverage_filtered.txt
+          echo "=== Filtered Test Coverage ==="
+          go tool cover -func=coverage_filtered.txt
       - name: Convert test output to XML
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() && matrix.goarch == '' }}
         run: |

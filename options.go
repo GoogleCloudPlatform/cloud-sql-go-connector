@@ -29,6 +29,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
+	"cloud.google.com/go/cloudsqlconn/internal/sqldataclient"
 	"golang.org/x/oauth2"
 	apiopt "google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
@@ -49,10 +50,12 @@ type dialerConfig struct {
 	useIAMAuthN           bool
 	logger                debug.ContextLogger
 	lazyRefresh           bool
+	sqlDataEndpoint       string
 	clientUniverseDomain  string
 	quotaProject          string
 	authCredentials       *auth.Credentials
 	iamLoginTokenProvider auth.TokenProvider
+	apiTokenProvider      auth.TokenProvider
 	useragents            []string
 	// TODO: Update to applicationID, which uses GCE VM Name, GKE Pod Name.
 	applicationName          string
@@ -64,6 +67,9 @@ type dialerConfig struct {
 	resolver                 instance.ConnectionNameResolver
 	failoverPeriod           time.Duration
 	metadataExchangeDisabled bool
+	dnsResolver              cloudsql.NetResolver
+	sqlDataDialer            sqldataclient.Dialer
+	sqlDataStreamTimeout     time.Duration
 	disableBuiltInMetrics    bool
 	// err tracks any dialer options that may have failed.
 	err error
@@ -75,6 +81,13 @@ func WithOptions(opts ...Option) Option {
 		for _, opt := range opts {
 			opt(d)
 		}
+	}
+}
+
+// WithSQLDataStreamTimeout sets the maximum time allowed for a stream to SQLDataService
+func WithSQLDataStreamTimeout(timeout time.Duration) Option {
+	return func(d *dialerConfig) {
+		d.sqlDataStreamTimeout = timeout
 	}
 }
 
@@ -155,6 +168,7 @@ func WithTokenSource(s oauth2.TokenSource) Option {
 	return func(d *dialerConfig) {
 		d.setTokenSource = true
 		d.setCredentials = true
+		d.apiTokenProvider = oauth2adapt.TokenProviderFromTokenSource(s)
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(s))
 	}
 }
@@ -180,6 +194,7 @@ func WithIAMAuthNTokenSources(apiTS, iamLoginTS oauth2.TokenSource) Option {
 		d.setIAMAuthNTokenSource = true
 		d.setCredentials = true
 		d.iamLoginTokenProvider = oauth2adapt.TokenProviderFromTokenSource(iamLoginTS)
+		d.apiTokenProvider = oauth2adapt.TokenProviderFromTokenSource(apiTS)
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithTokenSource(apiTS))
 	}
 }
@@ -196,6 +211,7 @@ func WithCredentials(c *auth.Credentials) Option {
 	return func(d *dialerConfig) {
 		d.setTokenSource = true
 		d.setCredentials = true
+		d.apiTokenProvider = c.TokenProvider
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithAuthCredentials(c))
 	}
 }
@@ -221,6 +237,7 @@ func WithIAMAuthNCredentials(apiCreds, iamCreds *auth.Credentials) Option {
 		d.setIAMAuthNTokenSource = true
 		d.setCredentials = true
 		d.iamLoginTokenProvider = iamCreds
+		d.apiTokenProvider = apiCreds.TokenProvider
 		d.sqladminOpts = append(d.sqladminOpts, apiopt.WithAuthCredentials(apiCreds))
 	}
 }
@@ -329,7 +346,7 @@ func WithResolver(r instance.ConnectionNameResolver) Option {
 //   - Value: `my-project:region:my-instance` – This is the instance name
 func WithDNSResolver() Option {
 	return func(d *dialerConfig) {
-		d.resolver = cloudsql.DNSResolver
+		d.resolver = cloudsql.NewDNSResolver(d.dnsResolver)
 	}
 }
 
@@ -407,12 +424,29 @@ func WithLazyRefresh() Option {
 	}
 }
 
+// WithSQLDataEndpoint allows callers to override the default endpoint for the
+// SQL Data API. Typically, this is for development only and should be ignored
+// otherwise.
+func WithSQLDataEndpoint(endpoint string) Option {
+	return func(d *dialerConfig) {
+		d.sqlDataEndpoint = endpoint
+	}
+}
+
+// WithSQLDataDialer allows callers to override the default dialer for the SQLDataService
+// with an alternate dialer.
+func WithSQLDataDialer(dialer sqldataclient.Dialer) Option {
+	return func(d *dialerConfig) {
+		d.sqlDataDialer = dialer
+	}
+}
+
 // A DialOption is an option for configuring how a Dialer's Dial call is executed.
 type DialOption func(d *dialConfig)
 
 type dialConfig struct {
 	dialFunc              func(ctx context.Context, network, addr string) (net.Conn, error)
-	ipType                string
+	connectionType        string
 	tcpKeepAlive          time.Duration
 	useIAMAuthN           bool
 	mdxClientProtocolType string
@@ -446,21 +480,21 @@ func WithTCPKeepAlive(d time.Duration) DialOption {
 // WithPublicIP returns a DialOption that specifies a public IP will be used to connect.
 func WithPublicIP() DialOption {
 	return func(cfg *dialConfig) {
-		cfg.ipType = cloudsql.PublicIP
+		cfg.connectionType = cloudsql.PublicIP
 	}
 }
 
 // WithPrivateIP returns a DialOption that specifies a private IP (VPC) will be used to connect.
 func WithPrivateIP() DialOption {
 	return func(cfg *dialConfig) {
-		cfg.ipType = cloudsql.PrivateIP
+		cfg.connectionType = cloudsql.PrivateIP
 	}
 }
 
 // WithPSC returns a DialOption that specifies a PSC endpoint will be used to connect.
 func WithPSC() DialOption {
 	return func(cfg *dialConfig) {
-		cfg.ipType = cloudsql.PSC
+		cfg.connectionType = cloudsql.PSC
 	}
 }
 
@@ -469,7 +503,16 @@ func WithPSC() DialOption {
 // compatibility only and is not recommended for use in production.
 func WithAutoIP() DialOption {
 	return func(cfg *dialConfig) {
-		cfg.ipType = cloudsql.AutoIP
+		cfg.connectionType = cloudsql.AutoIP
+	}
+}
+
+// WithSQLData returns a DialOption that routes traffic through the SQL Data API
+// endpoint. This dial option allows the dialer to reach the target instance
+// when there is not a network path.
+func WithSQLData() DialOption {
+	return func(cfg *dialConfig) {
+		cfg.connectionType = cloudsql.SQLData
 	}
 }
 
