@@ -309,3 +309,29 @@ func TestMetricRecorder(t *testing.T) {
 	}
 
 }
+
+func TestDetectDatabaseEngineType(t *testing.T) {
+	tests := []struct {
+		dbVersion string
+		want      string
+	}{
+		{"MYSQL_8_0", "MYSQL"},
+		{"POSTGRES_15", "POSTGRESQL"},
+		{"SQLSERVER_2019_STANDARD", "SQLSERVER"},
+		{"UNKNOWN_DB", "UNKNOWN"},
+		{"", "UNKNOWN"},
+	}
+	for _, tc := range tests {
+		got := tel.DetectDatabaseEngineType(tc.dbVersion)
+		if got != tc.want {
+			t.Errorf("DetectDatabaseEngineType(%q) = %q, want %q", tc.dbVersion, got, tc.want)
+		}
+	}
+}
+
+func TestDetectComputePlatform(t *testing.T) {
+	t.Setenv("K_SERVICE", "my-cloud-run-svc")
+	if got := tel.DetectComputePlatform(); got != "CLOUD_RUN" {
+		t.Errorf("DetectComputePlatform() = %q, want %q", got, "CLOUD_RUN")
+	}
+}

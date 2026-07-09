@@ -395,25 +395,28 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 }
 
 // metricRecorder does a lazy initialization of the metric exporter.
-func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName) tel.MetricRecorder {
+func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbEngineType string) tel.MetricRecorder {
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
 	if mr, ok := d.metricRecorders[inst]; ok {
-		return mr
+		if dbEngineType == "UNKNOWN" || dbEngineType == "" || mr.DatabaseEngine() == dbEngineType {
+			return mr
+		}
 	}
 	cfg := tel.Config{
 		Enabled:            !d.disableBuiltInMetrics,
 		Version:            versionString,
 		ResourceContainer:  inst.Project(),
-		ResourceID:         inst.Name(),
+		// ResourceID is the Cloud SQL instance identifier formatted as [project_name:instance_name].
+		ResourceID:         inst.Project() + ":" + inst.Name(),
 		ClientUID:          d.dialerID,
 		ApplicationName:    d.applicationName,
 		Region:             inst.Region(),
-		ClientRegion:       "Client-Region-Testing",    // TODO: detect client region
-		ComputePlatform:    "Compute-Platform-Testing", // TODO: detect compute platform
+		ClientRegion:       tel.DetectClientRegion(),
+		ComputePlatform:    tel.DetectComputePlatform(),
 		ConnectorType:      tel.ConnectorTypeValue(d.userAgent),
 		ConnectorVersion:   versionString,
-		DatabaseEngineType: "DB-Engine-Type-Testing", // TODO: detect database engine type
+		DatabaseEngineType: dbEngineType,
 	}
 	mr := tel.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
 	d.metricRecorders[inst] = mr
@@ -441,7 +444,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	if err != nil {
 		return nil, err
 	}
-	mr := d.metricRecorder(ctx, cn)
+	mr := d.metricRecorder(ctx, cn, "UNKNOWN")
 
 	startTime := time.Now()
 	var endDial trace.EndSpanFunc
@@ -535,16 +538,21 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	c, cacheHit, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
 	attrs.CacheHit = cacheHit
 	if err != nil {
+		attrs.DialStatus = tel.ConnectError
+		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
 		endInfo(err)
 		return nil, err
 	}
 	ci, err := c.ConnectionInfo(ctx)
 	if err != nil {
 		d.removeCached(ctx, cn, c, err)
+		attrs.DialStatus = tel.ConnectError
+		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
 		endInfo(err)
 		return nil, err
 	}
-	endInfo(err)
+	mr = d.metricRecorder(ctx, cn, tel.DetectDatabaseEngineType(ci.DBVersion))
+	endInfo(nil)
 
 	// If the client certificate has expired (as when the computer goes to
 	// sleep, and the refresh cycle cannot run), force a refresh immediately.
@@ -604,6 +612,8 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", cn.String(), addr, err)
 		// refresh the instance info in case it caused the connection failure
 		c.ForceRefresh()
+		attrs.DialStatus = tel.ConnectError
+		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
 		return nil, errtype.NewDialError("failed to dial", cn.String(), err)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
@@ -624,6 +634,8 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		d.logger.Debugf(ctx, "[%v] TLS handshake failed: %v", cn.String(), err)
 		d.removeCached(ctx, cn, c, err)
 		_ = tlsConn.Close() // best effort close attempt
+		attrs.DialStatus = tel.ConnectError
+		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
 		return nil, errtype.NewDialError("handshake failed", cn.String(), err)
 	}
 
@@ -639,6 +651,7 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	n := c.openConnsCount.Add(1)
 	trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
 	trace.RecordDialLatency(ctx, cn.String(), d.dialerID, latency)
+	attrs.DialStatus = tel.ConnectSuccess
 	mr.RecordOpenConnection(ctx, attrs)
 	mr.RecordConnectLatencies(ctx, attrs, latency)
 
@@ -647,8 +660,6 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
 		mr.RecordClosedConnection(context.Background(), attrs)
 		mr.RecordClosedConnectionCount(context.Background(), attrs)
-		// lot the message to terminal for debugging purposes
-		fmt.Println("Cloud SQL Go Connector Dialer ID:", d.dialerID, "closed connection to instance:", cn.String())
 	}
 	errFunc := func(err error) {
 		// io.EOF occurs when the server closes the connection. This is safe to
