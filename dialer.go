@@ -404,9 +404,9 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 		}
 	}
 	cfg := tel.Config{
-		Enabled:            !d.disableBuiltInMetrics,
-		Version:            versionString,
-		ResourceContainer:  inst.Project(),
+		Enabled:           !d.disableBuiltInMetrics,
+		Version:           versionString,
+		ResourceContainer: inst.Project(),
 		// ResourceID is the Cloud SQL instance identifier formatted as [project_name:instance_name].
 		ResourceID:         inst.Project() + ":" + inst.Name(),
 		ClientUID:          d.dialerID,
