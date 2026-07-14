@@ -15,11 +15,13 @@ package tel_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	"github.com/google/go-cmp/cmp"
 	"golang.org/x/oauth2"
@@ -295,6 +297,48 @@ func TestMetricRecorder(t *testing.T) {
 				"status":             "success",
 			},
 		},
+		{
+			desc: "connection_durations",
+			cfg:  defaultCfg,
+			attrs: tel.Attributes{
+				IPType:   "public",
+				IAMAuthN: true,
+			},
+			action: func(ctx context.Context, mr tel.MetricRecorder, attrs tel.Attributes) {
+				mr.RecordConnectionDuration(ctx, attrs, 12.34)
+			},
+			wantProject:        wantProject,
+			wantResourceType:   wantResourceType,
+			wantResourceLabels: wantResourceLabels,
+			wantMetricType:     "cloudsql.googleapis.com/client/connector/connection_durations",
+			wantMetricLabels: map[string]string{
+				"instance_auth_type": "iam",
+				"instance_ip_type":   "public",
+			},
+		},
+		{
+			desc: "open_connection_count",
+			cfg:  defaultCfg,
+			attrs: tel.Attributes{
+				IPType:         "psc",
+				IAMAuthN:       false,
+				ConnectionPart: "client_to_proxy",
+				AttemptStatus:  "user_error",
+			},
+			action: func(ctx context.Context, mr tel.MetricRecorder, attrs tel.Attributes) {
+				mr.RecordOpenConnectionCount(ctx, attrs)
+			},
+			wantProject:        wantProject,
+			wantResourceType:   wantResourceType,
+			wantResourceLabels: wantResourceLabels,
+			wantMetricType:     "cloudsql.googleapis.com/client/connector/open_connection_count",
+			wantMetricLabels: map[string]string{
+				"instance_auth_type": "built_in",
+				"instance_ip_type":   "psc",
+				"connection_part":    "client_to_proxy",
+				"status":             "user_error",
+			},
+		},
 	}
 
 	for _, tc := range tcs {
@@ -333,5 +377,24 @@ func TestDetectComputePlatform(t *testing.T) {
 	t.Setenv("K_SERVICE", "my-cloud-run-svc")
 	if got := tel.DetectComputePlatform(); got != "CLOUD_RUN" {
 		t.Errorf("DetectComputePlatform() = %q, want %q", got, "CLOUD_RUN")
+	}
+}
+
+func TestClassifyDialError(t *testing.T) {
+	tests := []struct {
+		err        error
+		wantPart   string
+		wantStatus string
+	}{
+		{nil, "", "success"},
+		{errtype.NewConfigError("invalid instance name", "proj:inst"), "client_to_proxy", "user_error"},
+		{errtype.NewRefreshError("certificate expired", "proj:inst", errors.New("api failed")), "client_to_proxy", "refresh_failed_error"},
+		{errors.New("something weird happened"), "unknown", "unknown_error"},
+	}
+	for _, tc := range tests {
+		gotPart, gotStatus := tel.ClassifyDialError(tc.err)
+		if gotPart != tc.wantPart || gotStatus != tc.wantStatus {
+			t.Errorf("ClassifyDialError(%v) = (%q, %q), want (%q, %q)", tc.err, gotPart, gotStatus, tc.wantPart, tc.wantStatus)
+		}
 	}
 }

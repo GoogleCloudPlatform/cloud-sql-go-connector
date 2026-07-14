@@ -16,13 +16,14 @@ package tel
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"time"
 
-	"cloud.google.com/go/compute/metadata"
-
 	"cloud.google.com/go/cloudsqlconn/debug"
+	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/compute/metadata"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -39,6 +40,9 @@ const (
 	connectLatency        = "connect_latencies" // dial latency
 	closedConnectionCount = "closed_connection_count"
 	openConnections       = "open_connections"
+	connectionDurations   = "connection_durations"
+	openConnectionCount   = "open_connection_count"
+	connectionPart        = "connection_part"
 
 	// ResourceContainer is the identifier of the GCP project associated with this CSQL resource.
 	ResourceContainer = "resource_container"
@@ -191,6 +195,30 @@ type Attributes struct {
 	RefreshType string
 	// ipType specifies IP address type of the connection, one of [public, psa, psc].
 	IPAddressType string
+	// ConnectionPart specifies which part of the connection errors out, one of [client_to_proxy, proxy_to_server].
+	ConnectionPart string
+	// AttemptStatus specifies the detailed status of the dial attempt.
+	AttemptStatus string
+}
+
+// ClassifyDialError classifies an error during a connection attempt into connection_part and status labels.
+func ClassifyDialError(err error) (part string, status string) {
+	if err == nil {
+		return "", ConnectSuccess
+	}
+	var configErr *errtype.ConfigError
+	if errors.As(err, &configErr) {
+		return "client_to_proxy", "user_error"
+	}
+	var refreshErr *errtype.RefreshError
+	if errors.As(err, &refreshErr) {
+		return "client_to_proxy", "refresh_failed_error"
+	}
+	// TODO: Replace this fallback with structural error tracking across callsites
+	// to accurately map granular status codes and provide more accurate "connection_part"
+	// detection (especially distinguishing errors in the proxy_to_server path)
+	// without relying on string matching.
+	return "unknown", "unknown_error"
 }
 
 // MetricRecorder defines the interface for recording metrics related to the
@@ -200,6 +228,8 @@ type MetricRecorder interface {
 	RecordClosedConnection(context.Context, Attributes)
 	RecordClosedConnectionCount(context.Context, Attributes)
 	RecordConnectLatencies(context.Context, Attributes, int64)
+	RecordConnectionDuration(context.Context, Attributes, float64)
+	RecordOpenConnectionCount(context.Context, Attributes)
 	DatabaseEngine() string
 }
 
@@ -282,6 +312,18 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize refresh count metric: %v", err)
 		return NullMetricRecorder{}
 	}
+	mConnectionDuration, err := m.Float64Histogram(connectionDurations, metric.WithUnit("s"))
+	if err != nil {
+		_ = exp.Shutdown(ctx)
+		l.Debugf(ctx, "built-in metrics exporter failed to initialize connection duration metric: %v", err)
+		return NullMetricRecorder{}
+	}
+	mOpenConnectionCount, err := m.Int64Counter(openConnectionCount)
+	if err != nil {
+		_ = exp.Shutdown(ctx)
+		l.Debugf(ctx, "built-in metrics exporter failed to initialize open connection count metric: %v", err)
+		return NullMetricRecorder{}
+	}
 	return &metricRecorder{
 		exporter:               exp,
 		provider:               p,
@@ -289,7 +331,9 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		dbEngineType:           cfg.DatabaseEngineType,
 		mClosedConnectionCount: mClosedConnectionCount,
 		mConnectLatency:        mConnectLatency,
+		mConnectionDuration:    mConnectionDuration,
 		mOpenConns:             mOpenConns,
+		mOpenConnectionCount:   mOpenConnectionCount,
 	}
 }
 
@@ -301,7 +345,9 @@ type metricRecorder struct {
 	dbEngineType           string
 	mClosedConnectionCount metric.Int64Counter
 	mConnectLatency        metric.Float64Histogram
+	mConnectionDuration    metric.Float64Histogram
 	mOpenConns             metric.Int64UpDownCounter
+	mOpenConnectionCount   metric.Int64Counter
 }
 
 // DatabaseEngine returns the configured database engine type for this recorder.
@@ -347,6 +393,28 @@ func (m *metricRecorder) RecordConnectLatencies(ctx context.Context, a Attribute
 	)
 }
 
+// RecordConnectionDuration records established connection duration in seconds.
+func (m *metricRecorder) RecordConnectionDuration(ctx context.Context, a Attributes, durationSec float64) {
+	m.mConnectionDuration.Record(ctx, durationSec,
+		metric.WithAttributeSet(attribute.NewSet(
+			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
+			attribute.String(ipType, a.IPType),
+		)),
+	)
+}
+
+// RecordOpenConnectionCount records connection attempts and error classifications.
+func (m *metricRecorder) RecordOpenConnectionCount(ctx context.Context, a Attributes) {
+	m.mOpenConnectionCount.Add(ctx, 1,
+		metric.WithAttributeSet(attribute.NewSet(
+			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
+			attribute.String(ipType, a.IPType),
+			attribute.String(connectionPart, a.ConnectionPart),
+			attribute.String(status, a.AttemptStatus),
+		)),
+	)
+}
+
 // NullMetricRecorder implements the MetricRecorder interface with no-ops. It
 // is useful for disabling the built-in metrics.
 type NullMetricRecorder struct{}
@@ -363,6 +431,13 @@ func (n NullMetricRecorder) RecordClosedConnectionCount(context.Context, Attribu
 // RecordConnectLatencies is a no-op.
 func (n NullMetricRecorder) RecordConnectLatencies(context.Context, Attributes, int64) {
 }
+
+// RecordConnectionDuration is a no-op.
+func (n NullMetricRecorder) RecordConnectionDuration(context.Context, Attributes, float64) {
+}
+
+// RecordOpenConnectionCount is a no-op.
+func (n NullMetricRecorder) RecordOpenConnectionCount(context.Context, Attributes) {}
 
 // DatabaseEngine returns an empty string for the null recorder.
 func (n NullMetricRecorder) DatabaseEngine() string {
