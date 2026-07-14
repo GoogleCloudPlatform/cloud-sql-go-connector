@@ -129,27 +129,22 @@ func DetectClientRegion() (region string) {
 			region = "UNKNOWN"
 		}
 	}()
-	if metadata.OnGCE() {
-		zone, err := metadata.Zone()
-		if err == nil && zone != "" {
-			if idx := strings.LastIndex(zone, "-"); idx != -1 {
-				return zone[:idx]
-			}
-			return zone
-		}
+	if !metadata.OnGCE() {
+		return "UNKNOWN"
 	}
-	return "UNKNOWN"
+	zone, err := metadata.Zone()
+	if err != nil || zone == "" {
+		return "UNKNOWN"
+	}
+	if idx := strings.LastIndex(zone, "-"); idx != -1 {
+		return zone[:idx]
+	}
+	return zone
 }
 
 // DetectComputePlatform detects the GCP compute platform environment.
 // Any panic or error fails silently and returns "UNKNOWN".
 func DetectComputePlatform() (platform string) {
-	// Safeguard against unexpected panics to prevent hard crashes in client applications.
-	defer func() {
-		if r := recover(); r != nil {
-			platform = "UNKNOWN"
-		}
-	}()
 	switch {
 	case os.Getenv("KUBERNETES_SERVICE_HOST") != "":
 		return "GKE"
@@ -169,12 +164,6 @@ func DetectComputePlatform() (platform string) {
 // DetectDatabaseEngineType detects the database engine type from a Cloud SQL DBVersion string.
 // Any panic or error fails silently and returns "UNKNOWN".
 func DetectDatabaseEngineType(dbVersion string) (engine string) {
-	// Safeguard against unexpected panics to prevent hard crashes in client applications.
-	defer func() {
-		if r := recover(); r != nil {
-			engine = "UNKNOWN"
-		}
-	}()
 	switch {
 	case strings.HasPrefix(dbVersion, "MYSQL"):
 		return "MYSQL"
