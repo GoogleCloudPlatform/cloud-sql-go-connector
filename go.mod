@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	cloud.google.com/go/auth v0.24.1
 	cloud.google.com/go/auth/oauth2adapt v0.3.0
+	cloud.google.com/go/compute/metadata v0.10.0
 	cloud.google.com/go/monitoring v1.31.0
 	cloud.google.com/go/sql v0.3.0
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.62.0
@@ -28,7 +29,6 @@ require (
 )
 
 require (
-	cloud.google.com/go/compute/metadata v0.10.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.62.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

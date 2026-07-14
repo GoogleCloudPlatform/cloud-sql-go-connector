@@ -16,8 +16,11 @@ package tel
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
+
+	"cloud.google.com/go/compute/metadata"
 
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"go.opentelemetry.io/otel/attribute"
@@ -117,6 +120,62 @@ func AuthTypeValue(iamAuthn bool) string {
 	return "built_in"
 }
 
+// DetectClientRegion returns the client region from GCP metadata if running on GCE/GKE/Cloud Run.
+// Any panic or error fails silently and returns "UNKNOWN".
+func DetectClientRegion() (region string) {
+	// Safeguard against unexpected panics to prevent hard crashes in client applications.
+	defer func() {
+		if r := recover(); r != nil {
+			region = "UNKNOWN"
+		}
+	}()
+	if !metadata.OnGCE() {
+		return "UNKNOWN"
+	}
+	zone, err := metadata.Zone()
+	if err != nil || zone == "" {
+		return "UNKNOWN"
+	}
+	if idx := strings.LastIndex(zone, "-"); idx != -1 {
+		return zone[:idx]
+	}
+	return zone
+}
+
+// DetectComputePlatform detects the GCP compute platform environment.
+// Any panic or error fails silently and returns "UNKNOWN".
+func DetectComputePlatform() (platform string) {
+	switch {
+	case os.Getenv("KUBERNETES_SERVICE_HOST") != "":
+		return "GKE"
+	case os.Getenv("K_SERVICE") != "":
+		return "CLOUD_RUN"
+	case os.Getenv("GAE_SERVICE") != "":
+		return "APP_ENGINE"
+	case os.Getenv("FUNCTION_NAME") != "":
+		return "CLOUD_FUNCTIONS"
+	case metadata.OnGCE():
+		return "GCE"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// DetectDatabaseEngineType detects the database engine type from a Cloud SQL DBVersion string.
+// Any panic or error fails silently and returns "UNKNOWN".
+func DetectDatabaseEngineType(dbVersion string) (engine string) {
+	switch {
+	case strings.HasPrefix(dbVersion, "MYSQL"):
+		return "MYSQL"
+	case strings.HasPrefix(dbVersion, "POSTGRES"):
+		return "POSTGRESQL"
+	case strings.HasPrefix(dbVersion, "SQLSERVER"):
+		return "SQLSERVER"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 // Attributes holds all the various pieces of metadata to attach to a metric.
 type Attributes struct {
 	// IAMAuthN specifies whether IAM authentication is enabled.
@@ -141,6 +200,7 @@ type MetricRecorder interface {
 	RecordClosedConnection(context.Context, Attributes)
 	RecordClosedConnectionCount(context.Context, Attributes)
 	RecordConnectLatencies(context.Context, Attributes, int64)
+	DatabaseEngine() string
 }
 
 // DefaultExportInterval is the interval that the metric exporter runs. It
@@ -226,6 +286,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		exporter:               exp,
 		provider:               p,
 		dialerID:               cfg.ClientUID,
+		dbEngineType:           cfg.DatabaseEngineType,
 		mClosedConnectionCount: mClosedConnectionCount,
 		mConnectLatency:        mConnectLatency,
 		mOpenConns:             mOpenConns,
@@ -237,9 +298,15 @@ type metricRecorder struct {
 	exporter               sdkmetric.Exporter
 	provider               *sdkmetric.MeterProvider
 	dialerID               string
+	dbEngineType           string
 	mClosedConnectionCount metric.Int64Counter
 	mConnectLatency        metric.Float64Histogram
 	mOpenConns             metric.Int64UpDownCounter
+}
+
+// DatabaseEngine returns the configured database engine type for this recorder.
+func (m *metricRecorder) DatabaseEngine() string {
+	return m.dbEngineType
 }
 
 // RecordClosedConnectionCount records totals number of closed connections.
@@ -261,7 +328,7 @@ func (m *metricRecorder) RecordOpenConnection(ctx context.Context, a Attributes)
 		)))
 }
 
-// RecordOpenConnection records current number of open connections.
+// RecordClosedConnection decreases current number of open connections.
 func (m *metricRecorder) RecordClosedConnection(ctx context.Context, a Attributes) {
 	m.mOpenConns.Add(ctx, -1,
 		metric.WithAttributeSet(attribute.NewSet(
@@ -295,4 +362,9 @@ func (n NullMetricRecorder) RecordClosedConnectionCount(context.Context, Attribu
 
 // RecordConnectLatencies is a no-op.
 func (n NullMetricRecorder) RecordConnectLatencies(context.Context, Attributes, int64) {
+}
+
+// DatabaseEngine returns an empty string for the null recorder.
+func (n NullMetricRecorder) DatabaseEngine() string {
+	return ""
 }
