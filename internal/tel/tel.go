@@ -202,7 +202,7 @@ type Attributes struct {
 }
 
 // ClassifyDialError classifies an error during a connection attempt into connection_part and status labels.
-func ClassifyDialError(err error) (part string, status string) {
+func ClassifyDialError(err error) (string, string) {
 	if err == nil {
 		return "", ConnectSuccess
 	}
