@@ -602,7 +602,7 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 func isSQLDataUnsupportedError(err error) bool {
 	if s, ok := status.FromError(err); ok {
 		return s.Code() == codes.FailedPrecondition &&
-			strings.HasPrefix(s.Message(), "unsupported instance edition:")
+			strings.HasPrefix(s.Message(), "unsupported instance edition")
 	}
 	return false
 }
