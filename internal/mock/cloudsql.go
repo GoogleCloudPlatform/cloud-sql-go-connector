@@ -299,8 +299,7 @@ func GenerateCertWithCommonName(i FakeCSQLInstance, cn string) []byte {
 // on all interfaces, configured with TLS as specified by the FakeCSQLInstance.
 // Callers should invoke the returned function to clean up all resources.
 func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
-
-	ln, err := tls.Listen("tcp", ":3307", &tls.Config{
+	ln, err := startListenerWithRetries(&tls.Config{
 		Certificates: i.certs.serverChain(i.useStandardTLSValidation),
 		ClientCAs:    i.certs.clientCAPool(),
 		ClientAuth:   tls.RequireAndVerifyClientCert,
@@ -368,6 +367,22 @@ func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 	}
 }
 
+// startListenerWithRetries opens a mock server on port 3307 for testing. If it fails
+// to open the port, it waits and retries up to 50 times. This prevents test flakes caused
+// by delays cleaning up the mock server from prior tests.
+func startListenerWithRetries(cfg *tls.Config) (net.Listener, error) {
+	var ln net.Listener
+	var err error
+	for attempts := 0; attempts < 50; attempts++ {
+		ln, err = tls.Listen("tcp", ":3307", cfg)
+		if err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return ln, err
+}
+
 // RotateCA rotates all CA certificates and keys.
 func RotateCA(inst FakeCSQLInstance) {
 	inst.certs.rotateCA()
@@ -409,8 +424,7 @@ func NewFailoverTestServer(t *testing.T) *FailoverTestServer {
 
 // Start starts the test server up, to make sure that it is ready to go
 func (s *FailoverTestServer) Start(i *FakeCSQLInstance) {
-
-	ln, err := tls.Listen("tcp", ":3307", &tls.Config{
+	ln, err := startListenerWithRetries(&tls.Config{
 		Certificates: i.certs.serverChain(i.useStandardTLSValidation),
 		ClientCAs:    i.certs.clientCAPool(),
 		ClientAuth:   tls.RequireAndVerifyClientCert,
