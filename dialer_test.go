@@ -1869,3 +1869,43 @@ func TestDialerPSCPSCFirst(t *testing.T) {
 		t.Fatalf("unexpected dial attempts, want = %v, got = %v", wantAttempts, attempts)
 	}
 }
+
+type mockEmptyHostResolver struct {
+	mockNetResolver
+}
+
+func (r *mockEmptyHostResolver) LookupHost(_ context.Context, _ string) ([]string, error) {
+	return []string{}, nil
+}
+
+func TestDialerDnsResolutionEmptyFallbackToPrivateIP(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+		mock.WithPrivateIP("127.0.0.2"),
+		mock.WithDNS("db.example.com"),
+	)
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			withMockDNSResolver(&mockEmptyHostResolver{
+				mockNetResolver{
+					txtEntries: map[string]string{
+						"db.example.com": "my-project:my-region:my-instance",
+					},
+				},
+			}),
+			WithDNSResolver(),
+			WithDefaultDialOptions(WithPrivateIP()),
+			WithTokenSource(mock.EmptyTokenSource{}),
+		},
+	})
+
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"db.example.com",
+	)
+}
