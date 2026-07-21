@@ -254,3 +254,58 @@ func TestDNSInstanceNameResolver_Lookup_Fails_CnameLoop(t *testing.T) {
 		t.Fatalf("want = %v, got = %v", wantMsg, err)
 	}
 }
+
+func TestDNSInstanceNameResolver_Lookup_Success_GlobalCname(t *testing.T) {
+	dnsName := "0123456789ab.fedcba9876543.global.sql-psc.goog"
+	cnameTarget := "0123456789ab.fedcba9876543.europe-north2.sql-psc.goog"
+	realConnName := "my-project:europe-north2:my-instance"
+	want, _ := instance.ParseConnNameWithDomainName(realConnName, dnsName)
+
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.ResolveConnectSettingsSuccess(cnameTarget+".", "europe-north2", realConnName, 1),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	r := DNSInstanceConnectionNameResolver{
+		dnsResolver: &fakeResolver{
+			cnameEntries: map[string]string{
+				dnsName: cnameTarget,
+			},
+		},
+		client: client,
+	}
+	got, err := r.Resolve(context.Background(), dnsName)
+	if err != nil {
+		t.Fatal("got error", err)
+	}
+	if got != want {
+		t.Fatal("Got", got, "Want", want)
+	}
+}
+
+func TestDNSInstanceNameResolver_Lookup_Fails_GlobalDirect(t *testing.T) {
+	dnsName := "0123456789ab.fedcba9876543.global.sql-psc.goog"
+
+	client, cleanup, err := mock.NewSQLAdminService(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	r := DNSInstanceConnectionNameResolver{
+		dnsResolver: &fakeResolver{},
+		client:      client,
+	}
+	_, err = r.Resolve(context.Background(), dnsName)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	wantMsg := "no DNS record found for"
+	if !strings.Contains(err.Error(), wantMsg) {
+		t.Fatalf("want = %v, got = %v", wantMsg, err)
+	}
+}
