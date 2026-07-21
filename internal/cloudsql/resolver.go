@@ -50,25 +50,25 @@ type NetResolver interface {
 	LookupCNAME(ctx context.Context, name string) (string, error)
 }
 
-// NewDNSResolver returns a new DNSInstanceConnectionNameResolver with the
+// NewDNSResolver returns a new dnsInstanceConnectionNameResolver with the
 // provided resolver.
-func NewDNSResolver(r NetResolver, client *sqladmin.Service) *DNSInstanceConnectionNameResolver {
-	return &DNSInstanceConnectionNameResolver{
+func NewDNSResolver(r NetResolver, client *sqladmin.Service) instance.ConnectionNameResolver {
+	return &dnsInstanceConnectionNameResolver{
 		dnsResolver: r,
 		client:      client,
 	}
 }
 
-// DNSInstanceConnectionNameResolver can resolve domain names into instance names using
+// dnsInstanceConnectionNameResolver can resolve domain names into instance names using
 // TXT records in DNS. Implements InstanceConnectionNameResolver
-type DNSInstanceConnectionNameResolver struct {
+type dnsInstanceConnectionNameResolver struct {
 	dnsResolver NetResolver
 	client      *sqladmin.Service
 }
 
 // Resolve returns the instance name, possibly using DNS. This will return an
 // instance.ConnName or an error if it was unable to resolve an instance name.
-func (r *DNSInstanceConnectionNameResolver) Resolve(ctx context.Context, icn string) (instance.ConnName, error) {
+func (r *dnsInstanceConnectionNameResolver) Resolve(ctx context.Context, icn string) (instance.ConnName, error) {
 	// Check if the connection name is an Instance
 	cn, err := instance.ParseConnName(icn)
 	if err == nil {
@@ -94,6 +94,9 @@ func (r *DNSInstanceConnectionNameResolver) Resolve(ctx context.Context, icn str
 				dnsNameWithDot += "."
 			}
 			db, err := retry50x(ctx, func(ctx2 context.Context) (*sqladmin.ConnectSettings, error) {
+				if r.client == nil {
+					return nil, fmt.Errorf("dnsresolver sqladmin api client is not initialized")
+				}
 				return r.client.Connect.Resolve(
 					region, dnsNameWithDot).Context(ctx2).Do()
 			}, exponentialBackoff)
@@ -145,7 +148,7 @@ func (r *DNSInstanceConnectionNameResolver) Resolve(ctx context.Context, icn str
 //   - The domain name resolves to 2 or more DNS record - return first valid
 //     record when sorted by priority: lowest value first, then by target:
 //     alphabetically.
-func (r *DNSInstanceConnectionNameResolver) queryDNS(ctx context.Context, domainName string) (instance.ConnName, error) {
+func (r *dnsInstanceConnectionNameResolver) queryDNS(ctx context.Context, domainName string) (instance.ConnName, error) {
 	// Attempt to query the TXT records.
 	// This could return a partial error where both err != nil && len(records) > 0.
 	records, err := r.dnsResolver.LookupTXT(ctx, domainName)

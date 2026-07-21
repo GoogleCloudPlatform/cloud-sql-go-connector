@@ -119,13 +119,17 @@ func fetchMetadata(
 		for _, dnm := range db.DnsNames {
 			if dnm.Name != "" &&
 				dnm.ConnectionType == "PRIVATE_SERVICE_CONNECT" && dnm.DnsScope == "INSTANCE" {
-				pscDNSNames = append(pscDNSNames, dnm.Name)
+				// trim . from end of dns name
+				name := strings.TrimSuffix(dnm.Name, ".")
+				pscDNSNames = append(pscDNSNames, name)
 			}
 		}
 
 		// If the psc dns name was not found, use the legacy dns_name field
 		if len(pscDNSNames) == 0 && db.DnsName != "" {
-			pscDNSNames = append(pscDNSNames, db.DnsName)
+			// trim . from end of dns name
+			name := strings.TrimSuffix(db.DnsName, ".")
+			pscDNSNames = append(pscDNSNames, name)
 		}
 
 		// If the psc dns name was found, add it to the ipaddrs map.
@@ -384,6 +388,8 @@ func supportsAutoIAMAuthN(version string) error {
 	}
 }
 
+// sortPSCDNSNames sorts PSC DNS names alphabetically, putting the names
+// that end with `.sql-psc.goog.` first.
 func sortPSCDNSNames(names []string) {
 	sort.SliceStable(names, func(i, j int) bool {
 		iIsPsc := strings.HasSuffix(names[i], ".sql-psc.goog")
@@ -394,6 +400,6 @@ func sortPSCDNSNames(names []string) {
 		if !iIsPsc && jIsPsc {
 			return false // j comes first
 		}
-		return false
+		return names[i] < names[j]
 	})
 }

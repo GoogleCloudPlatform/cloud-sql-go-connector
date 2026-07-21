@@ -50,7 +50,7 @@ func (r *fakeResolver) LookupCNAME(_ context.Context, name string) (string, erro
 func TestDNSInstanceNameResolver_Lookup_Success_TxtRecord(t *testing.T) {
 	want, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
 
-	r := DNSInstanceConnectionNameResolver{
+	r := dnsInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{
 			txtEntries: map[string]string{
 				"db.example.com": "my-project:my-region:my-instance",
@@ -68,7 +68,7 @@ func TestDNSInstanceNameResolver_Lookup_Success_TxtRecord(t *testing.T) {
 }
 
 func TestDNSInstanceNameResolver_Lookup_Fails_TxtRecordMissing(t *testing.T) {
-	r := DNSInstanceConnectionNameResolver{
+	r := dnsInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{},
 	}
 	_, err := r.Resolve(context.Background(), "doesnt-exist.example.com")
@@ -80,7 +80,7 @@ func TestDNSInstanceNameResolver_Lookup_Fails_TxtRecordMissing(t *testing.T) {
 }
 
 func TestDNSInstanceNameResolver_Lookup_Fails_TxtRecordMalformed(t *testing.T) {
-	r := DNSInstanceConnectionNameResolver{
+	r := dnsInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{
 			txtEntries: map[string]string{
 				"malformed.example.com": "invalid-instance-name",
@@ -108,7 +108,7 @@ func TestDNSInstanceNameResolver_Lookup_Success_DirectPSC(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := DNSInstanceConnectionNameResolver{
+	r := dnsInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{},
 		client:      client,
 	}
@@ -136,7 +136,7 @@ func TestDNSInstanceNameResolver_Lookup_Success_CnamePSC(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := DNSInstanceConnectionNameResolver{
+	r := dnsInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{
 			cnameEntries: map[string]string{
 				dnsName: cnameTarget,
@@ -163,7 +163,7 @@ func TestDNSInstanceNameResolver_Lookup_Fails_InvalidPattern(t *testing.T) {
 	}
 
 	for _, dnsName := range invalidDNSNames {
-		r := DNSInstanceConnectionNameResolver{
+		r := dnsInstanceConnectionNameResolver{
 			dnsResolver: &fakeResolver{},
 		}
 		_, err := r.Resolve(context.Background(), dnsName)
@@ -189,7 +189,7 @@ func TestDNSInstanceNameResolver_Lookup_Success_CnameChainPSC(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := DNSInstanceConnectionNameResolver{
+	r := dnsInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{
 			cnameEntries: map[string]string{
 				dnsName: cname2,
@@ -213,7 +213,7 @@ func TestDNSInstanceNameResolver_Lookup_Success_CnameChainTxt(t *testing.T) {
 	cname3 := "name3.example.com"
 	want, _ := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", cname3)
 
-	r := DNSInstanceConnectionNameResolver{
+	r := dnsInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{
 			cnameEntries: map[string]string{
 				dnsName: cname2,
@@ -237,7 +237,7 @@ func TestDNSInstanceNameResolver_Lookup_Fails_CnameLoop(t *testing.T) {
 	dnsName := "name1.example.com"
 	cname2 := "name2.example.com"
 
-	r := DNSInstanceConnectionNameResolver{
+	r := dnsInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{
 			cnameEntries: map[string]string{
 				dnsName: cname2,
@@ -270,7 +270,7 @@ func TestDNSInstanceNameResolver_Lookup_Success_GlobalCname(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := DNSInstanceConnectionNameResolver{
+	r := dnsInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{
 			cnameEntries: map[string]string{
 				dnsName: cnameTarget,
@@ -296,7 +296,7 @@ func TestDNSInstanceNameResolver_Lookup_Fails_GlobalDirect(t *testing.T) {
 	}
 	defer cleanup()
 
-	r := DNSInstanceConnectionNameResolver{
+	r := dnsInstanceConnectionNameResolver{
 		dnsResolver: &fakeResolver{},
 		client:      client,
 	}

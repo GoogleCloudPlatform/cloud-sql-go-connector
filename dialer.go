@@ -508,25 +508,16 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	// address if the DNS name does not resolve to an IP address.
 	if cn.HasDomainName() {
 		resolved, err := d.dnsResolver.LookupHost(ctx, cn.DomainName())
-		if err != nil || len(resolved) == 0 {
-			fallbackAddr := addrs[0]
-			if net.ParseIP(fallbackAddr) == nil {
-				if pIP, err2 := ci.Addr(cloudsql.PrivateIP); err2 == nil {
-					fallbackAddr = pIP
-				} else if pIP, err2 := ci.Addr(cloudsql.PublicIP); err2 == nil {
-					fallbackAddr = pIP
-				}
-			}
-			if err != nil {
-				d.logger.Debugf(ctx,
-					"[%v] custom DNS name %q did not resolve to an IP address: %v, using %s from instance metadata",
-					cn.String(), cn.DomainName(), err, fallbackAddr)
-			} else {
-				d.logger.Debugf(ctx,
-					"[%v] custom DNS name %q resolved but returned no entries, using %s from instance metadata",
-					cn.String(), cn.DomainName(), fallbackAddr)
-			}
-			targets = []string{fallbackAddr}
+		if err != nil {
+			d.logger.Debugf(ctx,
+				"[%v] custom DNS name %q did not resolve to an IP address: %v, using %s from instance metadata",
+				cn.String(), cn.DomainName(), err, addrs)
+			targets = addrs
+		} else if len(resolved) == 0 {
+			d.logger.Debugf(ctx,
+				"[%v] custom DNS name %q resolved but returned no entries, using %s from instance metadata",
+				cn.String(), cn.DomainName(), addrs)
+			targets = addrs
 		} else {
 			d.logger.Debugf(ctx,
 				"[%v] custom DNS name %q resolved to %q, using it to connect",
@@ -541,7 +532,7 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	if cfg.dialFunc != nil {
 		f = cfg.dialFunc
 	}
-
+	// Attempt to dial each of the targets in turn. Use the first one that succeeds.
 	var dialErr error
 	for _, target := range targets {
 		dialAddr := net.JoinHostPort(target, serverProxyPort)
