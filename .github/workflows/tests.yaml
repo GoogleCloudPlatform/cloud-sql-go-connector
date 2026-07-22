@@ -123,10 +123,9 @@ jobs:
           ./build.sh e2e_ci
 
       - name: Convert test output to XML
-        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() }}
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'pull_request') && always() }}
         run: |
-          go install github.com/jstemmer/go-junit-report/v2@latest
-          go-junit-report -in test_results.txt -set-exit-code -out integration_sponge_log.xml
+          cp test-results/e2e.xml integration_sponge_log.xml
 
       - name: FlakyBot (Linux)
         # only run flakybot on periodic (schedule) and continuous (push) events
