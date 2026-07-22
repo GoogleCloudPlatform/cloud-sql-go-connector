@@ -123,7 +123,7 @@ jobs:
           ./build.sh e2e_ci
 
       - name: Convert test output to XML
-        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'pull_request') && always() }}
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() }}
         run: |
           cp test-results/e2e.xml integration_sponge_log.xml
 
