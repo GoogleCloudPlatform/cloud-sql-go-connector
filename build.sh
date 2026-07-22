@@ -167,7 +167,7 @@ function get_protoc() {
 ## build - Builds the project without running tests.
 function build() {
   generate
-  go build ./...
+  go build -buildvcs=false ./...
 }
 
 ## test - Runs local unit tests.
@@ -321,7 +321,7 @@ function iam_user_pg() {
   local pguser
 
   email="$(iam_user_email)"
-  pguser="${email%%.iam.gserviceaccount.com}"
+  pguser="${email%%.gserviceaccount.com}"
   if [[ -n "$pguser" ]] ; then
     echo "$pguser"
   else
