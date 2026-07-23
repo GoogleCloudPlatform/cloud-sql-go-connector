@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.23.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.22.1...v1.23.0) (2026-07-23)
+
+
+### Features
+
+* Add PSC DNS and Global Write Endpoint support to Go Connector ([#1106](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1106)) ([7061e54](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/7061e54131545b26728f6b13455e7145f8a44a14))
+
+
+### Bug Fixes
+
+* Correctly identify unsupported instance edition error. ([#1130](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1130)) ([8e7ec2f](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/8e7ec2f75f3b9311f88b970ab1bb117fe61ac7c5))
+* update go dependencies ([#1134](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1134)) ([028e616](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/028e6166ffe72257db2e1ea34a205972b635e1d1))
+* use generated XML in integration tests workflow ([#1136](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1136)) ([87db30d](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/87db30df846a58e577707c1e1facd89bbcc8bfe3))
+
 ## [1.22.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.22.0...v1.22.1) (2026-06-25)
 
 
