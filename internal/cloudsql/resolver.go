@@ -18,9 +18,11 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
+	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 // DefaultResolver simply parses instance names.
@@ -45,45 +47,94 @@ func (r *ConnNameResolver) Resolve(_ context.Context, icn string) (instanceName 
 type NetResolver interface {
 	LookupTXT(ctx context.Context, name string) ([]string, error)
 	LookupHost(ctx context.Context, name string) ([]string, error)
+	LookupCNAME(ctx context.Context, name string) (string, error)
 }
 
-// NewDNSResolver returns a new DNSInstanceConnectionNameResolver with the
+// NewDNSResolver returns a new dnsInstanceConnectionNameResolver with the
 // provided resolver.
-func NewDNSResolver(r NetResolver) *DNSInstanceConnectionNameResolver {
-	return &DNSInstanceConnectionNameResolver{dnsResolver: r}
+func NewDNSResolver(r NetResolver, client *sqladmin.Service) instance.ConnectionNameResolver {
+	return &dnsInstanceConnectionNameResolver{
+		dnsResolver: r,
+		client:      client,
+	}
 }
 
-// DNSInstanceConnectionNameResolver can resolve domain names into instance names using
+// dnsInstanceConnectionNameResolver can resolve domain names into instance names using
 // TXT records in DNS. Implements InstanceConnectionNameResolver
-type DNSInstanceConnectionNameResolver struct {
+type dnsInstanceConnectionNameResolver struct {
 	dnsResolver NetResolver
+	client      *sqladmin.Service
 }
 
 // Resolve returns the instance name, possibly using DNS. This will return an
 // instance.ConnName or an error if it was unable to resolve an instance name.
-func (r *DNSInstanceConnectionNameResolver) Resolve(ctx context.Context, icn string) (instanceName instance.ConnName, err error) {
+func (r *dnsInstanceConnectionNameResolver) Resolve(ctx context.Context, icn string) (instance.ConnName, error) {
+	// Check if the connection name is an Instance
 	cn, err := instance.ParseConnName(icn)
-	if err != nil {
-		// The connection name was not in project:region:instance format.
-		// Check that connection name is a valid DNS domain name.
-		if instance.IsValidDomain(icn) {
-			// Attempt to query a TXT record and see if it works instead.
-			cn, err = r.queryDNS(ctx, icn)
+	if err == nil {
+		return cn, nil
+	}
+
+	// Check that connection name is a valid DNS domain name.
+	if !instance.IsValidDomain(icn) {
+		return instance.ConnName{}, errtype.NewConfigError(
+			"invalid connection name, expected PROJECT:REGION:INSTANCE "+
+				"format or valid DNS domain name",
+			icn,
+		)
+	}
+
+	current := icn
+	var txtErr error
+	for depth := 0; depth < 10; depth++ {
+		// Check if it matches the well-known DNS pattern directly
+		if _, _, region, _, ok := parseInstanceDNSName(current); ok {
+			dnsNameWithDot := current
+			if !strings.HasSuffix(dnsNameWithDot, ".") {
+				dnsNameWithDot += "."
+			}
+			db, err := retry50x(ctx, func(ctx2 context.Context) (*sqladmin.ConnectSettings, error) {
+				if r.client == nil {
+					return nil, fmt.Errorf("dnsresolver sqladmin api client is not initialized")
+				}
+				return r.client.Connect.Resolve(
+					region, dnsNameWithDot).Context(ctx2).Do()
+			}, exponentialBackoff)
 			if err != nil {
 				return instance.ConnName{}, err
 			}
-		} else {
-			// Connection name is not valid instance connection name or domain name
-			err := errtype.NewConfigError(
-				"invalid connection name, expected PROJECT:REGION:INSTANCE "+
-					"format or valid DNS domain name",
-				icn,
-			)
-			return instance.ConnName{}, err
+
+			// Return ConnName using the resolved connection name from the API response
+			return instance.ParseConnNameWithDomainName(db.ConnectionName, icn)
 		}
+
+		// Attempt to query a TXT record
+		cn, txtErr = r.queryDNS(ctx, current)
+		if txtErr == nil {
+			return cn, nil
+		}
+
+		// If TXT lookup fails, check CNAME record
+		cnameVal, cnameErr := r.dnsResolver.LookupCNAME(ctx, current)
+		if cnameErr != nil {
+			// If CNAME lookup also fails, return the TXT error
+			return instance.ConnName{}, fmt.Errorf("no DNS record found for %q, lookup of %q. Lookup TXT error: %v Lookup CNAME error: %v", icn, current, txtErr, cnameErr)
+		}
+
+		// If cname record value == query, then the CNAME record is not found, return error.
+		cnameVal = strings.TrimSuffix(cnameVal, ".")
+		if cnameVal == current {
+			return instance.ConnName{}, fmt.Errorf("no DNS record found for %q, lookup of %q. Lookup TXT error: %v Lookup CNAME record not found", icn, current, txtErr)
+		}
+		// If the cname record value is not a valud domain name, return error.
+		if !instance.IsValidDomain(cnameVal) {
+			return instance.ConnName{}, fmt.Errorf("invalid format for CNAME record for %q, lookup of %q", icn, current)
+		}
+
+		current = cnameVal
 	}
 
-	return cn, nil
+	return instance.ConnName{}, fmt.Errorf("cname lookup limit exceeded (max 10) for %q", icn)
 }
 
 // queryDNS attempts to resolve a TXT record for the domain name.
@@ -97,7 +148,7 @@ func (r *DNSInstanceConnectionNameResolver) Resolve(ctx context.Context, icn str
 //   - The domain name resolves to 2 or more DNS record - return first valid
 //     record when sorted by priority: lowest value first, then by target:
 //     alphabetically.
-func (r *DNSInstanceConnectionNameResolver) queryDNS(ctx context.Context, domainName string) (instance.ConnName, error) {
+func (r *dnsInstanceConnectionNameResolver) queryDNS(ctx context.Context, domainName string) (instance.ConnName, error) {
 	// Attempt to query the TXT records.
 	// This could return a partial error where both err != nil && len(records) > 0.
 	records, err := r.dnsResolver.LookupTXT(ctx, domainName)
@@ -132,4 +183,54 @@ func (r *DNSInstanceConnectionNameResolver) queryDNS(ctx context.Context, domain
 
 	// No records were found, return an error.
 	return instance.ConnName{}, fmt.Errorf("no valid TXT records found for %q", domainName)
+}
+
+// parseInstanceDNSName parses a DNS name into its constituent parts.
+// Instance DNS names follow this template:
+// {instance-dns-label}.{project-dns-label}.{cloud-region}.{dns-suffix}
+// Suffix is one of: sql.goog, sql-psa.goog, sql-psc.goog (with optional trailing dot).
+// This returns ok == false when the region is "global"
+func parseInstanceDNSName(dnsName string) (instanceLabel, projectLabel, region, suffix string, ok bool) {
+	dnsName = strings.TrimSuffix(dnsName, ".")
+	dnsName = strings.ToLower(dnsName)
+
+	parts := strings.Split(dnsName, ".")
+	if len(parts) != 5 {
+		return "", "", "", "", false
+	}
+
+	if parts[4] != "goog" {
+		return "", "", "", "", false
+	}
+
+	suffixType := parts[3]
+	if suffixType != "sql" && suffixType != "sql-psa" && suffixType != "sql-psc" {
+		return "", "", "", "", false
+	}
+
+	instanceLabel = parts[0]
+	projectLabel = parts[1]
+	region = parts[2]
+	suffix = suffixType + ".goog"
+
+	// Validate region != "global". "global" is used for redirect to write endpoint DNS
+	if region == "global" {
+		return "", "", "", "", false
+	}
+
+	// Validate labels
+	if len(instanceLabel) != 12 {
+		return "", "", "", "", false
+	}
+	for _, c := range instanceLabel {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return "", "", "", "", false
+		}
+	}
+
+	if !strings.Contains(region, "-") {
+		return "", "", "", "", false
+	}
+
+	return instanceLabel, projectLabel, region, suffix, true
 }

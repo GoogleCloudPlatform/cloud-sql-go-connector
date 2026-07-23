@@ -176,7 +176,7 @@ function test() {
   get_golang_tool 'go-junit-report' 'jstemmer/go-junit-report' 'github.com/jstemmer/go-junit-report/v2'
   mkdir -p test-results
 
-  go test -v -race -cover -short -json \
+  go test -v -race -cover -short -json "$@" \
     | .tools/go-junit-report -iocopy -parser gojson -out test-results/unit.xml \
           | jq -j 'select(.Output) | .Output'
 }
