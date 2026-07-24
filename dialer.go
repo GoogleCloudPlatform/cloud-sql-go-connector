@@ -539,7 +539,9 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	attrs.CacheHit = cacheHit
 	if err != nil {
 		attrs.DialStatus = tel.ConnectError
+		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
 		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+		mr.RecordOpenConnectionCount(ctx, attrs)
 		endInfo(err)
 		return nil, err
 	}
@@ -547,7 +549,9 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	if err != nil {
 		d.removeCached(ctx, cn, c, err)
 		attrs.DialStatus = tel.ConnectError
+		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
 		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+		mr.RecordOpenConnectionCount(ctx, attrs)
 		endInfo(err)
 		return nil, err
 	}
@@ -566,6 +570,10 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		ci, err = c.ConnectionInfo(ctx)
 		if err != nil {
 			d.removeCached(ctx, cn, c, err)
+			attrs.DialStatus = tel.ConnectError
+			attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+			mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+			mr.RecordOpenConnectionCount(ctx, attrs)
 			return nil, err
 		}
 	}
@@ -577,6 +585,10 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	addr, err := ci.Addr(cfg.connectionType)
 	if err != nil {
 		d.removeCached(ctx, cn, c, err)
+		attrs.DialStatus = tel.ConnectError
+		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+		mr.RecordOpenConnectionCount(ctx, attrs)
 		return nil, err
 	}
 
@@ -613,14 +625,24 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		// refresh the instance info in case it caused the connection failure
 		c.ForceRefresh()
 		attrs.DialStatus = tel.ConnectError
+		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
 		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+		mr.RecordOpenConnectionCount(ctx, attrs)
 		return nil, errtype.NewDialError("failed to dial", cn.String(), err)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
+			attrs.DialStatus = tel.ConnectError
+			attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+			mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+			mr.RecordOpenConnectionCount(ctx, attrs)
 			return nil, errtype.NewDialError("failed to set keep-alive", cn.String(), err)
 		}
 		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
+			attrs.DialStatus = tel.ConnectError
+			attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+			mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+			mr.RecordOpenConnectionCount(ctx, attrs)
 			return nil, errtype.NewDialError("failed to set keep-alive period", cn.String(), err)
 		}
 	}
@@ -635,7 +657,9 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		d.removeCached(ctx, cn, c, err)
 		_ = tlsConn.Close() // best effort close attempt
 		attrs.DialStatus = tel.ConnectError
+		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
 		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+		mr.RecordOpenConnectionCount(ctx, attrs)
 		return nil, errtype.NewDialError("handshake failed", cn.String(), err)
 	}
 
@@ -648,18 +672,24 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	}
 
 	latency := time.Since(startTime).Milliseconds()
+	openTime := time.Now()
 	n := c.openConnsCount.Add(1)
 	trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
 	trace.RecordDialLatency(ctx, cn.String(), d.dialerID, latency)
 	attrs.DialStatus = tel.ConnectSuccess
+	attrs.ConnectionPart = ""
+	attrs.AttemptStatus = tel.ConnectSuccess
 	mr.RecordOpenConnection(ctx, attrs)
 	mr.RecordConnectLatencies(ctx, attrs, latency)
+	mr.RecordOpenConnectionCount(ctx, attrs)
 
 	closeFunc := func() {
+		durationSec := time.Since(openTime).Seconds()
 		n := c.openConnsCount.Add(^uint64(0)) // c.openConnsCount = c.openConnsCount - 1
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
 		mr.RecordClosedConnection(context.Background(), attrs)
 		mr.RecordClosedConnectionCount(context.Background(), attrs)
+		mr.RecordConnectionDuration(context.Background(), attrs, durationSec)
 	}
 	errFunc := func(err error) {
 		// io.EOF occurs when the server closes the connection. This is safe to
