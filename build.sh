@@ -111,12 +111,34 @@ EOF
   done
 }
 
+# Helper to perform authenticated curl requests to GitHub API if token is present
+function gh_curl() {
+  local auth_header=()
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    auth_header=(-H "Authorization: Bearer $GITHUB_TOKEN")
+  elif [[ -n "${GH_TOKEN:-}" ]]; then
+    auth_header=(-H "Authorization: Bearer $GH_TOKEN")
+  fi
+  curl -s "${auth_header[@]}" "$@"
+}
+
 # Download the protoc tool if it's not already installed.
 function get_protoc() {
   # Find the latest version of protoc
-  protoc_version=$(curl -s "https://api.github.com/repos/protocolbuffers/protobuf/releases/latest" | jq -r '.tag_name' | sed 's/v//')
-  proto_go_version=$(curl -s "https://api.github.com/repos/protocolbuffers/protobuf-go/releases/latest" | jq -r '.tag_name' | sed 's/v//')
-  proto_grpc_go_version=$(curl -s "https://api.github.com/repos/grpc/grpc-go/releases" | jq -r '.[].tag_name' | grep cmd/protoc-gen-go-grpc | sed 's|cmd/protoc-gen-go-grpc/v||' | head -n1)
+  protoc_version=$(gh_curl "https://api.github.com/repos/protocolbuffers/protobuf/releases/latest" | jq -r 'if type=="object" and .tag_name then .tag_name else empty end' 2>/dev/null | sed 's/v//' || true)
+  if [[ -z "$protoc_version" ]]; then
+    protoc_version="35.1"
+  fi
+
+  proto_go_version=$(gh_curl "https://api.github.com/repos/protocolbuffers/protobuf-go/releases/latest" | jq -r 'if type=="object" and .tag_name then .tag_name else empty end' 2>/dev/null | sed 's/v//' || true)
+  if [[ -z "$proto_go_version" ]]; then
+    proto_go_version="1.36.11"
+  fi
+
+  proto_grpc_go_version=$(gh_curl "https://api.github.com/repos/grpc/grpc-go/releases" | jq -r 'if type=="array" then .[].tag_name else empty end' 2>/dev/null | grep cmd/protoc-gen-go-grpc | sed 's|cmd/protoc-gen-go-grpc/v||' | head -n1 || true)
+  if [[ -z "$proto_grpc_go_version" ]]; then
+    proto_grpc_go_version="1.6.2"
+  fi
 
   mkdir -p "$SCRIPT_DIR/.tools"
   versioned_cmd="$SCRIPT_DIR/.tools/protoc-$protoc_version"
@@ -207,8 +229,10 @@ function get_golang_tool() {
   github_repo="$2"
   package="$3"
   set -x
-  # Download goimports tool
-  version=$(curl -s "https://api.github.com/repos/$github_repo/tags" | jq -r '.[].name' | head -n 1)
+  version=$(gh_curl "https://api.github.com/repos/$github_repo/tags" | jq -r 'if type=="array" then .[0].name else empty end' 2>/dev/null || true)
+  if [[ -z "$version" || "$version" == "null" ]]; then
+    version="latest"
+  fi
   mkdir -p "$SCRIPT_DIR/.tools"
   cmd="$SCRIPT_DIR/.tools/$name"
   versioned_cmd="$SCRIPT_DIR/.tools/$name-$version"
