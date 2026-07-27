@@ -16,12 +16,15 @@ package cloudsqlconn
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/debug"
+	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
+	"google.golang.org/api/googleapi"
 )
 
 // monitoredCache is a wrapper around a connectionInfoCache that tracks the
@@ -58,7 +61,7 @@ func newMonitoredCache(
 		logger:              logger,
 		connectionInfoCache: cache,
 	}
-	if cn.HasDomainName() {
+	if cn.HasDomainName() && !instance.IsInstanceDNSName(cn.DomainName()) {
 		c.domainNameTicker = time.NewTicker(failoverPeriod)
 		go func() {
 			dnCheckCtx, cancelFn := context.WithCancel(context.Background())
@@ -130,11 +133,16 @@ func (c *monitoredCache) checkDomainName(ctx context.Context) {
 	}
 	newCn, err := c.resolver.Resolve(ctx, c.cn.DomainName())
 	if err != nil {
-		// The domain name could not be resolved.
-		c.logger.Debugf(ctx, "domain name %s for instance %s did not resolve, "+
-			"closing all connections: %v",
-			c.cn.DomainName(), c.cn.Name(), err)
-		c.Close()
+		if isNonTransient(err) {
+			c.logger.Debugf(ctx, "domain name %s for instance %s failed with non-transient error, "+
+				"closing all connections: %v",
+				c.cn.DomainName(), c.cn.Name(), err)
+			c.Close()
+		} else {
+			c.logger.Debugf(ctx, "domain name %s did not resolve (transient error), keeping connections: %v",
+				c.cn.DomainName(), err)
+		}
+		return
 	}
 	if newCn != c.cn {
 		// The instance changed.
@@ -144,4 +152,21 @@ func (c *monitoredCache) checkDomainName(ctx context.Context) {
 		c.Close()
 	}
 
+}
+
+func isNonTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	var confErr *errtype.ConfigError
+	if errors.As(err, &confErr) {
+		return true
+	}
+	var apiErr *googleapi.Error
+	if errors.As(err, &apiErr) {
+		if apiErr.Code == 403 || apiErr.Code == 404 {
+			return true
+		}
+	}
+	return false
 }
