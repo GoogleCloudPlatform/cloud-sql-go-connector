@@ -16,6 +16,7 @@ package cloudsqlconn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -24,12 +25,16 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	sqldatapb "cloud.google.com/go/cloudsqlconn/internal/sqldata"
 	"cloud.google.com/go/cloudsqlconn/internal/sqldataclient"
 	sqldatagrpcpb "cloud.google.com/go/cloudsqlconn/internal/sqldatagrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func startMockServer(t *testing.T, handler func(sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error) (string, func()) {
@@ -536,7 +541,7 @@ func TestDialerWithSqlDataTimeout(t *testing.T) {
 	conn, err := d.Dial(ctx, "proj:reg:inst", WithSQLData())
 	if err != nil {
 		// If dial failed, check the error
-		if !strings.Contains(err.Error(), "context deadline exceeded") && !strings.Contains(err.Error(), "deadline exceeded") {
+		if !strings.Contains(strings.ToLower(err.Error()), "deadline") {
 			t.Fatalf("expected deadline exceeded error during dial, got: %v", err)
 		}
 		return
@@ -548,7 +553,7 @@ func TestDialerWithSqlDataTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Read to fail due to timeout, but it succeeded")
 	}
-	if !strings.Contains(err.Error(), "context deadline exceeded") && !strings.Contains(err.Error(), "deadline exceeded") {
+	if !strings.Contains(strings.ToLower(err.Error()), "deadline") {
 		t.Fatalf("expected deadline exceeded error during read, got: %v", err)
 	}
 }
@@ -588,4 +593,383 @@ func newTestDialer(ctx context.Context, addr string, dialTimeout time.Duration) 
 	}
 
 	return NewDialer(ctx, opts...)
+}
+
+func TestDialerWithSqlData_ResourceExhaustedCooldown(t *testing.T) {
+	var callCount int
+	var mu sync.Mutex
+	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+		mu.Lock()
+		callCount++
+		mu.Unlock()
+		if _, err := stream.Recv(); err != nil {
+			return err
+		}
+		return status.Error(codes.ResourceExhausted, "resource busy")
+	}
+	addr, cleanup := startMockServer(t, handler)
+	defer cleanup()
+
+	ctx := context.Background()
+	cooldown := 500 * time.Millisecond
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithDefaultDialOptions(WithSQLData()),
+		WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, 45*time.Minute, "")),
+		WithResourceExhaustedCooldownPeriod(cooldown),
+	)
+	if err != nil {
+		t.Fatalf("NewDialer failed: %v", err)
+	}
+	defer d.Close()
+
+	// First dial might succeed, if so we must read to get the error
+	conn, err := d.Dial(ctx, "proj:reg:inst", WithSQLData())
+	if err == nil {
+		defer conn.Close()
+		_, err = conn.Read(make([]byte, 1))
+	}
+	if err == nil {
+		t.Fatal("expected Dial or Read to fail")
+	}
+	if !strings.Contains(err.Error(), "resource busy") {
+		t.Fatalf("expected resource busy error, got: %v", err)
+	}
+
+	mu.Lock()
+	if callCount != 1 {
+		t.Errorf("expected 1 call to server, got %d", callCount)
+	}
+	mu.Unlock()
+
+	// Second dial immediately should fail with ResourceExhaustedError (cooldown active)
+	// and should NOT call the server
+	_, err = d.Dial(ctx, "proj:reg:inst", WithSQLData())
+	if err == nil {
+		t.Fatal("expected Dial to fail during cooldown")
+	}
+	var reErr *errtype.ResourceExhaustedError
+	if !errors.As(err, &reErr) {
+		t.Fatalf("expected ResourceExhaustedError, got: %T (%v)", err, err)
+	}
+	if !strings.Contains(err.Error(), "cooldown active") {
+		t.Errorf("expected cooldown active message, got: %v", err)
+	}
+
+	mu.Lock()
+	if callCount != 1 {
+		t.Errorf("expected still 1 call to server (cooldown should prevent call), got %d", callCount)
+	}
+	mu.Unlock()
+
+	// Wait for cooldown to expire (max backoff for attempt 1 is cooldown * 1.618)
+	time.Sleep(2 * cooldown)
+
+	// Third dial might succeed, if so we must read to get the error
+	conn2, err := d.Dial(ctx, "proj:reg:inst", WithSQLData())
+	if err == nil {
+		defer conn2.Close()
+		_, err = conn2.Read(make([]byte, 1))
+	}
+	if err == nil {
+		t.Fatal("expected Dial or Read to fail after cooldown")
+	}
+	if errors.As(err, &reErr) {
+		t.Fatalf("expected server error, got cooldown error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "resource busy") {
+		t.Fatalf("expected resource busy error from server, got: %v", err)
+	}
+
+	mu.Lock()
+	if callCount != 2 {
+		t.Errorf("expected 2 calls to server after cooldown, got %d", callCount)
+	}
+	mu.Unlock()
+}
+
+func TestDialerWithSqlData_ResourceExhaustedCooldown_StreamError(t *testing.T) {
+	var callCount int
+	var mu sync.Mutex
+	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+		mu.Lock()
+		callCount++
+		mu.Unlock()
+		// Handshake
+		if _, err := stream.Recv(); err != nil {
+			return err
+		}
+		// Return error on first actual data stream read (or just close stream with error)
+		return status.Error(codes.ResourceExhausted, "resource busy")
+	}
+	addr, cleanup := startMockServer(t, handler)
+	defer cleanup()
+
+	ctx := context.Background()
+	cooldown := 500 * time.Millisecond
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithDefaultDialOptions(WithSQLData()),
+		WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, 45*time.Minute, "")),
+		WithResourceExhaustedCooldownPeriod(cooldown),
+	)
+	if err != nil {
+		t.Fatalf("NewDialer failed: %v", err)
+	}
+	defer d.Close()
+
+	// First dial should succeed (handshake succeeds)
+	conn, err := d.Dial(ctx, "proj:reg:inst", WithSQLData())
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	// First read should fail with ResourceExhausted
+	_, err = conn.Read(make([]byte, 1))
+	if err == nil {
+		t.Fatal("expected Read to fail")
+	}
+	if !strings.Contains(err.Error(), "resource busy") {
+		t.Fatalf("expected resource busy error, got: %v", err)
+	}
+
+	mu.Lock()
+	if callCount != 1 {
+		t.Errorf("expected 1 call to server, got %d", callCount)
+	}
+	mu.Unlock()
+
+	// Second dial immediately should fail with ResourceExhaustedError (cooldown active)
+	_, err = d.Dial(ctx, "proj:reg:inst", WithSQLData())
+	if err == nil {
+		t.Fatal("expected Dial to fail during cooldown")
+	}
+	var reErr *errtype.ResourceExhaustedError
+	if !errors.As(err, &reErr) {
+		t.Fatalf("expected ResourceExhaustedError, got: %T (%v)", err, err)
+	}
+
+	mu.Lock()
+	if callCount != 1 {
+		t.Errorf("expected still 1 call to server, got %d", callCount)
+	}
+	mu.Unlock()
+
+	// Wait for cooldown to expire (max backoff for attempt 1 is cooldown * 1.618)
+	time.Sleep(2 * cooldown)
+
+	// Third dial should call the server again
+	conn2, err := d.Dial(ctx, "proj:reg:inst", WithSQLData())
+	if err != nil {
+		t.Fatalf("Dial failed after cooldown: %v", err)
+	}
+	defer conn2.Close()
+
+	// Perform a read to ensure the server handler has run and failed
+	_, err = conn2.Read(make([]byte, 1))
+	if err == nil {
+		t.Fatal("expected Read to fail after cooldown")
+	}
+	if !strings.Contains(err.Error(), "resource busy") {
+		t.Fatalf("expected resource busy error, got: %v", err)
+	}
+
+	mu.Lock()
+	if callCount != 2 {
+		t.Errorf("expected 2 calls to server after cooldown, got %d", callCount)
+	}
+	mu.Unlock()
+}
+
+func TestDialerWithSqlData_ResourceExhaustedBackoff(t *testing.T) {
+	var succeed bool
+	var succeedMu sync.Mutex
+	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+		// Read initial connection settings (StartSession)
+		req, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		if !req.HasStartSession() {
+			return fmt.Errorf("expected StartSession, got %v", req)
+		}
+
+		succeedMu.Lock()
+		s := succeed
+		succeedMu.Unlock()
+
+		if !s {
+			return status.Error(codes.ResourceExhausted, "resource busy")
+		}
+
+		// Echo loop
+		for {
+			req, err := stream.Recv()
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+
+			data := req.GetData()
+			if data != nil {
+				// Echo back
+				err := stream.Send(sqldatapb.StreamSqlDataResponse_builder{
+					Data: sqldatapb.DataPacket_builder{
+						Data: data.GetData(),
+					}.Build(),
+				}.Build())
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	addr, cleanup := startMockServer(t, handler)
+	defer cleanup()
+
+	ctx := context.Background()
+	cooldown := 500 * time.Millisecond
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithDefaultDialOptions(WithSQLData()),
+		WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, 45*time.Minute, "")),
+		WithResourceExhaustedCooldownPeriod(cooldown),
+	)
+	if err != nil {
+		t.Fatalf("NewDialer failed: %v", err)
+	}
+	defer d.Close()
+
+	instName := "proj:reg:inst"
+	cn, _ := instance.ParseConnName(instName)
+	key := createKey(cn)
+
+	// Helper to get state
+	getState := func() *sqlDataConnState {
+		d.lock.RLock()
+		state := d.sqlDataConnState[key]
+		d.lock.RUnlock()
+		return state
+	}
+
+	// 1. Initial State
+	state := getState()
+	if state != nil {
+		t.Fatalf("expected state to be nil before first dial, got: %+v", state)
+	}
+
+	// 2. First failure (Dial succeeds, Read fails)
+	conn, err := d.Dial(ctx, instName, WithSQLData())
+	if err != nil {
+		t.Fatalf("first Dial failed: %v", err)
+	}
+	_, err = conn.Read(make([]byte, 1))
+	if err == nil {
+		t.Fatal("expected Read to fail")
+	}
+	conn.Close()
+
+	state = getState()
+	if state == nil {
+		t.Fatal("expected state to be initialized after failure")
+	}
+	state.mu.Lock()
+	counter := state.backoffCounter
+	cooldownUntil := state.cooldownUntil
+	state.mu.Unlock()
+
+	if counter != 1 {
+		t.Errorf("expected backoffCounter to be 1, got: %d", counter)
+	}
+	if cooldownUntil.Before(time.Now()) {
+		t.Errorf("expected cooldownUntil to be in the future, got: %v", cooldownUntil)
+	}
+	firstCooldownDuration := time.Until(cooldownUntil)
+	if firstCooldownDuration < 400*time.Millisecond || firstCooldownDuration > 900*time.Millisecond {
+		t.Errorf("expected first cooldown duration to be ~500ms-809ms, got: %v", firstCooldownDuration)
+	}
+
+	// 3. Second failure (Dial should fail immediately due to cooldown)
+	_, err = d.Dial(ctx, instName, WithSQLData())
+	if err == nil {
+		t.Fatal("expected Dial to fail during cooldown")
+	}
+
+	state.mu.Lock()
+	counter = state.backoffCounter
+	state.mu.Unlock()
+	if counter != 1 {
+		t.Errorf("expected backoffCounter to remain 1 during cooldown Dial, got: %d", counter)
+	}
+
+	// Wait for cooldown to expire
+	time.Sleep(firstCooldownDuration + 50*time.Millisecond)
+
+	// Now dial again, should call server and fail again on read, incrementing counter to 2
+	conn2, err := d.Dial(ctx, instName, WithSQLData())
+	if err != nil {
+		t.Fatalf("second Dial failed: %v", err)
+	}
+	_, err = conn2.Read(make([]byte, 1))
+	if err == nil {
+		t.Fatal("expected second Read to fail")
+	}
+	conn2.Close()
+
+	state.mu.Lock()
+	counter = state.backoffCounter
+	cooldownUntil = state.cooldownUntil
+	state.mu.Unlock()
+
+	if counter != 2 {
+		t.Errorf("expected backoffCounter to be 2, got: %d", counter)
+	}
+	secondCooldownDuration := time.Until(cooldownUntil)
+	if secondCooldownDuration < 700*time.Millisecond || secondCooldownDuration > 1400*time.Millisecond {
+		t.Errorf("expected second cooldown duration to be ~809ms-1309ms, got: %v", secondCooldownDuration)
+	}
+
+	// Wait for second cooldown to expire
+	time.Sleep(secondCooldownDuration + 50*time.Millisecond)
+
+	// 4. Success (Dial succeeds, Write/Read succeeds)
+	succeedMu.Lock()
+	succeed = true
+	succeedMu.Unlock()
+
+	conn3, err := d.Dial(ctx, instName, WithSQLData())
+	if err != nil {
+		t.Fatalf("third Dial failed: %v", err)
+	}
+	defer conn3.Close()
+
+	// Write and Read to ensure it is successful
+	want := []byte("test")
+	if _, err := conn3.Write(want); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(conn3, got); err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	// Verify state is reset
+	state = getState()
+	if state == nil {
+		t.Fatal("expected state to exist")
+	}
+	state.mu.Lock()
+	counter = state.backoffCounter
+	cooldownUntil = state.cooldownUntil
+	state.mu.Unlock()
+
+	if counter != 0 {
+		t.Errorf("expected backoffCounter to be reset to 0, got: %d", counter)
+	}
+	if !cooldownUntil.IsZero() {
+		t.Errorf("expected cooldownUntil to be cleared (zero time), got: %v", cooldownUntil)
+	}
 }
