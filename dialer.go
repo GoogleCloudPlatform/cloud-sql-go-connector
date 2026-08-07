@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	mathrand "math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -150,15 +152,23 @@ func (c *dialerConfig) getClientUniverseDomain() string {
 	return defaultUniverseDomain
 }
 
+type sqlDataConnState struct {
+	mu             sync.Mutex
+	allowed        bool
+	cooldownUntil  time.Time
+	lastErr        error
+	backoffCounter int
+}
+
 // A Dialer is used to create connections to Cloud SQL instances.
 //
 // Use NewDialer to initialize a Dialer.
 type Dialer struct {
-	lock               sync.RWMutex
-	cache              map[cacheKey]*monitoredCache
-	sqlDataConnAllowed map[cacheKey]bool
-	keyGenerator       *keyGenerator
-	refreshTimeout     time.Duration
+	lock             sync.RWMutex
+	cache            map[cacheKey]*monitoredCache
+	sqlDataConnState map[cacheKey]*sqlDataConnState
+	keyGenerator     *keyGenerator
+	refreshTimeout   time.Duration
 	// closed reports if the dialer has been closed.
 	closed chan struct{}
 
@@ -198,8 +208,9 @@ type Dialer struct {
 
 	sqlDataDialer sqldataclient.Dialer
 
-	tokenProvider   auth.TokenProvider
-	sqlDataEndpoint string
+	tokenProvider                   auth.TokenProvider
+	sqlDataEndpoint                 string
+	resourceExhaustedCooldownPeriod time.Duration
 }
 
 var (
@@ -218,14 +229,15 @@ func (nullLogger) Debugf(_ context.Context, _ string, _ ...interface{}) {}
 // RSA keypair is generated will be faster.
 func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	cfg := &dialerConfig{
-		refreshTimeout:       cloudsql.RefreshTimeout,
-		dialFunc:             proxy.Dial,
-		logger:               nullLogger{},
-		useragents:           []string{userAgent},
-		failoverPeriod:       cloudsql.FailoverPeriod,
-		dnsResolver:          net.DefaultResolver,
-		sqlDataEndpoint:      "sqladmin.googleapis.com",
-		sqlDataStreamTimeout: 2 * time.Hour,
+		refreshTimeout:                  cloudsql.RefreshTimeout,
+		dialFunc:                        proxy.Dial,
+		logger:                          nullLogger{},
+		useragents:                      []string{userAgent},
+		failoverPeriod:                  cloudsql.FailoverPeriod,
+		dnsResolver:                     net.DefaultResolver,
+		sqlDataEndpoint:                 "sqladmin.googleapis.com",
+		sqlDataStreamTimeout:            2 * time.Hour,
+		resourceExhaustedCooldownPeriod: 5 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -337,25 +349,26 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 
 	d := &Dialer{
-		closed:                   make(chan struct{}),
-		sqlDataConnAllowed:       make(map[cacheKey]bool),
-		cache:                    make(map[cacheKey]*monitoredCache),
-		lazyRefresh:              cfg.lazyRefresh,
-		keyGenerator:             g,
-		refreshTimeout:           cfg.refreshTimeout,
-		sqladmin:                 client,
-		logger:                   cfg.logger,
-		defaultDialConfig:        dc,
-		dialerID:                 uuid.New().String(),
-		iamTokenProvider:         cfg.iamLoginTokenProvider,
-		dialFunc:                 cfg.dialFunc,
-		dnsResolver:              cfg.dnsResolver,
-		resolver:                 r,
-		failoverPeriod:           cfg.failoverPeriod,
-		metadataExchangeDisabled: cfg.metadataExchangeDisabled,
-		tokenProvider:            tp,
-		sqlDataEndpoint:          cfg.sqlDataEndpoint,
-		sqlDataDialer:            sqlDataDialer,
+		closed:                          make(chan struct{}),
+		sqlDataConnState:                make(map[cacheKey]*sqlDataConnState),
+		cache:                           make(map[cacheKey]*monitoredCache),
+		lazyRefresh:                     cfg.lazyRefresh,
+		keyGenerator:                    g,
+		refreshTimeout:                  cfg.refreshTimeout,
+		sqladmin:                        client,
+		logger:                          cfg.logger,
+		defaultDialConfig:               dc,
+		dialerID:                        uuid.New().String(),
+		iamTokenProvider:                cfg.iamLoginTokenProvider,
+		dialFunc:                        cfg.dialFunc,
+		dnsResolver:                     cfg.dnsResolver,
+		resolver:                        r,
+		failoverPeriod:                  cfg.failoverPeriod,
+		metadataExchangeDisabled:        cfg.metadataExchangeDisabled,
+		tokenProvider:                   tp,
+		sqlDataEndpoint:                 cfg.sqlDataEndpoint,
+		sqlDataDialer:                   sqlDataDialer,
+		resourceExhaustedCooldownPeriod: cfg.resourceExhaustedCooldownPeriod,
 	}
 
 	return d, nil
@@ -406,13 +419,31 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	if cfg.connectionType == cloudsql.SQLData {
 		key := createKey(cn)
 		d.lock.RLock()
-		allowed, connInCache := d.sqlDataConnAllowed[key]
+		state, ok := d.sqlDataConnState[key]
 		d.lock.RUnlock()
-		// if the cache an entry, and the cache entry says sqlDataService is not allowed
-		if connInCache && !allowed {
-			// fall back to AutoIP
+		if !ok {
+			d.lock.Lock()
+			state, ok = d.sqlDataConnState[key]
+			if !ok {
+				state = &sqlDataConnState{allowed: true}
+				d.sqlDataConnState[key] = state
+			}
+			d.lock.Unlock()
+		}
+
+		state.mu.Lock()
+		if !state.allowed {
+			state.mu.Unlock()
 			cfg.connectionType = cloudsql.AutoIP
 		} else {
+			cooldownUntil := state.cooldownUntil
+			lastErr := state.lastErr
+			state.mu.Unlock()
+
+			if time.Now().Before(cooldownUntil) {
+				return nil, errtype.NewResourceExhaustedError("cooldown active", cn.String(), lastErr)
+			}
+
 			// Attempt to connect SqlDataService
 			sdcConn, sdcErr := d.connectSQLDataService(ctx, cn, cfg, startTime)
 			if sdcErr == nil {
@@ -436,18 +467,57 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 
 // connectSQLDataService dials a connection through the SqlDataService.
 func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time) (net.Conn, error) {
+	key := createKey(cn)
+	onResourceExhausted := func(err error) {
+		d.lock.RLock()
+		state, ok := d.sqlDataConnState[key]
+		d.lock.RUnlock()
+		if !ok {
+			return
+		}
+		state.mu.Lock()
+		// Maximum backup counter is 5.
+		if state.backoffCounter < 5 {
+			state.backoffCounter++
+		}
+		backoff := cooldownBackoff(d.resourceExhaustedCooldownPeriod, state.backoffCounter)
+		state.cooldownUntil = time.Now().Add(backoff)
+		state.lastErr = err
+		state.mu.Unlock()
+	}
+
+	onSuccess := func() {
+		d.lock.RLock()
+		state, ok := d.sqlDataConnState[key]
+		d.lock.RUnlock()
+		if !ok {
+			return
+		}
+		state.mu.Lock()
+		state.backoffCounter = 0
+		state.cooldownUntil = time.Time{}
+		state.mu.Unlock()
+	}
+
 	conn, err := d.sqlDataDialer.ConnectSQLDataService(ctx, cn)
 	if err != nil {
+		if isResourceExhaustedError(err) {
+			onResourceExhausted(err)
+		}
 		return nil, err
 	}
 
 	// This creates a fallback connection using AutoIP, and marks the connection
 	// as permanently needing to fallback to AutoIP
 	fb := func() (net.Conn, error) {
-		key := createKey(cn)
-		d.lock.Lock()
-		d.sqlDataConnAllowed[key] = false
-		d.lock.Unlock()
+		d.lock.RLock()
+		state, ok := d.sqlDataConnState[key]
+		d.lock.RUnlock()
+		if ok {
+			state.mu.Lock()
+			state.allowed = false
+			state.mu.Unlock()
+		}
 		cfg.connectionType = cloudsql.AutoIP
 		return d.connectInstanceIP(ctx, cn, cfg, startTime)
 	}
@@ -455,7 +525,12 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 	// Assuming the connection is successful if Recv doesn't return an error
 	// immediately. The first message might not contain data, so we don't pass
 	// any initialData.
-	return newFallbackConn(conn, isSQLDataUnsupportedError, fb), nil
+	fc := newFallbackConn(conn, isSQLDataUnsupportedError, fb)
+	return &resourceExhaustedTrackingConn{
+		Conn:                fc,
+		onResourceExhausted: onResourceExhausted,
+		onSuccess:           onSuccess,
+	}, nil
 }
 
 // connectInstanceIP dials the IP address of the instance using a normal net.Conn.
@@ -959,4 +1034,50 @@ func isPreconditionFailed(err error) bool {
 		return s.Code() == codes.FailedPrecondition
 	}
 	return false
+}
+
+func isResourceExhaustedError(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.ResourceExhausted
+	}
+	return false
+}
+
+type resourceExhaustedTrackingConn struct {
+	net.Conn
+	onResourceExhausted func(error)
+	onSuccess           func()
+	firstReadDone       bool
+	mu                  sync.Mutex
+}
+
+func (c *resourceExhaustedTrackingConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if err == nil {
+		c.mu.Lock()
+		if !c.firstReadDone {
+			c.firstReadDone = true
+			c.mu.Unlock()
+			c.onSuccess()
+		} else {
+			c.mu.Unlock()
+		}
+	} else if isResourceExhaustedError(err) {
+		c.onResourceExhausted(err)
+	}
+	return n, err
+}
+
+func (c *resourceExhaustedTrackingConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	if err != nil && isResourceExhaustedError(err) {
+		c.onResourceExhausted(err)
+	}
+	return n, err
+}
+
+func cooldownBackoff(base time.Duration, attempt int) time.Duration {
+	const multi = 1.618
+	exp := float64(attempt-1) + mathrand.Float64()
+	return time.Duration(float64(base) * math.Pow(multi, exp))
 }
