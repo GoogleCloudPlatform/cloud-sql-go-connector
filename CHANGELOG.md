@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.24.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.23.0...v1.24.0) (2026-08-07)
+
+
+### Features
+
+* implement cooldown on ResourceExhausted errors ([#1141](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1141)) ([5de0cf4](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/5de0cf4e848173a30212ad7b582780b4e513e3c3))
+
+
+### Bug Fixes
+
+* Address code review comments on PSC DNS error handling ([#1140](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1140)) ([57703a5](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/57703a50d85390a2fe36c51929b85397d1b03fa0))
+
 ## [1.23.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.22.1...v1.23.0) (2026-07-23)
 
 
