@@ -88,7 +88,7 @@ func (r *dnsInstanceConnectionNameResolver) Resolve(ctx context.Context, icn str
 	var txtErr error
 	for depth := 0; depth < 10; depth++ {
 		// Check if it matches the well-known DNS pattern directly
-		if _, _, region, _, ok := parseInstanceDNSName(current); ok {
+		if _, _, region, _, ok := instance.ParseInstanceDNSName(current); ok {
 			dnsNameWithDot := current
 			if !strings.HasSuffix(dnsNameWithDot, ".") {
 				dnsNameWithDot += "."
@@ -134,7 +134,7 @@ func (r *dnsInstanceConnectionNameResolver) Resolve(ctx context.Context, icn str
 		current = cnameVal
 	}
 
-	return instance.ConnName{}, fmt.Errorf("cname lookup limit exceeded (max 10) for %q", icn)
+	return instance.ConnName{}, errtype.NewConfigError(fmt.Sprintf("cname lookup limit exceeded (max 10) for %q", icn), icn)
 }
 
 // queryDNS attempts to resolve a TXT record for the domain name.
@@ -183,54 +183,4 @@ func (r *dnsInstanceConnectionNameResolver) queryDNS(ctx context.Context, domain
 
 	// No records were found, return an error.
 	return instance.ConnName{}, fmt.Errorf("no valid TXT records found for %q", domainName)
-}
-
-// parseInstanceDNSName parses a DNS name into its constituent parts.
-// Instance DNS names follow this template:
-// {instance-dns-label}.{project-dns-label}.{cloud-region}.{dns-suffix}
-// Suffix is one of: sql.goog, sql-psa.goog, sql-psc.goog (with optional trailing dot).
-// This returns ok == false when the region is "global"
-func parseInstanceDNSName(dnsName string) (instanceLabel, projectLabel, region, suffix string, ok bool) {
-	dnsName = strings.TrimSuffix(dnsName, ".")
-	dnsName = strings.ToLower(dnsName)
-
-	parts := strings.Split(dnsName, ".")
-	if len(parts) != 5 {
-		return "", "", "", "", false
-	}
-
-	if parts[4] != "goog" {
-		return "", "", "", "", false
-	}
-
-	suffixType := parts[3]
-	if suffixType != "sql" && suffixType != "sql-psa" && suffixType != "sql-psc" {
-		return "", "", "", "", false
-	}
-
-	instanceLabel = parts[0]
-	projectLabel = parts[1]
-	region = parts[2]
-	suffix = suffixType + ".goog"
-
-	// Validate region != "global". "global" is used for redirect to write endpoint DNS
-	if region == "global" {
-		return "", "", "", "", false
-	}
-
-	// Validate labels
-	if len(instanceLabel) != 12 {
-		return "", "", "", "", false
-	}
-	for _, c := range instanceLabel {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-			return "", "", "", "", false
-		}
-	}
-
-	if !strings.Contains(region, "-") {
-		return "", "", "", "", false
-	}
-
-	return instanceLabel, projectLabel, region, suffix, true
 }
