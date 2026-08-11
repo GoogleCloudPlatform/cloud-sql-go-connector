@@ -28,16 +28,15 @@ import (
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
-	sqldatapb "cloud.google.com/go/cloudsqlconn/internal/sqldata"
 	"cloud.google.com/go/cloudsqlconn/internal/sqldataclient"
-	sqldatagrpcpb "cloud.google.com/go/cloudsqlconn/internal/sqldatagrpc"
+	sqlpb "cloud.google.com/go/sql/apiv1beta4/sqlpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
-func startMockServer(t *testing.T, handler func(sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error) (string, func()) {
+func startMockServer(t *testing.T, handler func(sqlpb.SqlDataService_StreamSqlDataServer) error) (string, func()) {
 	lis, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		t.Fatalf("failed to listen: %v", err)
@@ -49,7 +48,7 @@ func startMockServer(t *testing.T, handler func(sqldatagrpcpb.SqlDataService_Str
 	fakeServer := &mock.FakeSQLDataServiceServer{
 		OnStreamSQLData: handler,
 	}
-	sqldatagrpcpb.RegisterSqlDataServiceServer(s, fakeServer)
+	sqlpb.RegisterSqlDataServiceServer(s, fakeServer)
 	go func() {
 		_ = s.Serve(lis)
 	}()
@@ -57,13 +56,13 @@ func startMockServer(t *testing.T, handler func(sqldatagrpcpb.SqlDataService_Str
 }
 
 func TestDialerWithSqlData(t *testing.T) {
-	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
 		// Read initial connection settings
 		req, err := stream.Recv()
 		if err != nil {
 			return err
 		}
-		if !req.HasStartSession() {
+		if req.GetStartSession() == nil {
 			return fmt.Errorf("expected StartSession, got %v", req)
 		}
 		// Echo loop
@@ -79,11 +78,13 @@ func TestDialerWithSqlData(t *testing.T) {
 			data := req.GetData()
 			if data != nil {
 				// Echo back
-				err := stream.Send(sqldatapb.StreamSqlDataResponse_builder{
-					Data: sqldatapb.DataPacket_builder{
-						Data: data.GetData(),
-					}.Build(),
-				}.Build())
+				err := stream.Send(&sqlpb.StreamSqlDataResponse{
+					Message: &sqlpb.StreamSqlDataResponse_Data{
+						Data: &sqlpb.DataPacket{
+							Data: data.GetData(),
+						},
+					},
+				})
 				if err != nil {
 					return err
 				}
@@ -132,7 +133,7 @@ func TestDialerWithSqlData(t *testing.T) {
 }
 
 func TestDialerWithSqlData_ConnectionFailure(t *testing.T) {
-	handler := func(_ sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(_ sqlpb.SqlDataService_StreamSqlDataServer) error {
 		return fmt.Errorf("simulated connection failure")
 	}
 	addr, cleanup := startMockServer(t, handler)
@@ -159,7 +160,7 @@ func TestDialerWithSqlData_ConnectionFailure(t *testing.T) {
 }
 
 func TestDialerWithSqlData_StreamInterruption(t *testing.T) {
-	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
 		// Handshake
 		if _, err := stream.Recv(); err != nil {
 			return err
@@ -171,11 +172,13 @@ func TestDialerWithSqlData_StreamInterruption(t *testing.T) {
 		}
 		// Echo it back
 		if data := req.GetData(); data != nil {
-			err := stream.Send(sqldatapb.StreamSqlDataResponse_builder{
-				Data: sqldatapb.DataPacket_builder{
-					Data: data.GetData(),
-				}.Build(),
-			}.Build())
+			err := stream.Send(&sqlpb.StreamSqlDataResponse{
+				Message: &sqlpb.StreamSqlDataResponse_Data{
+					Data: &sqlpb.DataPacket{
+						Data: data.GetData(),
+					},
+				},
+			})
 
 			if err != nil {
 				return err
@@ -219,7 +222,7 @@ func TestDialerWithSqlData_StreamInterruption(t *testing.T) {
 }
 
 func TestDialerWithSqlData_ClientCancellation(t *testing.T) {
-	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
 		for {
 			req, err := stream.Recv()
 			if err == io.EOF {
@@ -230,11 +233,13 @@ func TestDialerWithSqlData_ClientCancellation(t *testing.T) {
 			}
 			data := req.GetData()
 			if data != nil {
-				err := stream.Send(sqldatapb.StreamSqlDataResponse_builder{
-					Data: sqldatapb.DataPacket_builder{
-						Data: data.GetData(),
-					}.Build(),
-				}.Build())
+				err := stream.Send(&sqlpb.StreamSqlDataResponse{
+					Message: &sqlpb.StreamSqlDataResponse_Data{
+						Data: &sqlpb.DataPacket{
+							Data: data.GetData(),
+						},
+					},
+				})
 				if err != nil {
 					return err
 				}
@@ -276,7 +281,7 @@ func TestDialerWithSqlData_ClientCancellation(t *testing.T) {
 }
 
 func TestDialerWithSqlData_ConcurrentConnections(t *testing.T) {
-	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
 		for {
 			req, err := stream.Recv()
 			if err == io.EOF {
@@ -287,11 +292,13 @@ func TestDialerWithSqlData_ConcurrentConnections(t *testing.T) {
 			}
 			data := req.GetData()
 			if data != nil {
-				err := stream.Send(sqldatapb.StreamSqlDataResponse_builder{
-					Data: sqldatapb.DataPacket_builder{
-						Data: data.GetData(),
-					}.Build(),
-				}.Build())
+				err := stream.Send(&sqlpb.StreamSqlDataResponse{
+					Message: &sqlpb.StreamSqlDataResponse_Data{
+						Data: &sqlpb.DataPacket{
+							Data: data.GetData(),
+						},
+					},
+				})
 				if err != nil {
 					return err
 				}
@@ -340,7 +347,7 @@ func TestDialerWithSqlData_ConcurrentConnections(t *testing.T) {
 
 func TestDialerWithSqlData_HeadersAndSequence(t *testing.T) {
 	errCh := make(chan error, 1)
-	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
 		defer close(errCh)
 		md, ok := metadata.FromIncomingContext(stream.Context())
 		if !ok {
@@ -456,7 +463,7 @@ func TestDialerWithSqlData_LargePayload(t *testing.T) {
 		largeData[i] = byte(i % 256)
 	}
 
-	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
 		// Handshake
 		if _, err := stream.Recv(); err != nil {
 			return err
@@ -472,11 +479,13 @@ func TestDialerWithSqlData_LargePayload(t *testing.T) {
 			}
 			data := req.GetData()
 			if data != nil {
-				err := stream.Send(sqldatapb.StreamSqlDataResponse_builder{
-					Data: sqldatapb.DataPacket_builder{
-						Data: data.GetData(),
-					}.Build(),
-				}.Build())
+				err := stream.Send(&sqlpb.StreamSqlDataResponse{
+					Message: &sqlpb.StreamSqlDataResponse_Data{
+						Data: &sqlpb.DataPacket{
+							Data: data.GetData(),
+						},
+					},
+				})
 				if err != nil {
 					return err
 				}
@@ -519,7 +528,7 @@ func TestDialerWithSqlData_LargePayload(t *testing.T) {
 
 func TestDialerWithSqlDataTimeout(t *testing.T) {
 	// A handler that blocks on Recv, so it never completes.
-	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
 		_, _ = stream.Recv() // read initial settings
 		time.Sleep(5 * time.Second)
 		return nil
@@ -559,7 +568,7 @@ func TestDialerWithSqlDataTimeout(t *testing.T) {
 }
 
 func TestDialerWithSqlData_DialCancellation(t *testing.T) {
-	handler := func(_ sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(_ sqlpb.SqlDataService_StreamSqlDataServer) error {
 		return nil
 	}
 	addr, cleanup := startMockServer(t, handler)
@@ -598,7 +607,7 @@ func newTestDialer(ctx context.Context, addr string, dialTimeout time.Duration) 
 func TestDialerWithSqlData_ResourceExhaustedCooldown(t *testing.T) {
 	var callCount int
 	var mu sync.Mutex
-	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
 		mu.Lock()
 		callCount++
 		mu.Unlock()
@@ -691,7 +700,7 @@ func TestDialerWithSqlData_ResourceExhaustedCooldown(t *testing.T) {
 func TestDialerWithSqlData_ResourceExhaustedCooldown_StreamError(t *testing.T) {
 	var callCount int
 	var mu sync.Mutex
-	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
 		mu.Lock()
 		callCount++
 		mu.Unlock()
@@ -785,13 +794,13 @@ func TestDialerWithSqlData_ResourceExhaustedCooldown_StreamError(t *testing.T) {
 func TestDialerWithSqlData_ResourceExhaustedBackoff(t *testing.T) {
 	var succeed bool
 	var succeedMu sync.Mutex
-	handler := func(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
 		// Read initial connection settings (StartSession)
 		req, err := stream.Recv()
 		if err != nil {
 			return err
 		}
-		if !req.HasStartSession() {
+		if req.GetStartSession() == nil {
 			return fmt.Errorf("expected StartSession, got %v", req)
 		}
 
@@ -816,11 +825,13 @@ func TestDialerWithSqlData_ResourceExhaustedBackoff(t *testing.T) {
 			data := req.GetData()
 			if data != nil {
 				// Echo back
-				err := stream.Send(sqldatapb.StreamSqlDataResponse_builder{
-					Data: sqldatapb.DataPacket_builder{
-						Data: data.GetData(),
-					}.Build(),
-				}.Build())
+				err := stream.Send(&sqlpb.StreamSqlDataResponse{
+					Message: &sqlpb.StreamSqlDataResponse_Data{
+						Data: &sqlpb.DataPacket{
+							Data: data.GetData(),
+						},
+					},
+				})
 				if err != nil {
 					return err
 				}

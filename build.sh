@@ -35,10 +35,7 @@ function clean() {
 function generate() {
   set -x
   get_protoc
-  generated_pb_go=("internal/mdx/metadata_exchange.pb.go"
-    "internal/sqldatagrpc/sql_data_service_grpc.pb.go"
-    "internal/sqldata/sql_data_service.pb.go"
-    )
+  generated_pb_go=("internal/mdx/metadata_exchange.pb.go")
 
   # Delete the old pb files
   for pbFile in  "${generated_pb_go[@]}" ; do
@@ -54,38 +51,6 @@ function generate() {
     --go_opt=default_api_level=API_OPAQUE \
     internal/mdx/metadata_exchange.proto \
     --go_opt=paths=source_relative
-
-  # Generate SqlDataService proto messages
-  PATH="${SCRIPT_DIR}/.tools/protoc/bin:$PATH" "${SCRIPT_DIR}/.tools/protoc/bin/protoc" \
-    -I "${SCRIPT_DIR}/internal/google_apis" \
-    --proto_path=. \
-    --go_out=. \
-    --go_opt=paths=source_relative \
-    internal/sqldata/sql_data_service.proto
-
-  # Generate SqlDataService proto grpc stubs
-  PATH="${SCRIPT_DIR}/.tools/protoc/bin:$PATH" "${SCRIPT_DIR}/.tools/protoc/bin/protoc" \
-    -I "${SCRIPT_DIR}/internal/google_apis" \
-    --proto_path=. \
-    --go-grpc_out=.\
-    --go-grpc_opt=paths=source_relative, \
-    internal/sqldata/sql_data_service.proto
-
-
-  # Move the sql_data_service_grpc.pb.go into a separate directory
-  # so that it may be referenced from a different package
-  dest_file="$SCRIPT_DIR/internal/sqldatagrpc/sql_data_service_grpc.pb.go"
-  mkdir -p "$SCRIPT_DIR/internal/sqldatagrpc"
-  mv "$SCRIPT_DIR/internal/sqldata/sql_data_service_grpc.pb.go" "$dest_file"
-  if [[ $(uname) == "Darwin" ]] ; then
-    sed -i '' 's|^package sqldata$|package sqldatagrpc\nimport sqldatapb "cloud.google.com/go/cloudsqlconn/internal/sqldata"|' "$dest_file"
-    sed -i '' 's/StreamSqlDataRequest/sqldatapb.StreamSqlDataRequest/' "$dest_file"
-    sed -i '' 's/StreamSqlDataResponse/sqldatapb.StreamSqlDataResponse/' "$dest_file"
-  else
-    sed -i 's|^package sqldata$|package sqldatagrpc\nimport sqldatapb "cloud.google.com/go/cloudsqlconn/internal/sqldata"|' "$dest_file"
-    sed -i 's/StreamSqlDataRequest/sqldatapb.StreamSqlDataRequest/' "$dest_file"
-    sed -i 's/StreamSqlDataResponse/sqldatapb.StreamSqlDataResponse/' "$dest_file"
-  fi
 
   # Add the copyright header to the generated protobuf file
   for pbFile in  "${generated_pb_go[@]}" ; do
