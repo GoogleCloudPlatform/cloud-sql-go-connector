@@ -124,3 +124,43 @@ func TestMonitoredCache_Close(t *testing.T) {
 	}
 
 }
+
+func TestMonitoredCache_OptimizationForImmutableNames(t *testing.T) {
+	tcs := []struct {
+		desc       string
+		domainName string
+		wantTicker bool
+	}{
+		{
+			desc:       "custom DNS name",
+			domainName: "db.example.com",
+			wantTicker: true,
+		},
+		{
+			desc:       "immutable instance DNS name",
+			domainName: "0123456789ab.fedcba9876543.us-central1.sql-psc.goog",
+			wantTicker: false,
+		},
+		{
+			desc:       "mutable global instance DNS name",
+			domainName: "0123456789ab.fedcba9876543.global.sql-psc.goog",
+			wantTicker: true,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			cn, err := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", tc.domainName)
+			if err != nil {
+				t.Fatalf("ParseConnNameWithDomainName failed: %v", err)
+			}
+			c := newMonitoredCache(&spyConnectionInfoCache{}, cn, 10*time.Millisecond, nil, &testLog{t: t})
+			defer c.Close()
+
+			hasTicker := c.domainNameTicker != nil
+			if hasTicker != tc.wantTicker {
+				t.Errorf("got ticker = %v, want %v", hasTicker, tc.wantTicker)
+			}
+		})
+	}
+}

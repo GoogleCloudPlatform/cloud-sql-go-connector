@@ -121,6 +121,34 @@ func TestDNSInstanceNameResolver_Lookup_Success_DirectPSC(t *testing.T) {
 	}
 }
 
+func TestDNSInstanceNameResolver_Lookup_Success_DirectPSC_Permissive(t *testing.T) {
+	// non-hex hash, short labels, region without hyphen
+	dnsName := "g123.p.uscentral.sql-psc.goog"
+	realConnName := "my-project:uscentral:my-instance"
+	want, _ := instance.ParseConnNameWithDomainName(realConnName, dnsName)
+
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.ResolveConnectSettingsSuccess(dnsName+".", "uscentral", realConnName, 1),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	r := dnsInstanceConnectionNameResolver{
+		dnsResolver: &fakeResolver{},
+		client:      client,
+	}
+	got, err := r.Resolve(context.Background(), dnsName)
+	if err != nil {
+		t.Fatal("got error", err)
+	}
+	if got != want {
+		t.Fatal("Got", got, "Want", want)
+	}
+}
+
 func TestDNSInstanceNameResolver_Lookup_Success_CnamePSC(t *testing.T) {
 	dnsName := "db.example.com"
 	cnameTarget := "0123456789ab.fedcba9876543.europe-north2.sql-psc.goog"
@@ -155,11 +183,12 @@ func TestDNSInstanceNameResolver_Lookup_Success_CnamePSC(t *testing.T) {
 
 func TestDNSInstanceNameResolver_Lookup_Fails_InvalidPattern(t *testing.T) {
 	invalidDNSNames := []string{
-		"0123456789ab.fedcba9876543.europe-north2.sql-psc.goog.com", // wrong suffix domain
-		"0123456789ag.fedcba9876543.europe-north2.sql-psc.goog",     // non-hex char 'g' in hash
-		"0123456789a.fedcba9876543.europe-north2.sql-psc.goog",      // wrong hash length (11)
-		"0123456789abc.fedcba9876543.europe-north2.sql-psc.goog",    // wrong hash length (13)
-		"0123456789ab.fedcba9876543.europenorth2.sql-psc.goog",      // region has no hyphen
+		"0123456789ab.fedcba9876543.europe-north2.sql-psc.goog.com",   // wrong suffix domain
+		"0123456789ab.fedcba9876543.europe-north2.sql-psc.goog.other", // wrong suffix
+		"0123456789ab..europe-north2.sql-psc.goog",                    // empty project label
+		"-abc.def.ghi.sql.goog",                                       // label starts with hyphen
+		"abc-.def.ghi.sql.goog",                                       // label ends with hyphen
+		"abc.def.ghi.sql-other.goog",                                  // invalid suffix type
 	}
 
 	for _, dnsName := range invalidDNSNames {

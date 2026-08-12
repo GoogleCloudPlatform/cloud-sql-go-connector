@@ -31,8 +31,7 @@ var (
 	// The domain name pattern in accordance with RFC 1035, RFC 1123 and RFC 2181.
 	domainNameRegex = regexp.MustCompile(`^(?:[_a-z0-9](?:[_a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?)?$`)
 
-	instanceDNSSuffixRegex = regexp.MustCompile(`\.sql(-[a-zA-Z0-9_]+)?\.goog\.?$`)
-	globalInstanceDNSRegex = regexp.MustCompile(`\.global\.sql(-[a-zA-Z0-9_]+)?\.goog\.?$`)
+	instanceDNSNamePattern = regexp.MustCompile(`^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])\.(sql|sql-psa|sql-psc)\.goog\.?$`)
 )
 
 // ConnName represents the "instance connection name", in the format
@@ -129,44 +128,17 @@ type ConnectionNameResolver interface {
 // Suffix is one of: sql.goog, sql-psa.goog, sql-psc.goog (with optional trailing dot).
 // This returns ok == false when the region is "global"
 func ParseInstanceDNSName(dnsName string) (instanceLabel, projectLabel, region, suffix string, ok bool) {
-	dnsName = strings.TrimSuffix(dnsName, ".")
 	dnsName = strings.ToLower(dnsName)
-
-	parts := strings.Split(dnsName, ".")
-	if len(parts) != 5 {
+	m := instanceDNSNamePattern.FindStringSubmatch(dnsName)
+	if m == nil {
 		return "", "", "", "", false
 	}
+	instanceLabel = m[1]
+	projectLabel = m[2]
+	region = m[3]
+	suffix = m[4] + ".goog"
 
-	if parts[4] != "goog" {
-		return "", "", "", "", false
-	}
-
-	suffixType := parts[3]
-	if suffixType != "sql" && suffixType != "sql-psa" && suffixType != "sql-psc" {
-		return "", "", "", "", false
-	}
-
-	instanceLabel = parts[0]
-	projectLabel = parts[1]
-	region = parts[2]
-	suffix = suffixType + ".goog"
-
-	// Validate region != "global". "global" is used for redirect to write endpoint DNS
 	if region == "global" {
-		return "", "", "", "", false
-	}
-
-	// Validate labels
-	if len(instanceLabel) != 12 {
-		return "", "", "", "", false
-	}
-	for _, c := range instanceLabel {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-			return "", "", "", "", false
-		}
-	}
-
-	if !strings.Contains(region, "-") {
 		return "", "", "", "", false
 	}
 
@@ -177,5 +149,9 @@ func ParseInstanceDNSName(dnsName string) (instanceLabel, projectLabel, region, 
 // Cloud SQL instance DNS name pattern.
 func IsInstanceDNSName(dnsName string) bool {
 	dnsName = strings.ToLower(dnsName)
-	return instanceDNSSuffixRegex.MatchString(dnsName) && !globalInstanceDNSRegex.MatchString(dnsName)
+	m := instanceDNSNamePattern.FindStringSubmatch(dnsName)
+	if m == nil {
+		return false
+	}
+	return m[3] != "global"
 }
