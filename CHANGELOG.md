@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.25.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.24.0...v1.25.0) (2026-08-13)
+
+
+### Features
+
+* replace local generated gRPC client with GAPIC client library ([#1145](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1145)) ([5203f19](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/5203f19f378c5297a0112bd654fbd842b7f98489))
+
+
+### Bug Fixes
+
+* Optimize DNS resolution logic ([#1143](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1143)) ([ca3c760](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/ca3c760bd6b2a0b6da4116355656276ba1d98084))
+
 ## [1.24.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.23.0...v1.24.0) (2026-08-07)
 
 
