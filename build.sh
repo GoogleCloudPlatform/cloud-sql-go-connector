@@ -113,10 +113,14 @@ EOF
 
 # Download the protoc tool if it's not already installed.
 function get_protoc() {
+  headers=()
+  if [[ -n "${GITHUB_TOKEN}" ]]; then
+    headers+=("-H" "Authorization: token ${GITHUB_TOKEN}")
+  fi
   # Find the latest version of protoc
-  protoc_version=$(curl -s "https://api.github.com/repos/protocolbuffers/protobuf/releases/latest" | jq -r '.tag_name' | sed 's/v//')
-  proto_go_version=$(curl -s "https://api.github.com/repos/protocolbuffers/protobuf-go/releases/latest" | jq -r '.tag_name' | sed 's/v//')
-  proto_grpc_go_version=$(curl -s "https://api.github.com/repos/grpc/grpc-go/releases" | jq -r '.[].tag_name' | grep cmd/protoc-gen-go-grpc | sed 's|cmd/protoc-gen-go-grpc/v||' | head -n1)
+  protoc_version=$(curl -s "${headers[@]}" "https://api.github.com/repos/protocolbuffers/protobuf/releases/latest" | jq -r '.tag_name' | sed 's/v//')
+  proto_go_version=$(curl -s "${headers[@]}" "https://api.github.com/repos/protocolbuffers/protobuf-go/releases/latest" | jq -r '.tag_name' | sed 's/v//')
+  proto_grpc_go_version=$(curl -s "${headers[@]}" "https://api.github.com/repos/grpc/grpc-go/releases" | jq -r '.[].tag_name' | grep cmd/protoc-gen-go-grpc | sed 's|cmd/protoc-gen-go-grpc/v||' | head -n1)
 
   mkdir -p "$SCRIPT_DIR/.tools"
   versioned_cmd="$SCRIPT_DIR/.tools/protoc-$protoc_version"
@@ -207,8 +211,13 @@ function get_golang_tool() {
   github_repo="$2"
   package="$3"
   set -x
+
+  headers=()
+  if [[ -n "${GITHUB_TOKEN}" ]]; then
+    headers+=("-H" "Authorization: token ${GITHUB_TOKEN}")
+  fi
   # Download goimports tool
-  version=$(curl -s "https://api.github.com/repos/$github_repo/tags" | jq -r '.[].name' | head -n 1)
+  version=$(curl -s "${headers[@]}" "https://api.github.com/repos/$github_repo/tags" | jq -r '.[].name' | head -n 1)
   mkdir -p "$SCRIPT_DIR/.tools"
   cmd="$SCRIPT_DIR/.tools/$name"
   versioned_cmd="$SCRIPT_DIR/.tools/$name-$version"

@@ -117,6 +117,7 @@ jobs:
           SQLSERVER_PASS: "${{ steps.secrets.outputs.SQLSERVER_PASS }}"
           SQLSERVER_DB: "${{ steps.secrets.outputs.SQLSERVER_DB }}"
           QUOTA_PROJECT: "${{ steps.secrets.outputs.QUOTA_PROJECT }}"
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
         shell: bash
         run: |
