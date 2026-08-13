@@ -18,20 +18,20 @@ import (
 	"fmt"
 	"io"
 
-	sqldatagrpcpb "cloud.google.com/go/cloudsqlconn/internal/sqldatagrpc"
+	sqlpb "cloud.google.com/go/sql/apiv1beta4/sqlpb"
 )
 
 // FakeSQLDataServiceServer is a mock implementation of the SqlDataService gRPC server.
 type FakeSQLDataServiceServer struct {
-	sqldatagrpcpb.UnimplementedSqlDataServiceServer
+	sqlpb.UnimplementedSqlDataServiceServer
 	// OnStreamSQLData is called when a stream is established.
 	// It gives the test control over the stream.
-	OnStreamSQLData func(sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error
+	OnStreamSQLData func(sqlpb.SqlDataService_StreamSqlDataServer) error
 }
 
 // StreamSqlData implements the gRPC service method.
 // revive:disable-next-line:var-naming
-func (s *FakeSQLDataServiceServer) StreamSqlData(stream sqldatagrpcpb.SqlDataService_StreamSqlDataServer) error {
+func (s *FakeSQLDataServiceServer) StreamSqlData(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
 	if s.OnStreamSQLData != nil {
 		return s.OnStreamSQLData(stream)
 	}
