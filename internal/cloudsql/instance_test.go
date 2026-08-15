@@ -289,6 +289,110 @@ func TestConnectInfoAutoIP(t *testing.T) {
 	}
 }
 
+func TestConnectInfoSQLDataFallbackIP(t *testing.T) {
+	tcs := []struct {
+		desc   string
+		ips    []mock.FakeCSQLInstanceOption
+		wantIP string
+	}{
+		{
+			desc: "when private, psc, and public are all enabled, prefer private",
+			ips: []mock.FakeCSQLInstanceOption{
+				mock.WithPublicIP("8.8.8.8"),
+				mock.WithPrivateIP("10.0.0.1"),
+				mock.WithPSC(true),
+				mock.WithDNS("abcde.12345.my-region.sql.goog"),
+			},
+			wantIP: "10.0.0.1",
+		},
+		{
+			desc: "when psc and public are enabled, prefer psc",
+			ips: []mock.FakeCSQLInstanceOption{
+				mock.WithPublicIP("8.8.8.8"),
+				mock.WithPSC(true),
+				mock.WithDNS("abcde.12345.my-region.sql.goog"),
+			},
+			wantIP: "abcde.12345.my-region.sql.goog",
+		},
+		{
+			desc: "when only public IP is enabled, choose public",
+			ips: []mock.FakeCSQLInstanceOption{
+				mock.WithPublicIP("8.8.8.8"),
+			},
+			wantIP: "8.8.8.8",
+		},
+		{
+			desc: "when only private IP is enabled, choose private",
+			ips: []mock.FakeCSQLInstanceOption{
+				mock.WithPrivateIP("10.0.0.1"),
+			},
+			wantIP: "10.0.0.1",
+		},
+		{
+			desc: "when only psc is enabled, choose psc",
+			ips: []mock.FakeCSQLInstanceOption{
+				mock.WithPSC(true),
+				mock.WithDNS("abcde.12345.my-region.sql.goog"),
+			},
+			wantIP: "abcde.12345.my-region.sql.goog",
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			var opts []mock.FakeCSQLInstanceOption
+			opts = append(opts, mock.WithNoIPAddrs())
+			opts = append(opts, tc.ips...)
+			inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", opts...)
+			client, cleanup, err := mock.NewSQLAdminService(
+				context.Background(),
+				mock.InstanceGetSuccess(inst, 1),
+				mock.CreateEphemeralSuccess(inst, 1),
+			)
+			if err != nil {
+				t.Fatalf("%s", err)
+			}
+			defer func() {
+				if cErr := cleanup(); cErr != nil {
+					t.Fatalf("%v", cErr)
+				}
+			}()
+
+			i := NewRefreshAheadCache(
+				testInstanceConnName(), nullLogger{}, client,
+				RSAKey, 30*time.Second, nil, "", false,
+			)
+
+			ci, err := i.ConnectionInfo(context.Background())
+			if err != nil {
+				t.Fatalf("failed to retrieve connect info: %v", err)
+			}
+
+			got, err := ci.Addr(SQLData)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.wantIP {
+				t.Fatalf(
+					"ConnectInfo Addr returned unexpected IP address, want = %v, got = %v",
+					tc.wantIP, got,
+				)
+			}
+
+			gotAddrs, err := ci.Addrs(SQLData)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(gotAddrs) == 0 || gotAddrs[0] != tc.wantIP {
+				t.Fatalf(
+					"ConnectInfo Addrs returned unexpected IP address, want = %v, got = %v",
+					tc.wantIP, gotAddrs,
+				)
+			}
+		})
+	}
+}
+
 func TestClose(t *testing.T) {
 	ctx := context.Background()
 

@@ -24,6 +24,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,11 +44,19 @@ var (
 	postgresCASConnName          = os.Getenv("POSTGRES_CAS_CONNECTION_NAME")              // "Cloud SQL Postgres CAS instance connection name, in the form of 'project:region:instance'.
 	postgresCustomerCASConnName  = os.Getenv("POSTGRES_CUSTOMER_CAS_CONNECTION_NAME")     // "Cloud SQL Postgres Customer CAS instance connection name, in the form of 'project:region:instance'.
 	postgresMCPConnName          = os.Getenv("POSTGRES_MCP_CONNECTION_NAME")              // "Cloud SQL Postgres MCP instance connection name, in the form of 'project:region:instance'.
+	postgresAIDEConnName         = os.Getenv("POSTGRES_AIDE_CONNECTION_NAME")             // "Cloud SQL Postgres AIDE instance connection name, in the form of 'project:region:instance'.
 	postgresUser                 = os.Getenv("POSTGRES_USER")                             // Name of database user.
 	postgresPass                 = os.Getenv("POSTGRES_PASS")                             // Password for the database user; be careful when entering a password on the command line (it may go into your terminal's history).
 	postgresCASPass              = os.Getenv("POSTGRES_CAS_PASS")                         // Password for the database user for CAS instances; be careful when entering a password on the command line (it may go into your terminal's history).
 	postgresMCPPass              = os.Getenv("POSTGRES_MCP_PASS")                         // Password for the database user for MCP instances; be careful when entering a password on the command line (it may go into your terminal's history).
 	postgresCustomerCASPass      = os.Getenv("POSTGRES_CUSTOMER_CAS_PASS")                // Password for the database user for customer CAS instances; be careful when entering a password on the command line (it may go into your terminal's history).
+	postgresAIDEUser             = os.Getenv("POSTGRES_AIDE_USER")                        // Name of database user for AIDE instance.
+	postgresAIDEPass             = os.Getenv("POSTGRES_AIDE_PASS")                        // Password for the database user for AIDE instance.
+	postgresAIDEDB               = os.Getenv("POSTGRES_AIDE_DB")                          // Name of the database to connect to for AIDE instance.
+	postgresFallbackConnName     = os.Getenv("POSTGRES_FALLBACK_CONNECTION_NAME")         // Cloud SQL Postgres Fallback instance connection name, in the form of 'project:region:instance'.
+	postgresFallbackUser         = os.Getenv("POSTGRES_FALLBACK_USER")                    // Name of database user for Fallback instance.
+	postgresFallbackPass         = os.Getenv("POSTGRES_FALLBACK_PASS")                    // Password for the database user for Fallback instance.
+	postgresFallbackDB           = os.Getenv("POSTGRES_FALLBACK_DB")                      // Name of the database to connect to for Fallback instance.
 	postgresDB                   = os.Getenv("POSTGRES_DB")                               // Name of the database to connect to.
 	postgresUserIAM              = os.Getenv("POSTGRES_USER_IAM")                         // Name of database IAM user.
 	project                      = os.Getenv("QUOTA_PROJECT")                             // Name of the Google Cloud Platform project to use for quota and billing.
@@ -58,6 +67,9 @@ var (
 func addIPTypeOptions(opts []cloudsqlconn.Option) []cloudsqlconn.Option {
 	if ipType == "private" {
 		return append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithPrivateIP()))
+	}
+	if ipType == "sqldata" {
+		return append(opts, cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithSQLData()))
 	}
 	return opts
 }
@@ -92,6 +104,34 @@ func requirePostgresVars(t *testing.T) {
 		t.Fatal("'POSTGRES_SAN_DOMAIN_NAME' env var not set")
 	case postgresSANInvalidDomainName:
 		t.Fatal("'POSTGRES_SAN_INVALID_DOMAIN_NAME' env var not set")
+	}
+}
+
+func requirePostgresAIDEVars(t *testing.T) {
+	t.Helper()
+	switch "" {
+	case postgresAIDEConnName:
+		t.Skip("'POSTGRES_AIDE_CONNECTION_NAME' env var not set, skipping AIDE test")
+	case postgresAIDEUser:
+		t.Skip("'POSTGRES_AIDE_USER' env var not set, skipping AIDE test")
+	case postgresAIDEPass:
+		t.Skip("'POSTGRES_AIDE_PASS' env var not set, skipping AIDE test")
+	case postgresAIDEDB:
+		t.Skip("'POSTGRES_AIDE_DB' env var not set, skipping AIDE test")
+	}
+}
+
+func requirePostgresFallbackVars(t *testing.T) {
+	t.Helper()
+	switch "" {
+	case postgresFallbackConnName:
+		t.Skip("'POSTGRES_FALLBACK_CONNECTION_NAME' env var not set, skipping Fallback test")
+	case postgresFallbackUser:
+		t.Skip("'POSTGRES_FALLBACK_USER' env var not set, skipping Fallback test")
+	case postgresFallbackPass:
+		t.Skip("'POSTGRES_FALLBACK_PASS' env var not set, skipping Fallback test")
+	case postgresFallbackDB:
+		t.Skip("'POSTGRES_FALLBACK_DB' env var not set, skipping Fallback test")
 	}
 }
 
@@ -197,6 +237,173 @@ func TestPostgresCASConnect(t *testing.T) {
 		t.Fatalf("QueryRow failed: %s", err)
 	}
 	t.Log(now)
+}
+
+type e2eTestLogger struct {
+	t *testing.T
+}
+
+func (l *e2eTestLogger) Debugf(f string, args ...interface{}) {
+	l.t.Logf(f, args...)
+}
+
+func TestPostgresSQLDataConnect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
+	requirePostgresAIDEVars(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Configure the driver to connect to the database
+	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresAIDEUser, postgresAIDEPass, postgresAIDEDB)
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("failed to parse pgx config: %v", err)
+	}
+
+	// Create a new dialer with SQLData option
+	d, err := cloudsqlconn.NewDialer(ctx,
+		cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithSQLData()),
+		cloudsqlconn.WithDebugLogger(&e2eTestLogger{t: t}),
+	)
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+	defer d.Close()
+
+	var connsMu sync.Mutex
+	var conns []net.Conn
+	cleanupConns := func() {
+		connsMu.Lock()
+		defer connsMu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		conns = nil
+	}
+	defer cleanupConns()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			cleanupConns()
+		case <-done:
+		}
+	}()
+
+	// Tell the driver to use the Cloud SQL Go Connector to create connections
+	// postgresAIDEConnName takes the form of 'project:region:instance'.
+	config.ConnConfig.DialFunc = func(dialCtx context.Context, _ string, _ string) (net.Conn, error) {
+		t.Logf("DialFunc called for %s", postgresAIDEConnName)
+		conn, err := d.Dial(dialCtx, postgresAIDEConnName)
+		if err != nil {
+			t.Logf("d.Dial returned error: %v", err)
+			return nil, err
+		}
+		t.Logf("d.Dial returned net.Conn successfully")
+		connsMu.Lock()
+		conns = append(conns, conn)
+		connsMu.Unlock()
+		return conn, nil
+	}
+
+	// Interact with the driver directly as you normally would
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("failed to create pool: %s", err)
+	}
+	defer pool.Close()
+
+	var now time.Time
+	err = pool.QueryRow(ctx, "SELECT NOW()").Scan(&now)
+	if err != nil {
+		t.Fatalf("QueryRow failed: %s", err)
+	}
+
+	t.Logf("Successfully executed query via SQLData: %v", now)
+}
+
+func TestPostgresSQLDataFallback(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration tests")
+	}
+	requirePostgresFallbackVars(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Configure the driver to connect to the database
+	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", postgresFallbackUser, postgresFallbackPass, postgresFallbackDB)
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("failed to parse pgx config: %v", err)
+	}
+
+	// Create a new dialer with SQLData option
+	d, err := cloudsqlconn.NewDialer(ctx,
+		cloudsqlconn.WithDefaultDialOptions(cloudsqlconn.WithSQLData()),
+		cloudsqlconn.WithDebugLogger(&e2eTestLogger{t: t}),
+	)
+	if err != nil {
+		t.Fatalf("failed to init Dialer: %v", err)
+	}
+	defer d.Close()
+
+	var connsMu sync.Mutex
+	var conns []net.Conn
+	cleanupConns := func() {
+		connsMu.Lock()
+		defer connsMu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		conns = nil
+	}
+	defer cleanupConns()
+
+	doneFallback := make(chan struct{})
+	defer close(doneFallback)
+	go func() {
+		select {
+		case <-ctx.Done():
+			cleanupConns()
+		case <-doneFallback:
+		}
+	}()
+
+	// Tell the driver to use the Cloud SQL Go Connector to create connections
+	// postgresFallbackConnName takes the form of 'project:region:instance'.
+	config.ConnConfig.DialFunc = func(dialCtx context.Context, _ string, _ string) (net.Conn, error) {
+		t.Logf("DialFunc called for %s", postgresFallbackConnName)
+		conn, err := d.Dial(dialCtx, postgresFallbackConnName)
+		if err != nil {
+			t.Logf("d.Dial returned error: %v", err)
+			return nil, err
+		}
+		t.Logf("d.Dial returned net.Conn successfully")
+		connsMu.Lock()
+		conns = append(conns, conn)
+		connsMu.Unlock()
+		return conn, nil
+	}
+
+	// Interact with the driver directly as you normally would
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("failed to create pool: %s", err)
+	}
+	defer pool.Close()
+
+	var now time.Time
+	err = pool.QueryRow(ctx, "SELECT NOW()").Scan(&now)
+	if err != nil {
+		t.Fatalf("QueryRow failed: %s", err)
+	}
+	t.Logf("Successfully executed query via SQLData fallback to public IP: %v", now)
 }
 
 func TestPostgresConnectWithQuotaProject(t *testing.T) {

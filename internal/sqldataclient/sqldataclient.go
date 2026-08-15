@@ -29,9 +29,7 @@ import (
 	sqlpb "cloud.google.com/go/sql/apiv1beta4/sqlpb"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
-	grpccreds "google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/credentials/oauth"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -103,32 +101,35 @@ func (d *GrpcDialer) initSQLDataClient(ctx context.Context) (*sqlgapic.SqlDataCl
 		return c, nil
 	}
 
-	var grpcOpts []grpc.DialOption
-	grpcOpts = append(grpcOpts,
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(100*1024*1024)),
-		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(100*1024*1024)),
+	var clientOpts []option.ClientOption
+	clientOpts = append(clientOpts,
+		option.WithGRPCDialOption(grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(100*1024*1024),
+			grpc.MaxCallSendMsgSize(100*1024*1024),
+		)),
 	)
 	if d.userAgent != "" {
-		grpcOpts = append(grpcOpts, grpc.WithUserAgent(d.userAgent))
+		clientOpts = append(clientOpts, option.WithUserAgent(d.userAgent))
+	}
+	if d.quotaProject != "" {
+		clientOpts = append(clientOpts, option.WithQuotaProject(d.quotaProject))
 	}
 	if d.useInsecure {
-		grpcOpts = append(grpcOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	} else {
-		ts := oauth2adapt.TokenSourceFromTokenProvider(d.tokenProvider)
-		grpcOpts = append(grpcOpts,
-			grpc.WithTransportCredentials(grpccreds.NewClientTLSFromCert(nil, "")),
-			grpc.WithPerRPCCredentials(oauth.TokenSource{TokenSource: ts}),
+		clientOpts = append(clientOpts,
+			option.WithoutAuthentication(),
+			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 		)
+	} else if d.tokenProvider != nil {
+		ts := oauth2adapt.TokenSourceFromTokenProvider(d.tokenProvider)
+		clientOpts = append(clientOpts, option.WithTokenSource(ts))
 	}
 
-	clientOpts := []option.ClientOption{
-		option.WithEndpoint(d.endpoint),
-	}
-	if d.useInsecure {
-		clientOpts = append(clientOpts, option.WithoutAuthentication())
-	}
-	for _, opt := range grpcOpts {
-		clientOpts = append(clientOpts, option.WithGRPCDialOption(opt))
+	if d.endpoint != "" {
+		endpoint := d.endpoint
+		if _, _, err := net.SplitHostPort(endpoint); err != nil {
+			endpoint = net.JoinHostPort(endpoint, "443")
+		}
+		clientOpts = append(clientOpts, option.WithEndpoint(endpoint))
 	}
 
 	c, err := sqlgapic.NewSqlDataClient(ctx, clientOpts...)
@@ -141,6 +142,10 @@ func (d *GrpcDialer) initSQLDataClient(ctx context.Context) (*sqlgapic.SqlDataCl
 
 // ConnectSQLDataService connects to the SqlDataService for the given connection name.
 func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.ConnName) (conn net.Conn, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	// ctx is the context with a 30 second timeout, which would allow the stream to connect.
 	// it should not be used as the context for the grpc stream call, which will run for
 	// more than the initial connection timeout.
@@ -166,7 +171,7 @@ func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.Conn
 	// routing_parameters: [ { field: "instance_id" }, { field: "location_id" } ]
 	instanceID := fmt.Sprintf("projects/%s/instances/%s", cn.Project(), cn.Name())
 	streamCtx = metadata.AppendToOutgoingContext(streamCtx,
-		"x-goog-request-params", fmt.Sprintf("instance_id=%s&location_id=locations/%s", instanceID, cn.Region()))
+		"x-goog-request-params", fmt.Sprintf("location_id=locations/%s&instance_id=%s", cn.Region(), instanceID))
 
 	// If quota-project cli flag is set, add the request header.
 	if d.quotaProject != "" {
@@ -202,13 +207,18 @@ func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.Conn
 		streamCancel()
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		if timeoutCancel != nil {
+			timeoutCancel()
+		}
+		streamCancel()
+		return nil, err
+	}
 	d.logger.Debugf(streamCtx, "Dialing via SqlDataService: %v", cn.Name())
 	return &streamConn{
 		stream:        stream,
 		timeoutCancel: timeoutCancel,
 		streamCancel:  streamCancel,
-		connName:      cn,
-		locationID:    fmt.Sprintf("locations/%s", cn.Region()),
 		logger:        d.logger,
 	}, nil
 }
@@ -218,8 +228,6 @@ type streamConn struct {
 	stream        sqlpb.SqlDataService_StreamSqlDataClient
 	timeoutCancel context.CancelFunc
 	streamCancel  context.CancelFunc
-	connName      instance.ConnName
-	locationID    string
 	readBuf       []byte
 	readOffset    int
 	logger        debug.ContextLogger
@@ -231,28 +239,33 @@ func (c *streamConn) Read(b []byte) (n int, err error) {
 		c.readOffset += n
 		return n, nil
 	}
-	// During read, ignore unknown messages. This will allow old clients to work correctly
-	// even if new clients introduce new messages.
-	msg, err := c.stream.Recv()
-	if err != nil {
-		// This could be io.EOF or a gRPC error
-		return 0, err
-	}
+	for {
+		msg, err := c.stream.Recv()
+		if err != nil {
+			// This could be io.EOF or a gRPC error
+			return 0, err
+		}
 
-	if msg.GetData() == nil {
-		// Ignore unknown messages, treat them as a 0 length read to avoid unnecessary blocking.
-		// The caller will retry the read if appropriate.
-		c.logger.Debugf(context.Background(), "Received unknown message %v", msg)
-		return 0, nil
+		if msg.GetData() == nil {
+			// Ignore unknown messages (e.g. SessionMetadata).
+			c.logger.Debugf(context.Background(), "Received unknown message %v", msg)
+			continue
+		}
+		c.readBuf = msg.GetData().GetData()
+		c.readOffset = 0
+		if len(c.readBuf) == 0 {
+			continue
+		}
+		n = copy(b, c.readBuf)
+		c.readOffset = n
+		return n, nil
 	}
-	c.readBuf = msg.GetData().GetData()
-	c.readOffset = 0
-	n = copy(b, c.readBuf)
-	c.readOffset = n
-	return n, nil
 }
 
 func (c *streamConn) Write(b []byte) (n int, err error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
 	err = c.stream.Send(&sqlpb.StreamSqlDataRequest{
 		Message: &sqlpb.StreamSqlDataRequest_Data{
 			Data: &sqlpb.DataPacket{
