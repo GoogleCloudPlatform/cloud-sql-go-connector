@@ -226,6 +226,15 @@ func (c ConnectionInfo) Addr(ipType string) (string, error) {
 			// Try Private second
 			addrs, ok = c.addrs[PrivateIP]
 		}
+	case SQLData:
+		// Fall back to direct IP in preference order: PRIVATE, PSC, PUBLIC
+		addrs, ok = c.addrs[PrivateIP]
+		if !ok || len(addrs) == 0 {
+			addrs, ok = c.addrs[PSC]
+		}
+		if !ok || len(addrs) == 0 {
+			addrs, ok = c.addrs[PublicIP]
+		}
 	default:
 		addrs, ok = c.addrs[ipType]
 	}
@@ -252,6 +261,15 @@ func (c ConnectionInfo) Addrs(ipType string) ([]string, error) {
 		if !ok || len(addrs) == 0 {
 			// Try Private second
 			addrs, ok = c.addrs[PrivateIP]
+		}
+	case SQLData:
+		// Fall back to direct IP in preference order: PRIVATE, PSC, PUBLIC
+		addrs, ok = c.addrs[PrivateIP]
+		if !ok || len(addrs) == 0 {
+			addrs, ok = c.addrs[PSC]
+		}
+		if !ok || len(addrs) == 0 {
+			addrs, ok = c.addrs[PublicIP]
 		}
 	default:
 		addrs, ok = c.addrs[ipType]

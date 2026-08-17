@@ -235,7 +235,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		useragents:                      []string{userAgent},
 		failoverPeriod:                  cloudsql.FailoverPeriod,
 		dnsResolver:                     net.DefaultResolver,
-		sqlDataEndpoint:                 "sqladmin.googleapis.com",
+		sqlDataEndpoint:                 "sqladmin.googleapis.com:443",
 		sqlDataStreamTimeout:            2 * time.Hour,
 		resourceExhaustedCooldownPeriod: 5 * time.Second,
 	}
@@ -434,7 +434,6 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		state.mu.Lock()
 		if !state.allowed {
 			state.mu.Unlock()
-			cfg.connectionType = cloudsql.AutoIP
 		} else {
 			cooldownUntil := state.cooldownUntil
 			lastErr := state.lastErr
@@ -455,10 +454,9 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 			if !isPreconditionFailed(sdcErr) {
 				return nil, sdcErr
 			}
-			// sdcErr is a PreconditionFailed error. Fall back to auto-ip
+			// sdcErr is a PreconditionFailed error. Fall back to direct IP connection.
 			// This is a streaming gRPC. The PreconditionFailed error usually occurs on the
 			// first read from the stream, not here.
-			cfg.connectionType = cloudsql.AutoIP
 		}
 	}
 
@@ -507,8 +505,8 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 		return nil, err
 	}
 
-	// This creates a fallback connection using AutoIP, and marks the connection
-	// as permanently needing to fallback to AutoIP
+	// This creates a fallback connection, and marks the connection
+	// as permanently needing to fallback to direct IP.
 	fb := func() (net.Conn, error) {
 		d.lock.RLock()
 		state, ok := d.sqlDataConnState[key]
@@ -518,7 +516,6 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 			state.allowed = false
 			state.mu.Unlock()
 		}
-		cfg.connectionType = cloudsql.AutoIP
 		return d.connectInstanceIP(ctx, cn, cfg, startTime)
 	}
 
