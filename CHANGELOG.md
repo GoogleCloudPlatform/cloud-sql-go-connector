@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.25.0...v1.25.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* Ensure that the SqlDataEndpoint includes the default port :443 ([#1148](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1148)) ([a399bd5](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/a399bd587f4fd1ade5586b39a52f0d6d26b1c77d))
+
 ## [1.25.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.24.0...v1.25.0) (2026-08-13)
 
 
