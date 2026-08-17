@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -108,6 +109,7 @@ type RefreshAheadCache struct {
 
 	mu              sync.RWMutex
 	useIAMAuthNDial bool
+	dialFunc        func(ctx context.Context, network, addr string) (net.Conn, error)
 	// cur represents the current refreshOperation that will be used to
 	// create connections. If a valid complete refreshOperation isn't
 	// available it's possible for cur to be equal to next.
@@ -122,6 +124,16 @@ type RefreshAheadCache struct {
 	cancel context.CancelFunc
 }
 
+// RefreshAheadOption configures a RefreshAheadCache.
+type RefreshAheadOption func(*RefreshAheadCache)
+
+// WithRefreshAheadDialFunc sets a custom dial function for the refresh probe.
+func WithRefreshAheadDialFunc(d func(ctx context.Context, network, addr string) (net.Conn, error)) RefreshAheadOption {
+	return func(r *RefreshAheadCache) {
+		r.dialFunc = d
+	}
+}
+
 // NewRefreshAheadCache initializes a new Instance given an instance connection name
 func NewRefreshAheadCache(
 	cn instance.ConnName,
@@ -132,6 +144,7 @@ func NewRefreshAheadCache(
 	tp auth.TokenProvider,
 	dialerID string,
 	useIAMAuthNDial bool,
+	opts ...RefreshAheadOption,
 ) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &RefreshAheadCache{
@@ -149,6 +162,9 @@ func NewRefreshAheadCache(
 		useIAMAuthNDial: useIAMAuthNDial,
 		ctx:             ctx,
 		cancel:          cancel,
+	}
+	for _, opt := range opts {
+		opt(i)
 	}
 	// For the initial refresh operation, set cur = next so that connection
 	// requests block until the first refresh is complete.
@@ -447,6 +463,16 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			r.result, r.err = i.r.ConnectionInfo(
 				ctx, i.connName, useIAMAuthN,
 			)
+			if r.err == nil && useIAMAuthN {
+				if probeErr := i.probeConnection(ctx, r.result); probeErr != nil {
+					i.logger.Debugf(
+						ctx,
+						"[%v] Proactive IAM token refresh probe encountered error: %v",
+						i.connName.String(),
+						probeErr,
+					)
+				}
+			}
 		}
 		switch r.err {
 		case nil:
@@ -511,4 +537,55 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		i.next = i.scheduleRefresh(t)
 	})
 	return r
+}
+
+const serverProxyPort = "3307"
+
+func (i *RefreshAheadCache) probeConnection(ctx context.Context, ci ConnectionInfo) error {
+	var targets []string
+	if ci.ConnectionName.HasDomainName() {
+		targets = []string{ci.ConnectionName.DomainName()}
+	} else {
+		for _, ipType := range []string{PSC, PrivateIP, PublicIP} {
+			if addrs, err := ci.Addrs(ipType); err == nil && len(addrs) > 0 {
+				targets = append(targets, addrs...)
+			}
+		}
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("no valid connection targets found for instance %v", ci.ConnectionName.String())
+	}
+
+	dial := i.dialFunc
+	if dial == nil {
+		var netDialer net.Dialer
+		dial = netDialer.DialContext
+	}
+
+	var (
+		conn    net.Conn
+		dialErr error
+	)
+	for _, target := range targets {
+		dialAddr := net.JoinHostPort(target, serverProxyPort)
+		i.logger.Debugf(ctx, "[%v] Probing IAM token refresh on %v", ci.ConnectionName.String(), dialAddr)
+		conn, dialErr = dial(ctx, "tcp", dialAddr)
+		if dialErr == nil {
+			break
+		}
+		i.logger.Debugf(ctx, "[%v] Probing IAM token refresh on %v failed: %v", ci.ConnectionName.String(), dialAddr, dialErr)
+	}
+	if dialErr != nil {
+		return fmt.Errorf("failed to dial probe connection: %w", dialErr)
+	}
+	defer conn.Close()
+
+	tlsConn := tls.Client(conn, ci.TLSConfig())
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		return fmt.Errorf("probe TLS handshake failed: %w", err)
+	}
+	_ = tlsConn.Close()
+
+	i.logger.Debugf(ctx, "[%v] Proactive IAM token refresh probe successful", ci.ConnectionName.String())
+	return nil
 }
