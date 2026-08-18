@@ -109,6 +109,7 @@ type RefreshAheadCache struct {
 
 	mu              sync.RWMutex
 	useIAMAuthNDial bool
+	ipType          string
 	dialFunc        func(ctx context.Context, network, addr string) (net.Conn, error)
 	// cur represents the current refreshOperation that will be used to
 	// create connections. If a valid complete refreshOperation isn't
@@ -131,6 +132,13 @@ type RefreshAheadOption func(*RefreshAheadCache)
 func WithRefreshAheadDialFunc(d func(ctx context.Context, network, addr string) (net.Conn, error)) RefreshAheadOption {
 	return func(r *RefreshAheadCache) {
 		r.dialFunc = d
+	}
+}
+
+// WithRefreshAheadIPType sets the IP type preference for the refresh probe.
+func WithRefreshAheadIPType(ipType string) RefreshAheadOption {
+	return func(r *RefreshAheadCache) {
+		r.ipType = ipType
 	}
 }
 
@@ -542,15 +550,22 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 const serverProxyPort = "3307"
 
 func (i *RefreshAheadCache) probeConnection(ctx context.Context, ci ConnectionInfo) error {
+	ctx, cancel := context.WithTimeout(ctx, i.refreshTimeout)
+	defer cancel()
+
 	var targets []string
 	if ci.ConnectionName.HasDomainName() {
 		targets = []string{ci.ConnectionName.DomainName()}
 	} else {
-		for _, ipType := range []string{PSC, PrivateIP, PublicIP} {
-			if addrs, err := ci.Addrs(ipType); err == nil && len(addrs) > 0 {
-				targets = append(targets, addrs...)
-			}
+		ipType := i.ipType
+		if ipType == "" {
+			ipType = AutoIP
 		}
+		addrs, err := ci.Addrs(ipType)
+		if err != nil {
+			return fmt.Errorf("no valid connection targets found for instance %v (ipType %v): %w", ci.ConnectionName.String(), ipType, err)
+		}
+		targets = addrs
 	}
 	if len(targets) == 0 {
 		return fmt.Errorf("no valid connection targets found for instance %v", ci.ConnectionName.String())
