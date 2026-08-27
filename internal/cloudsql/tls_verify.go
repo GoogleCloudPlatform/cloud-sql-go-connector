@@ -109,16 +109,15 @@ func verifyPeerCertificateFunc(
 		}
 
 		// The instance has a DNS name.
-		// First, verify the server hostname
+		// Check without trailing dot first
+		serverName = strings.TrimSuffix(serverName, ".")
 		serverNameErr = serverCert.VerifyHostname(serverName)
+
 		if serverNameErr != nil {
-			// In case the certificate's SAN or serverName has/lacks a trailing dot (e.g. CAS certificates)
-			if strings.HasSuffix(serverName, ".") {
-				serverNameErr = serverCert.VerifyHostname(strings.TrimSuffix(serverName, "."))
-			} else {
-				serverNameErr = serverCert.VerifyHostname(serverName + ".")
-			}
+			// If that failed, add the trailing dot and check again
+			serverNameErr = serverCert.VerifyHostname(serverName + ".")
 		}
+
 		if serverNameErr != nil {
 			// If that failed, verify the CN field.
 			cnErr := verifyCn(cn, serverCert)
