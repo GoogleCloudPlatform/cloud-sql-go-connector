@@ -1870,6 +1870,55 @@ func TestDialerPSCPSCFirst(t *testing.T) {
 	}
 }
 
+func TestDialerPSCAllFailuresReturned(t *testing.T) {
+	dnsPSC := "abcde.12345.us-central1.sql-psc.goog"
+	dnsReg := "abcde.12345.us-central1.sql.goog"
+
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+		mock.WithPSC(true),
+		mock.WithDNSMapping(dnsReg, "INSTANCE", "PRIVATE_SERVICE_CONNECT"),
+		mock.WithDNSMapping(dnsPSC, "INSTANCE", "PRIVATE_SERVICE_CONNECT"),
+	)
+
+	dialFunc := func(_ context.Context, _, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		if host == dnsPSC {
+			return nil, errors.New("PSC auto DNS failed")
+		}
+		if host == dnsReg {
+			return nil, errors.New("manual DNS failed")
+		}
+		return nil, fmt.Errorf("unexpected dial address: %s", addr)
+	}
+
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithDialFunc(dialFunc),
+		},
+	})
+
+	_, err := d.Dial(context.Background(), inst.String(), WithPSC())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "PSC auto DNS failed") {
+		t.Errorf("error %q does not contain error from first target", err.Error())
+	}
+	if !strings.Contains(err.Error(), "manual DNS failed") {
+		t.Errorf("error %q does not contain error from second target", err.Error())
+	}
+}
+
 type mockEmptyHostResolver struct {
 	mockNetResolver
 }

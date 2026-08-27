@@ -170,7 +170,9 @@ func fetchMetadata(
 	// name in the list may be used to validate the server TLS certificate.
 	// Fall back to legacy dns_name field if necessary.
 	var serverName string
-	if len(db.DnsNames) > 0 {
+	if len(ipAddrs[PSC]) > 0 {
+		serverName = ipAddrs[PSC][0]
+	} else if len(db.DnsNames) > 0 {
 		serverName = db.DnsNames[0].Name
 	}
 	if serverName == "" {
@@ -392,8 +394,10 @@ func supportsAutoIAMAuthN(version string) error {
 // that end with `.sql-psc.goog.` first.
 func sortPSCDNSNames(names []string) {
 	sort.SliceStable(names, func(i, j int) bool {
-		iIsPsc := strings.HasSuffix(names[i], ".sql-psc.goog")
-		jIsPsc := strings.HasSuffix(names[j], ".sql-psc.goog")
+		nameI := strings.TrimSuffix(strings.ToLower(names[i]), ".")
+		nameJ := strings.TrimSuffix(strings.ToLower(names[j]), ".")
+		iIsPsc := strings.HasSuffix(nameI, ".sql-psc.goog")
+		jIsPsc := strings.HasSuffix(nameJ, ".sql-psc.goog")
 		if iIsPsc && !jIsPsc {
 			return true // i comes first
 		}

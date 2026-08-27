@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"strings"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
@@ -108,8 +109,15 @@ func verifyPeerCertificateFunc(
 		}
 
 		// The instance has a DNS name.
-		// First, verify the server hostname
+		// Check without trailing dot first
+		serverName = strings.TrimSuffix(serverName, ".")
 		serverNameErr = serverCert.VerifyHostname(serverName)
+
+		if serverNameErr != nil {
+			// If that failed, add the trailing dot and check again
+			serverNameErr = serverCert.VerifyHostname(serverName + ".")
+		}
+
 		if serverNameErr != nil {
 			// If that failed, verify the CN field.
 			cnErr := verifyCn(cn, serverCert)
