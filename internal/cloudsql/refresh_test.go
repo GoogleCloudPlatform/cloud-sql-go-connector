@@ -560,4 +560,57 @@ func TestRefreshPSCAutoDNS(t *testing.T) {
 	if gotPSCDNS[1] != wantDNS2 {
 		t.Errorf("want second PSC DNS name to be %q, got %q", wantDNS2, gotPSCDNS[1])
 	}
+	if rr.DNSName != wantDNS1 {
+		t.Errorf("want serverName/DNSName to be %q, got %q", wantDNS1, rr.DNSName)
+	}
+}
+
+func TestRefreshPSCAutoDNS_WithTrailingDots(t *testing.T) {
+	wantDNS1 := "abcde.12345.us-central1.sql-psc.goog"
+	wantDNS2 := "abcde.12345.us-central1.sql.goog"
+
+	cn := testInstanceConnName()
+	inst := mock.NewFakeCSQLInstance(
+		cn.Project(), cn.Region(), cn.Name(),
+		mock.WithPSC(true),
+		mock.WithDNSMapping(wantDNS2+".", "INSTANCE", "PRIVATE_SERVICE_CONNECT"),
+		mock.WithDNSMapping(wantDNS1+".", "INSTANCE", "PRIVATE_SERVICE_CONNECT"),
+	)
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	if err != nil {
+		t.Fatalf("failed to create test SQL admin service: %s", err)
+	}
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	r := newAdminAPIClient(nullLogger{}, client, RSAKey, nil, testDialerID)
+	rr, err := r.ConnectionInfo(context.Background(), cn, false)
+	if err != nil {
+		t.Fatalf("PerformRefresh unexpectedly failed with error: %v", err)
+	}
+
+	gotPSCDNS, err := rr.Addrs(PSC)
+	if err != nil {
+		t.Fatalf("metadata IP addresses did not include PSC endpoint: %v", err)
+	}
+
+	if len(gotPSCDNS) != 2 {
+		t.Fatalf("want 2 PSC DNS names, got %v", len(gotPSCDNS))
+	}
+	if gotPSCDNS[0] != wantDNS1 {
+		t.Errorf("want first PSC DNS name to be %q, got %q", wantDNS1, gotPSCDNS[0])
+	}
+	if gotPSCDNS[1] != wantDNS2 {
+		t.Errorf("want second PSC DNS name to be %q, got %q", wantDNS2, gotPSCDNS[1])
+	}
+	if rr.DNSName != wantDNS1 {
+		t.Errorf("want serverName/DNSName to be %q, got %q", wantDNS1, rr.DNSName)
+	}
 }

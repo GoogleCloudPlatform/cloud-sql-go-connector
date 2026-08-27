@@ -605,20 +605,23 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		f = cfg.dialFunc
 	}
 	// Attempt to dial each of the targets in turn. Use the first one that succeeds.
-	var dialErr error
+	var dialErrs []error
 	for _, target := range targets {
 		dialAddr := net.JoinHostPort(target, serverProxyPort)
 		d.logger.Debugf(ctx, "[%v] Dialing %v", cn.String(), dialAddr)
+		var dialErr error
 		conn, dialErr = f(ctx, "tcp", dialAddr)
 		if dialErr == nil {
+			dialErrs = nil
 			break
 		}
+		dialErrs = append(dialErrs, dialErr)
 		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", cn.String(), dialAddr, dialErr)
 	}
-	if dialErr != nil {
+	if len(dialErrs) > 0 {
 		// refresh the instance info in case it caused the connection failure
 		c.ForceRefresh()
-		return nil, errtype.NewDialError("failed to dial", cn.String(), dialErr)
+		return nil, errtype.NewDialError("failed to dial", cn.String(), errors.Join(dialErrs...))
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
