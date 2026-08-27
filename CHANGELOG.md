@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.25.1...v1.25.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* prioritize PSC auto-DNS names (.sql-psc.goog) and aggregate dial errors ([#1153](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1153)) ([390df16](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/390df1666d770be5ccc50ece29eeea9d45f88875))
+
 ## [1.25.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.25.0...v1.25.1) (2026-08-17)
 
 
