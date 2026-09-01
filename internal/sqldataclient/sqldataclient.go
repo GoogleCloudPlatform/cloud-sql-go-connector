@@ -173,11 +173,6 @@ func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.Conn
 	streamCtx = metadata.AppendToOutgoingContext(streamCtx,
 		"x-goog-request-params", fmt.Sprintf("location_id=locations/%s&instance_id=%s", cn.Region(), instanceID))
 
-	// If quota-project cli flag is set, add the request header.
-	if d.quotaProject != "" {
-		streamCtx = metadata.AppendToOutgoingContext(streamCtx, "x-goog-user-project", d.quotaProject)
-	}
-
 	var timeoutCancel context.CancelFunc
 	if d.timeout > 0 {
 		d.logger.Debugf(streamCtx, "Setting timeout: %v", d.timeout)

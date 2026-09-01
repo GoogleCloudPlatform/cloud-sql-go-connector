@@ -356,17 +356,10 @@ func TestDialerWithSqlData_HeadersAndSequence(t *testing.T) {
 			return err
 		}
 
-		// 1. Assert x-goog-user-project
+		// 1. Assert x-goog-user-project is not sent to avoid duplicate project header with x-goog-request-params
 		userProjects := md.Get("x-goog-user-project")
-		foundProj := false
-		for _, p := range userProjects {
-			if p == "quotaProj" {
-				foundProj = true
-				break
-			}
-		}
-		if !foundProj {
-			err := fmt.Errorf("metadata x-goog-user-project mismatch: got %v, want to contain quotaProj", userProjects)
+		if len(userProjects) != 0 {
+			err := fmt.Errorf("metadata x-goog-user-project mismatch: got %v, want empty to prevent conflict with x-goog-request-params", userProjects)
 			errCh <- err
 			return err
 		}
