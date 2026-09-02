@@ -16,7 +16,7 @@ require (
 	golang.org/x/time v0.15.0
 	google.golang.org/api v0.290.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260723164925-7274b71286bd
-	google.golang.org/grpc v1.82.1
+	google.golang.org/grpc v1.83.1
 	google.golang.org/protobuf v1.36.11
 )
 
