@@ -72,8 +72,6 @@ type mysqlDriver struct {
 	d *mysql.MySQLDriver
 }
 
-var _ driver.DriverContext = (*mysqlDriver)(nil)
-
 // Open accepts a DSN using the go-sql-driver/mysql format. See
 // https://github.com/go-sql-driver/mysql#dsn-data-source-name for details.
 // Note the protocol should match the name used when registering a driver. For

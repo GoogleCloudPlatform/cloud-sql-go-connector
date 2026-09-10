@@ -53,8 +53,6 @@ type pgDriver struct {
 	dbURIs map[string]string
 }
 
-var _ driver.DriverContext = (*pgDriver)(nil)
-
 // Open accepts a keyword/value formatted connection string and returns a
 // connection to the database using cloudsqlconn.Dialer. The Cloud SQL instance
 // connection name should be specified in the host field. For example:
