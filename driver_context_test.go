@@ -30,6 +30,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/mysql/mysql"
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv4"
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv5"
+	"cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
 	"github.com/google/uuid"
 )
 
@@ -41,6 +42,7 @@ func TestRegisteredDriverConnectionContext(t *testing.T) {
 		{"mysql", mysql.RegisterDriver},
 		{"pgxv5", pgxv5.RegisterDriver},
 		{"pgxv4", pgxv4.RegisterDriver},
+		{"mssql", mssql.RegisterDriver},
 	} {
 		for _, mode := range []string{"cancel", "deadline"} {
 			t.Run(drv.name+"/"+mode, func(t *testing.T) {
@@ -72,8 +74,11 @@ func TestRegisteredDriverConnectionContext(t *testing.T) {
 					}
 				})
 				dsn := "host=test-project:us-central1:test-instance user=test dbname=test sslmode=disable"
-				if drv.name == "mysql" {
+				switch drv.name {
+				case "mysql":
 					dsn = fmt.Sprintf("test@%s(test-project:us-central1:test-instance)/test", name)
+				case "mssql":
+					dsn = "sqlserver://test:password@localhost?database=test&cloudsql=test-project:us-central1:test-instance"
 				}
 				db, err := sql.Open(name, dsn)
 				if err != nil {
@@ -124,8 +129,11 @@ func TestRegisteredDriverConnectionContext(t *testing.T) {
 					t.Fatal("DB.Driver does not implement driver.DriverContext")
 				}
 				wantPackage := "cloud.google.com/go/cloudsqlconn/postgres/pgxv5"
-				if drv.name == "mysql" {
+				switch drv.name {
+				case "mysql":
 					wantPackage = "cloud.google.com/go/cloudsqlconn/mysql/mysql"
+				case "mssql":
+					wantPackage = "cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
 				}
 				if got := reflect.TypeOf(db.Driver()).Elem().PkgPath(); got != wantPackage {
 					t.Fatalf("DB.Driver package = %q, want %q", got, wantPackage)
@@ -137,7 +145,7 @@ func TestRegisteredDriverConnectionContext(t *testing.T) {
 				if connector.Driver() != db.Driver() {
 					t.Fatal("connector did not preserve the registered driver")
 				}
-				if _, err := driverCtx.OpenConnector("invalid"); err == nil {
+				if _, err := driverCtx.OpenConnector("port=invalid"); err == nil {
 					t.Fatal("OpenConnector accepted an invalid DSN")
 				}
 			})

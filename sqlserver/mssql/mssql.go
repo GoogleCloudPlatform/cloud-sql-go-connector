@@ -74,6 +74,16 @@ type sqlserverDriver struct {
 // For details, see
 // https://github.com/microsoft/go-mssqldb#the-connection-string-can-be-specified-in-one-of-three-formats
 func (s *sqlserverDriver) Open(name string) (driver.Conn, error) {
+	c, err := s.OpenConnector(name)
+	if err != nil {
+		return nil, err
+	}
+	return c.Connect(context.Background())
+}
+
+// OpenConnector implements driver.DriverContext, preserving the caller's context
+// when database/sql opens a connection.
+func (s *sqlserverDriver) OpenConnector(name string) (driver.Connector, error) {
 	res, err := msdsn.Parse(name)
 	if err != nil {
 		return nil, err
@@ -87,5 +97,12 @@ func (s *sqlserverDriver) Open(name string) (driver.Conn, error) {
 		d:        s.d,
 		connName: connName,
 	}
-	return c.Connect(context.Background())
+	return &sqlserverConnector{Connector: c, driver: s}, nil
 }
+
+type sqlserverConnector struct {
+	driver.Connector
+	driver *sqlserverDriver
+}
+
+func (c *sqlserverConnector) Driver() driver.Driver { return c.driver }
