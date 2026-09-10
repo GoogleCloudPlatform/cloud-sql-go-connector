@@ -53,6 +53,8 @@ type pgDriver struct {
 	dbURIs map[string]string
 }
 
+var _ driver.DriverContext = (*pgDriver)(nil)
+
 // Open accepts a keyword/value formatted connection string and returns a
 // connection to the database using cloudsqlconn.Dialer. The Cloud SQL instance
 // connection name should be specified in the host field. For example:
@@ -66,6 +68,27 @@ func (p *pgDriver) Open(name string) (driver.Conn, error) {
 	return stdlib.GetDefaultDriver().Open(dbURI)
 
 }
+
+// OpenConnector implements driver.DriverContext, preserving the caller's context
+// when database/sql opens a connection.
+func (p *pgDriver) OpenConnector(name string) (driver.Connector, error) {
+	dbURI, err := p.dbURI(name)
+	if err != nil {
+		return nil, err
+	}
+	c, err := stdlib.GetDefaultDriver().(driver.DriverContext).OpenConnector(dbURI)
+	if err != nil {
+		return nil, err
+	}
+	return &pgConnector{Connector: c, driver: p}, nil
+}
+
+type pgConnector struct {
+	driver.Connector
+	driver *pgDriver
+}
+
+func (c *pgConnector) Driver() driver.Driver { return c.driver }
 
 // dbURI registers a driver using the provided DSN. If the name has already
 // been registered, dbURI returns the existing registration.

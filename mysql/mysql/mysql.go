@@ -72,6 +72,8 @@ type mysqlDriver struct {
 	d *mysql.MySQLDriver
 }
 
+var _ driver.DriverContext = (*mysqlDriver)(nil)
+
 // Open accepts a DSN using the go-sql-driver/mysql format. See
 // https://github.com/go-sql-driver/mysql#dsn-data-source-name for details.
 // Note the protocol should match the name used when registering a driver. For
@@ -82,3 +84,20 @@ type mysqlDriver struct {
 func (d *mysqlDriver) Open(name string) (driver.Conn, error) {
 	return d.d.Open(name)
 }
+
+// OpenConnector implements driver.DriverContext, preserving the caller's context
+// when database/sql opens a connection.
+func (d *mysqlDriver) OpenConnector(name string) (driver.Connector, error) {
+	c, err := d.d.OpenConnector(name)
+	if err != nil {
+		return nil, err
+	}
+	return &mysqlConnector{Connector: c, driver: d}, nil
+}
+
+type mysqlConnector struct {
+	driver.Connector
+	driver *mysqlDriver
+}
+
+func (c *mysqlConnector) Driver() driver.Driver { return c.driver }
