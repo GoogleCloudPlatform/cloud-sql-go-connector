@@ -497,6 +497,9 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 		state.mu.Unlock()
 	}
 
+	if cfg.useIAMAuthN {
+		ctx = sqldataclient.WithAutoIAM(ctx, true)
+	}
 	conn, err := d.sqlDataDialer.ConnectSQLDataService(ctx, cn)
 	if err != nil {
 		if isResourceExhaustedError(err) {

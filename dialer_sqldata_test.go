@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protowire"
 )
 
 func startMockServer(t *testing.T, handler func(sqlpb.SqlDataService_StreamSqlDataServer) error) (string, func()) {
@@ -129,6 +130,103 @@ func TestDialerWithSqlData(t *testing.T) {
 
 	if string(buf) != string(msg) {
 		t.Errorf("Got %q, want %q", string(buf), string(msg))
+	}
+}
+
+func TestDialerWithSqlData_AutoIAMAuthN(t *testing.T) {
+	tcs := []struct {
+		desc        string
+		dialOpts    []DialOption
+		wantAuthVal uint64
+		hasAuthType bool
+	}{
+		{
+			desc:        "Auto IAM enabled via WithDialIAMAuthN(true)",
+			dialOpts:    []DialOption{WithSQLData(), WithDialIAMAuthN(true)},
+			wantAuthVal: 2, // AUTO_IAM_AUTHENTICATION
+			hasAuthType: true,
+		},
+		{
+			desc:        "Auto IAM disabled via WithDialIAMAuthN(false)",
+			dialOpts:    []DialOption{WithSQLData(), WithDialIAMAuthN(false)},
+			wantAuthVal: 0,
+			hasAuthType: false,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			errCh := make(chan error, 1)
+			var gotStartSession *sqlpb.StartSession
+			handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
+				defer close(errCh)
+				req, err := stream.Recv()
+				if err != nil {
+					errCh <- err
+					return err
+				}
+				gotStartSession = req.GetStartSession()
+				if gotStartSession == nil {
+					err := fmt.Errorf("expected StartSession in first message, got %v", req)
+					errCh <- err
+					return err
+				}
+				return nil
+			}
+
+			addr, cleanup := startMockServer(t, handler)
+			defer cleanup()
+
+			ctx := context.Background()
+			d, err := NewDialer(ctx,
+				WithTokenSource(mock.EmptyTokenSource{}),
+				WithDefaultDialOptions(WithSQLData()),
+				WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, 45*time.Minute, "")),
+			)
+			if err != nil {
+				t.Fatalf("NewDialer failed: %v", err)
+			}
+			defer d.Close()
+
+			conn, err := d.Dial(ctx, "proj:reg:inst", tc.dialOpts...)
+			if err != nil {
+				t.Fatalf("Dial failed: %v", err)
+			}
+			defer conn.Close()
+
+			if err := <-errCh; err != nil {
+				t.Fatalf("server error: %v", err)
+			}
+
+			startSession := gotStartSession
+			if startSession == nil {
+				t.Fatal("expected StartSession message, got nil")
+			}
+
+			// Parse unknown fields from StartSession looking for field 4 (authentication_type)
+			raw := startSession.ProtoReflect().GetUnknown()
+			var gotAuthVal uint64
+			var foundAuthType bool
+			for len(raw) > 0 {
+				num, typ, n := protowire.ConsumeField(raw)
+				if n < 0 {
+					t.Fatalf("failed to parse unknown fields: %v", protowire.ParseError(n))
+				}
+				if num == 4 && typ == protowire.VarintType {
+					val, _ := protowire.ConsumeVarint(raw[protowire.SizeTag(num):])
+					gotAuthVal = val
+					foundAuthType = true
+				}
+				raw = raw[n:]
+			}
+
+			if foundAuthType != tc.hasAuthType {
+				t.Errorf("foundAuthType = %v, want %v", foundAuthType, tc.hasAuthType)
+			}
+			if foundAuthType && gotAuthVal != tc.wantAuthVal {
+				t.Errorf("got authentication_type = %d, want %d", gotAuthVal, tc.wantAuthVal)
+			}
+		})
 	}
 }
 
