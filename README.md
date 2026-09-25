@@ -49,6 +49,12 @@ For a quick example, try out the Go Connector in a [Codelab][codelab].
 
 ## Installation
 
+> [!IMPORTANT]
+> **The Cloud SQL Go Connector requires Go 1.26 or later.** Go 1.25 is no
+> longer supported, because required security fixes in `golang.org/x/crypto`
+> (v0.56.0+) and other dependencies need Go 1.26. See [Supported Go
+> Versions](#supported-go-versions).
+
 You can install this repo with `go get`:
 ```sh
 go get cloud.google.com/go/cloudsqlconn
@@ -598,6 +604,8 @@ considered unsupported.
 
 We follow the [Go Version Support Policy][go-policy] used by Google Cloud
 Libraries for Go.
+
+The minimum supported Go version is **Go 1.26**, as declared in `go.mod`.
 
 [go-policy]: https://github.com/googleapis/google-cloud-go#go-versions-supported
 
