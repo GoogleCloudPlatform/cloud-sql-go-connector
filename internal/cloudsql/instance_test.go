@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -535,5 +536,101 @@ func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
 	}
 	if !got.RootCAs.Equal(wantRootCAs) {
 		t.Fatalf("unexpected root CAs, got %v, want %v", got.RootCAs, wantRootCAs)
+	}
+}
+
+func TestRefreshAheadCache_ProbeConnection_Success(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion("POSTGRES_14"))
+	client, cleanup, err := mock.NewSQLAdminService(
+		ctx,
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+	defer cleanup()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{{
+			Certificate: [][]byte{inst.Cert.Raw},
+			PrivateKey:  inst.Key,
+		}},
+	}
+	tlsLn := tls.NewListener(ln, tlsConfig)
+	defer tlsLn.Close()
+
+	probed := make(chan struct{})
+	go func() {
+		conn, err := tlsLn.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		close(probed)
+	}()
+
+	dialFunc := func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, ln.Addr().String())
+	}
+
+	i := NewRefreshAheadCache(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 30*time.Second, nil, "", true,
+		WithRefreshAheadDialFunc(dialFunc),
+	)
+	defer i.Close()
+
+	_, err = i.ConnectionInfo(ctx)
+	if err != nil {
+		t.Fatalf("failed to retrieve connection info: %v", err)
+	}
+
+	select {
+	case <-probed:
+		// Success: probe connection was accepted and TLS handshake completed
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for probe connection to be established")
+	}
+}
+
+func TestRefreshAheadCache_ProbeConnection_DialErrorDoesNotFailRefresh(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion("POSTGRES_14"))
+	client, cleanup, err := mock.NewSQLAdminService(
+		ctx,
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+	defer cleanup()
+
+	dialFunc := func(_ context.Context, _, _ string) (net.Conn, error) {
+		return nil, errors.New("network unreachable")
+	}
+
+	i := NewRefreshAheadCache(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 30*time.Second, nil, "", true,
+		WithRefreshAheadDialFunc(dialFunc),
+	)
+	defer i.Close()
+
+	ci, err := i.ConnectionInfo(ctx)
+	if err != nil {
+		t.Fatalf("ConnectionInfo failed despite non-fatal probe error: %v", err)
+	}
+	if ci.DBVersion != "POSTGRES_14" {
+		t.Fatalf("unexpected DBVersion: got %v, want POSTGRES_14", ci.DBVersion)
 	}
 }

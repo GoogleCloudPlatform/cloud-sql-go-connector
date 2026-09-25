@@ -990,6 +990,8 @@ func (d *Dialer) connectionInfoCache(
 			d.sqladmin, rsaKey,
 			d.refreshTimeout, d.iamTokenProvider,
 			d.dialerID, useIAMAuthNDial,
+			cloudsql.WithRefreshAheadDialFunc(d.dialFunc),
+			cloudsql.WithRefreshAheadIPType(d.defaultDialConfig.connectionType),
 		)
 	}
 	c = newMonitoredCache(cache, cn, d.failoverPeriod, d.resolver, d.logger)
