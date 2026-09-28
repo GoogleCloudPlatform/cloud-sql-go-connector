@@ -163,6 +163,13 @@ with host set to the instance connection name. The returned `cleanup` func
 will stop the dialer's background refresh goroutine and so should only be called
 when you're done with the `Dialer`.
 
+> [!NOTE]
+>
+> Keyword/value connection strings follow PostgreSQL `libpq` escaping rules
+> (`pgx` `v5.11.0+`). If your password or other values contain spaces, single
+> quotes (`'`), or backslashes (`\`), wrap the value in single quotes and escape
+> `'` as `\'` and `\` as `\\`.
+
 ``` go
 import (
     "database/sql"
