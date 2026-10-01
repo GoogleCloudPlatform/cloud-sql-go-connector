@@ -123,6 +123,7 @@ type connectionInfoCache interface {
 	ConnectionInfo(context.Context) (cloudsql.ConnectionInfo, error)
 	UpdateRefresh(*bool)
 	ForceRefresh()
+	RecordIAMPrincipal(user, database string)
 	io.Closer
 }
 
@@ -652,7 +653,7 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		netConn = cloudsql.NewMDXConn(tlsConn, cn.String(), mdxReq, d.logger)
 	}
 	if cfg.useIAMAuthN && strings.HasPrefix(ci.DBVersion, "POSTGRES") {
-		netConn = cloudsql.NewPostgresStartupSnifferConn(netConn, c.recordIAMPrincipal)
+		netConn = cloudsql.NewPostgresStartupSnifferConn(netConn, c.RecordIAMPrincipal)
 	}
 
 	latency := time.Since(startTime).Milliseconds()
@@ -985,6 +986,8 @@ func (d *Dialer) connectionInfoCache(
 			d.sqladmin, rsaKey,
 			d.refreshTimeout, d.iamTokenProvider,
 			d.dialerID, useIAMAuthNDial,
+			d.dialFunc,
+			d.defaultDialConfig.connectionType,
 		)
 	} else {
 		cache = cloudsql.NewRefreshAheadCache(
@@ -993,8 +996,8 @@ func (d *Dialer) connectionInfoCache(
 			d.sqladmin, rsaKey,
 			d.refreshTimeout, d.iamTokenProvider,
 			d.dialerID, useIAMAuthNDial,
-			cloudsql.WithRefreshAheadDialFunc(d.dialFunc),
-			cloudsql.WithRefreshAheadIPType(d.defaultDialConfig.connectionType),
+			d.dialFunc,
+			d.defaultDialConfig.connectionType,
 		)
 	}
 	c = newMonitoredCache(cache, cn, d.failoverPeriod, d.resolver, d.logger)

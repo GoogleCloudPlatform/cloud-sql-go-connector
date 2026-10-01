@@ -29,6 +29,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
+	"github.com/jackc/pgx/v5/pgproto3"
 )
 
 type nullLogger struct{}
@@ -75,7 +76,7 @@ func TestConnectionInfoDBVersion(t *testing.T) {
 		}()
 		i := NewRefreshAheadCache(
 			testInstanceConnName(), nullLogger{}, client,
-			RSAKey, 30*time.Second, nil, "", false,
+			RSAKey, 30*time.Second, nil, "", false, nil, "",
 		)
 		if err != nil {
 			t.Fatalf("failed to init instance: %v", err)
@@ -114,7 +115,7 @@ func TestConnectionInfo(t *testing.T) {
 
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
-		RSAKey, 30*time.Second, nil, "", false,
+		RSAKey, 30*time.Second, nil, "", false, nil, "",
 	)
 
 	ci, err := i.ConnectionInfo(ctx)
@@ -266,7 +267,7 @@ func TestConnectInfoAutoIP(t *testing.T) {
 
 		i := NewRefreshAheadCache(
 			testInstanceConnName(), nullLogger{}, client,
-			RSAKey, 30*time.Second, nil, "", false,
+			RSAKey, 30*time.Second, nil, "", false, nil, "",
 		)
 		if err != nil {
 			t.Fatalf("failed to create mock instance: %v", err)
@@ -361,7 +362,7 @@ func TestConnectInfoSQLDataFallbackIP(t *testing.T) {
 
 			i := NewRefreshAheadCache(
 				testInstanceConnName(), nullLogger{}, client,
-				RSAKey, 30*time.Second, nil, "", false,
+				RSAKey, 30*time.Second, nil, "", false, nil, "",
 			)
 
 			ci, err := i.ConnectionInfo(context.Background())
@@ -406,7 +407,7 @@ func TestClose(t *testing.T) {
 	// Set up an instance and then close it immediately
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
-		RSAKey, 30*time.Second, nil, "", false,
+		RSAKey, 30*time.Second, nil, "", false, nil, "",
 	)
 	i.Close()
 
@@ -585,7 +586,7 @@ func TestRefreshAheadCache_ProbeConnection_Success(t *testing.T) {
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
 		RSAKey, 30*time.Second, nil, "", true,
-		WithRefreshAheadDialFunc(dialFunc),
+		dialFunc, "",
 	)
 	defer i.Close()
 
@@ -622,7 +623,7 @@ func TestRefreshAheadCache_ProbeConnection_DialErrorDoesNotFailRefresh(t *testin
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
 		RSAKey, 30*time.Second, nil, "", true,
-		WithRefreshAheadDialFunc(dialFunc),
+		dialFunc, "",
 	)
 	defer i.Close()
 
@@ -664,9 +665,9 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 	defer tlsLn.Close()
 
 	type probeRecord struct {
-		user          string
-		database      string
-		sawTerminate  bool
+		user         string
+		database     string
+		sawTerminate bool
 	}
 	startupProbeCh := make(chan probeRecord, 2)
 	go func() {
@@ -678,21 +679,25 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 			go func(c net.Conn) {
 				defer c.Close()
 				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-				buf := make([]byte, 1024)
-				n, err := c.Read(buf)
-				if err != nil || n == 0 {
+				backend := pgproto3.NewBackend(c, c)
+				msg, err := backend.ReceiveStartupMessage()
+				if err != nil {
 					return
 				}
-				u, db, ok := parsePostgresStartupPacket(buf[:n])
-				if !ok || u == "" {
+				sm, ok := msg.(*pgproto3.StartupMessage)
+				if !ok || sm.Parameters["user"] == "" {
 					return
 				}
-				// Send AuthenticationOk ('R', len=8, status=0) + ReadyForQuery ('Z', len=5, 'I')
-				_, _ = c.Write([]byte{'R', 0, 0, 0, 8, 0, 0, 0, 0, 'Z', 0, 0, 0, 5, 'I'})
-				term := make([]byte, 16)
-				tn, _ := c.Read(term)
-				sawTerm := tn >= 5 && term[0] == 'X'
-				startupProbeCh <- probeRecord{user: u, database: db, sawTerminate: sawTerm}
+				backend.Send(&pgproto3.AuthenticationOk{})
+				backend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
+				_ = backend.Flush()
+				nextMsg, _ := backend.Receive()
+				_, sawTerm := nextMsg.(*pgproto3.Terminate)
+				startupProbeCh <- probeRecord{
+					user:         sm.Parameters["user"],
+					database:     sm.Parameters["database"],
+					sawTerminate: sawTerm,
+				}
 			}(conn)
 		}
 	}()
@@ -705,7 +710,7 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
 		RSAKey, 30*time.Second, nil, "", true,
-		WithRefreshAheadDialFunc(dialFunc),
+		dialFunc, "",
 	)
 	defer i.Close()
 
@@ -726,12 +731,25 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 		}
 	}()
 	sniffer := NewPostgresStartupSnifferConn(c1, i.RecordIAMPrincipal)
-	// Write SSLRequest followed by StartupMessage
-	sslReq := []byte{0, 0, 0, 8, 0x04, 0xd2, 0x16, 0x2f}
+	// Write SSLRequest followed by StartupMessage using pgproto3
+	sslReq, err := (&pgproto3.SSLRequest{}).Encode(nil)
+	if err != nil {
+		t.Fatalf("encode SSLRequest failed: %v", err)
+	}
 	if _, err := sniffer.Write(sslReq); err != nil {
 		t.Fatalf("sniffer write SSLRequest failed: %v", err)
 	}
-	if _, err := sniffer.Write(buildPostgresStartupPacket("iam-user@example.com", "mydb")); err != nil {
+	startupPkt, err := (&pgproto3.StartupMessage{
+		ProtocolVersion: pgproto3.ProtocolVersion30,
+		Parameters: map[string]string{
+			"user":     "iam-user@example.com",
+			"database": "mydb",
+		},
+	}).Encode(nil)
+	if err != nil {
+		t.Fatalf("encode StartupMessage failed: %v", err)
+	}
+	if _, err := sniffer.Write(startupPkt); err != nil {
 		t.Fatalf("sniffer write StartupMessage failed: %v", err)
 	}
 
