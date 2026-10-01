@@ -634,3 +634,122 @@ func TestRefreshAheadCache_ProbeConnection_DialErrorDoesNotFailRefresh(t *testin
 		t.Fatalf("unexpected DBVersion: got %v, want POSTGRES_14", ci.DBVersion)
 	}
 }
+
+func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion("POSTGRES_14"))
+	client, cleanup, err := mock.NewSQLAdminService(
+		ctx,
+		mock.InstanceGetSuccess(inst, 2),
+		mock.CreateEphemeralSuccess(inst, 2),
+	)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+	defer cleanup()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{{
+			Certificate: [][]byte{inst.Cert.Raw},
+			PrivateKey:  inst.Key,
+		}},
+	}
+	tlsLn := tls.NewListener(ln, tlsConfig)
+	defer tlsLn.Close()
+
+	type probeRecord struct {
+		user          string
+		database      string
+		sawTerminate  bool
+	}
+	startupProbeCh := make(chan probeRecord, 2)
+	go func() {
+		for {
+			conn, err := tlsLn.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+				buf := make([]byte, 1024)
+				n, err := c.Read(buf)
+				if err != nil || n == 0 {
+					return
+				}
+				u, db, ok := parsePostgresStartupPacket(buf[:n])
+				if !ok || u == "" {
+					return
+				}
+				// Send AuthenticationOk ('R', len=8, status=0) + ReadyForQuery ('Z', len=5, 'I')
+				_, _ = c.Write([]byte{'R', 0, 0, 0, 8, 0, 0, 0, 0, 'Z', 0, 0, 0, 5, 'I'})
+				term := make([]byte, 16)
+				tn, _ := c.Read(term)
+				sawTerm := tn >= 5 && term[0] == 'X'
+				startupProbeCh <- probeRecord{user: u, database: db, sawTerminate: sawTerm}
+			}(conn)
+		}
+	}()
+
+	dialFunc := func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, ln.Addr().String())
+	}
+
+	i := NewRefreshAheadCache(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 30*time.Second, nil, "", true,
+		WithRefreshAheadDialFunc(dialFunc),
+	)
+	defer i.Close()
+
+	if _, err := i.ConnectionInfo(ctx); err != nil {
+		t.Fatalf("initial ConnectionInfo failed: %v", err)
+	}
+
+	// Simulate an application connection capturing the PostgreSQL startup packet via sniffer.
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	defer c2.Close()
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			if _, err := c2.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+	sniffer := NewPostgresStartupSnifferConn(c1, i.RecordIAMPrincipal)
+	// Write SSLRequest followed by StartupMessage
+	sslReq := []byte{0, 0, 0, 8, 0x04, 0xd2, 0x16, 0x2f}
+	if _, err := sniffer.Write(sslReq); err != nil {
+		t.Fatalf("sniffer write SSLRequest failed: %v", err)
+	}
+	if _, err := sniffer.Write(buildPostgresStartupPacket("iam-user@example.com", "mydb")); err != nil {
+		t.Fatalf("sniffer write StartupMessage failed: %v", err)
+	}
+
+	// Trigger a background refresh and verify probeConnection sends StartupMessage + Terminate.
+	i.ForceRefresh()
+	if _, err := i.ConnectionInfo(ctx); err != nil {
+		t.Fatalf("refreshed ConnectionInfo failed: %v", err)
+	}
+
+	select {
+	case rec := <-startupProbeCh:
+		if rec.user != "iam-user@example.com" || rec.database != "mydb" {
+			t.Fatalf("unexpected startup probe principal: got (%q, %q), want (\"iam-user@example.com\", \"mydb\")", rec.user, rec.database)
+		}
+		if !rec.sawTerminate {
+			t.Fatal("expected probe connection to send Terminate ('X') after reading server response")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for PostgreSQL startup probe packet")
+	}
+}

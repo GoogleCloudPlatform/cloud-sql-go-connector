@@ -15,12 +15,15 @@
 package cloudsql
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -111,6 +114,7 @@ type RefreshAheadCache struct {
 	useIAMAuthNDial bool
 	ipType          string
 	dialFunc        func(ctx context.Context, network, addr string) (net.Conn, error)
+	iamPrincipals   []pgPrincipal
 	// cur represents the current refreshOperation that will be used to
 	// create connections. If a valid complete refreshOperation isn't
 	// available it's possible for cur to be equal to next.
@@ -123,6 +127,32 @@ type RefreshAheadCache struct {
 	// new refresh operations from being triggered.
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+type pgPrincipal struct {
+	user     string
+	database string
+}
+
+// RecordIAMPrincipal records a PostgreSQL (user, database) pair observed on an
+// active Auto-IAM connection so that subsequent background refresh probes can
+// send a StartupMessage and update PgBouncer's cached pool credentials.
+func (i *RefreshAheadCache) RecordIAMPrincipal(user, database string) {
+	if user == "" {
+		return
+	}
+	if database == "" {
+		database = user
+	}
+	p := pgPrincipal{user: user, database: database}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	for _, existing := range i.iamPrincipals {
+		if existing == p {
+			return
+		}
+	}
+	i.iamPrincipals = append(i.iamPrincipals, p)
 }
 
 // RefreshAheadOption configures a RefreshAheadCache.
@@ -547,7 +577,12 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 	return r
 }
 
-const serverProxyPort = "3307"
+const (
+	serverProxyPort       = "3307"
+	pgSSLRequestCode      = 80877103 // 0x04d2162f
+	pgProtocolVersion30   = 196608   // 0x00030000
+	maxPgStartupPacketLen = 10000
+)
 
 func (i *RefreshAheadCache) probeConnection(ctx context.Context, ci ConnectionInfo) error {
 	ctx, cancel := context.WithTimeout(ctx, i.refreshTimeout)
@@ -577,6 +612,37 @@ func (i *RefreshAheadCache) probeConnection(ctx context.Context, ci ConnectionIn
 		dial = netDialer.DialContext
 	}
 
+	var principals []pgPrincipal
+	if strings.HasPrefix(ci.DBVersion, "POSTGRES") {
+		i.mu.RLock()
+		principals = append(principals, i.iamPrincipals...)
+		i.mu.RUnlock()
+	}
+	if len(principals) == 0 {
+		principals = []pgPrincipal{{}}
+	}
+
+	var lastErr error
+	for _, p := range principals {
+		if err := i.probeSinglePrincipal(ctx, ci, targets, dial, p); err != nil {
+			lastErr = err
+		}
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+
+	i.logger.Debugf(ctx, "[%v] Proactive IAM token refresh probe successful", ci.ConnectionName.String())
+	return nil
+}
+
+func (i *RefreshAheadCache) probeSinglePrincipal(
+	ctx context.Context,
+	ci ConnectionInfo,
+	targets []string,
+	dial func(ctx context.Context, network, addr string) (net.Conn, error),
+	p pgPrincipal,
+) error {
 	var (
 		conn    net.Conn
 		dialErr error
@@ -599,8 +665,132 @@ func (i *RefreshAheadCache) probeConnection(ctx context.Context, ci ConnectionIn
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		return fmt.Errorf("probe TLS handshake failed: %w", err)
 	}
-	_ = tlsConn.Close()
 
-	i.logger.Debugf(ctx, "[%v] Proactive IAM token refresh probe successful", ci.ConnectionName.String())
+	if p.user != "" {
+		if dl, ok := ctx.Deadline(); ok {
+			_ = tlsConn.SetDeadline(dl)
+		}
+		startupPkt := buildPostgresStartupPacket(p.user, p.database)
+		if _, err := tlsConn.Write(startupPkt); err == nil {
+			// Read server response (AuthenticationOk / ErrorResponse) so that
+			// PgBouncer completes auth_query and finish_set_pool, updating
+			// pool->user_credentials->passwd in db->user_tree before disconnect.
+			var buf [1024]byte
+			_, _ = tlsConn.Read(buf[:])
+			_, _ = tlsConn.Write([]byte{'X', 0, 0, 0, 4})
+		}
+	}
+
+	_ = tlsConn.Close()
 	return nil
+}
+
+// NewPostgresStartupSnifferConn wraps conn so that the first PostgreSQL v3
+// StartupMessage written by the client is inspected to extract (user, database)
+// and passed to onStartup. Subsequent writes pass through with zero overhead.
+func NewPostgresStartupSnifferConn(conn net.Conn, onStartup func(user, database string)) net.Conn {
+	if onStartup == nil {
+		return conn
+	}
+	return &pgStartupSnifferConn{
+		Conn:      conn,
+		onStartup: onStartup,
+	}
+}
+
+type pgStartupSnifferConn struct {
+	net.Conn
+	mu        sync.Mutex
+	done      bool
+	buf       []byte
+	onStartup func(user, database string)
+}
+
+func (s *pgStartupSnifferConn) Write(b []byte) (int, error) {
+	s.mu.Lock()
+	if !s.done {
+		s.buf = append(s.buf, b...)
+		if user, db, complete := parsePostgresStartupPacket(s.buf); complete {
+			s.done = true
+			s.buf = nil
+			if user != "" {
+				s.onStartup(user, db)
+			}
+		} else if len(s.buf) > maxPgStartupPacketLen+8 {
+			s.done = true
+			s.buf = nil
+		}
+	}
+	s.mu.Unlock()
+	return s.Conn.Write(b)
+}
+
+func parsePostgresStartupPacket(buf []byte) (user, database string, complete bool) {
+	if len(buf) < 8 {
+		return "", "", false
+	}
+	pktLen := int(binary.BigEndian.Uint32(buf[0:4]))
+	code := binary.BigEndian.Uint32(buf[4:8])
+	if pktLen == 8 && code == pgSSLRequestCode {
+		buf = buf[8:]
+		if len(buf) < 8 {
+			return "", "", false
+		}
+		pktLen = int(binary.BigEndian.Uint32(buf[0:4]))
+		code = binary.BigEndian.Uint32(buf[4:8])
+	}
+	if code != pgProtocolVersion30 || pktLen < 8 || pktLen > maxPgStartupPacketLen {
+		return "", "", true
+	}
+	if len(buf) < pktLen {
+		return "", "", false
+	}
+	payload := buf[8:pktLen]
+	for len(payload) > 0 && payload[0] != 0 {
+		kEnd := bytes.IndexByte(payload, 0)
+		if kEnd < 0 {
+			break
+		}
+		key := string(payload[:kEnd])
+		payload = payload[kEnd+1:]
+		vEnd := bytes.IndexByte(payload, 0)
+		if vEnd < 0 {
+			break
+		}
+		val := string(payload[:vEnd])
+		payload = payload[vEnd+1:]
+		switch key {
+		case "user":
+			user = val
+		case "database":
+			database = val
+		}
+	}
+	if user != "" && database == "" {
+		database = user
+	}
+	return user, database, true
+}
+
+func buildPostgresStartupPacket(user, database string) []byte {
+	if database == "" {
+		database = user
+	}
+	var body bytes.Buffer
+	body.WriteString("user")
+	body.WriteByte(0)
+	body.WriteString(user)
+	body.WriteByte(0)
+	body.WriteString("database")
+	body.WriteByte(0)
+	body.WriteString(database)
+	body.WriteByte(0)
+	body.WriteByte(0)
+
+	totalLen := 4 + 4 + body.Len()
+	pkt := make([]byte, 8+body.Len())
+	binary.BigEndian.PutUint32(pkt[0:4], uint32(totalLen))
+	binary.BigEndian.PutUint32(pkt[4:8], pgProtocolVersion30)
+	copy(pkt[8:], body.Bytes())
+	return pkt
 }

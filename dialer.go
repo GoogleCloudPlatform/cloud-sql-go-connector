@@ -651,6 +651,9 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	if mdxReq != nil {
 		netConn = cloudsql.NewMDXConn(tlsConn, cn.String(), mdxReq, d.logger)
 	}
+	if cfg.useIAMAuthN && strings.HasPrefix(ci.DBVersion, "POSTGRES") {
+		netConn = cloudsql.NewPostgresStartupSnifferConn(netConn, c.recordIAMPrincipal)
+	}
 
 	latency := time.Since(startTime).Milliseconds()
 	n := c.openConnsCount.Add(1)
