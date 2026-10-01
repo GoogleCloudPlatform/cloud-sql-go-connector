@@ -88,6 +88,12 @@ func (c *monitoredCache) isClosed() bool {
 	return c.closed
 }
 
+func (c *monitoredCache) recordIAMPrincipal(user, database string) {
+	if r, ok := c.connectionInfoCache.(interface{ RecordIAMPrincipal(string, string) }); ok {
+		r.RecordIAMPrincipal(user, database)
+	}
+}
+
 func (c *monitoredCache) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
