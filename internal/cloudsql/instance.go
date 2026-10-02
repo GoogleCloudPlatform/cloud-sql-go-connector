@@ -724,16 +724,13 @@ func NewPostgresStartupSnifferConn(conn net.Conn, onStartup func(user, database 
 
 type pgStartupSnifferConn struct {
 	net.Conn
-	mu        sync.Mutex
 	done      bool
 	buf       []byte
 	onStartup func(user, database string)
 }
 
 func (s *pgStartupSnifferConn) Write(b []byte) (int, error) {
-	s.mu.Lock()
 	if s.done {
-		s.mu.Unlock()
 		return s.Conn.Write(b)
 	}
 
@@ -749,7 +746,6 @@ func (s *pgStartupSnifferConn) Write(b []byte) (int, error) {
 		s.buf = nil
 	}
 
-	s.mu.Unlock()
 	return s.Conn.Write(b)
 }
 
