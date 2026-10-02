@@ -523,12 +523,12 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			)
 		}
 
-		close(r.ready)
-
 		// Once the refresh is complete, update "current" with working
 		// refreshOperation and schedule a new refresh
 		i.mu.Lock()
 		defer i.mu.Unlock()
+
+		close(r.ready)
 
 		// if failed, scheduled the next refresh immediately
 		if r.err != nil {
