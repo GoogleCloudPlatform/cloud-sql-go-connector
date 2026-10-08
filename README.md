@@ -621,3 +621,6 @@ The minimum supported Go version is **Go 1.26**, as declared in `go.mod`.
 This project aims for a release on at least a monthly basis. If no new features
 or fixes have been added, a new PATCH version with the latest dependencies is
 released.
+
+
+Trivial change to trigger a PR build.
