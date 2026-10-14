@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.25.4](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.25.3...v1.25.4) (2026-10-14)
+
+
+### Bug Fixes
+
+* Update dependencies ([#1171](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1171)) ([d6088c5](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/d6088c54219bde77914df974e1e631bf3977fa51))
+* update all dependencies to latest ([#1170](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/pull/1170)) ([3414344](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/34143442345d4715fbc5bc3b94a863b7ad781878))
+
+### Security / CVE Fixes
+
+Updates `golang.org/x/net` from `v0.59.0` to `v0.61.0`, resolving the following HTTP/2 vulnerabilities:
+
+| Advisory | CVE | Description | Affected Package | Fixed Version |
+| --- | --- | --- | --- | --- |
+| [GO-2026-6603](https://pkg.go.dev/vuln/GO-2026-6603) | [CVE-2026-78659](https://nvd.nist.gov/vuln/detail/CVE-2026-78659) | HTTP/2 server memory exhaustion due to Trailer headers | `golang.org/x/net` | `v0.61.0` |
+| [GO-2026-6610](https://pkg.go.dev/vuln/GO-2026-6610) | [CVE-2026-78660](https://nvd.nist.gov/vuln/detail/CVE-2026-78660) | HTTP/2 transport accepts malformed framing-related headers | `golang.org/x/net` | `v0.61.0` |
+| [GO-2026-6611](https://pkg.go.dev/vuln/GO-2026-6611) | [CVE-2026-78669](https://nvd.nist.gov/vuln/detail/CVE-2026-78669) | Excessive CPU consumption from repeated initial window changes | `golang.org/x/net` | `v0.61.0` |
+| [GO-2026-6612](https://pkg.go.dev/vuln/GO-2026-6612) | [CVE-2026-78663](https://nvd.nist.gov/vuln/detail/CVE-2026-78663) | Double flow control refund on HTTP/2 server streams | `golang.org/x/net` | `v0.61.0` |
+| [GO-2026-6617](https://pkg.go.dev/vuln/GO-2026-6617) | [CVE-2026-97032](https://nvd.nist.gov/vuln/detail/CVE-2026-97032) | HTTP/2 server crash due to HPACK encoder race | `golang.org/x/net` | `v0.61.0` |
+
 ## [1.25.3](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.25.2...v1.25.3) (2026-09-28)
 
 
