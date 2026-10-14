@@ -23,6 +23,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -37,7 +38,13 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/mdx"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"cloud.google.com/go/cloudsqlconn/internal/tel"
+	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"golang.org/x/oauth2"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // testSuccessfulDial uses the provided dialer to dial the specified instance
@@ -2065,4 +2072,153 @@ func TestDialerPropagatesMetricResourceFields(t *testing.T) {
 	if strings.ContainsAny(strings.TrimSpace(versionString), "\r\n") || strings.TrimSpace(versionString) == "" {
 		t.Fatalf("versionString must be a non-empty single line, got %q", versionString)
 	}
+}
+
+type sentinelTokenProvider struct{}
+
+func (sentinelTokenProvider) Token(context.Context) (*auth.Token, error) {
+	return &auth.Token{Value: "sentinel"}, nil
+}
+
+func TestMetricTokenProvider(t *testing.T) {
+	saFile := filepath.Join(t.TempDir(), "sa.json")
+	if err := os.WriteFile(saFile, fakeServiceAccount(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	apiTP := sentinelTokenProvider{}
+
+	tcs := []struct {
+		desc        string
+		cfg         *dialerConfig
+		env         map[string]string
+		wantSameAPI bool
+	}{
+		{
+			desc:        "caller-supplied token source is used as-is",
+			cfg:         &dialerConfig{setCredentials: true},
+			wantSameAPI: true,
+		},
+		{
+			desc: "credentials JSON is re-scoped for monitoring",
+			cfg: &dialerConfig{
+				setCredentials:  true,
+				credentialsJSON: fakeServiceAccount(""),
+			},
+			wantSameAPI: false,
+		},
+		{
+			desc:        "application default credentials are re-scoped for monitoring",
+			cfg:         &dialerConfig{setCredentials: false},
+			env:         map[string]string{"GOOGLE_APPLICATION_CREDENTIALS": saFile},
+			wantSameAPI: false,
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			got, err := metricTokenProvider(tc.cfg, apiTP)
+			if err != nil {
+				t.Fatalf("metricTokenProvider: %v", err)
+			}
+			if got == nil {
+				t.Fatal("metricTokenProvider returned nil token provider")
+			}
+			_, isSentinel := got.(sentinelTokenProvider)
+			if isSentinel != tc.wantSameAPI {
+				t.Fatalf("want same-as-API token provider = %v, got %v (%T)", tc.wantSameAPI, isSentinel, got)
+			}
+		})
+	}
+}
+
+// fakeMetricServer is an in-memory Cloud Monitoring server that records
+// CreateServiceTimeSeries requests.
+type fakeMetricServer struct {
+	monitoringpb.UnimplementedMetricServiceServer
+	mu   sync.Mutex
+	reqs []*monitoringpb.CreateTimeSeriesRequest
+}
+
+func (f *fakeMetricServer) CreateServiceTimeSeries(_ context.Context, req *monitoringpb.CreateTimeSeriesRequest) (*emptypb.Empty, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reqs = append(f.reqs, req)
+	return &emptypb.Empty{}, nil
+}
+
+func (f *fakeMetricServer) requests() []*monitoringpb.CreateTimeSeriesRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*monitoringpb.CreateTimeSeriesRequest(nil), f.reqs...)
+}
+
+func startFakeMetricServer(t *testing.T) (*fakeMetricServer, *grpc.ClientConn) {
+	t.Helper()
+	srv := grpc.NewServer()
+	fake := &fakeMetricServer{}
+	monitoringpb.RegisterMetricServiceServer(srv, fake)
+	lis := bufconn.Listen(1024 * 1024)
+	go func() { _ = srv.Serve(lis) }()
+	conn, err := grpc.NewClient("passthrough://bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return lis.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = conn.Close()
+		srv.Stop()
+		_ = lis.Close()
+	})
+	return fake, conn
+}
+
+func TestBuiltInMetricsExportsThroughDialerClient(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = 100 * time.Millisecond
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(),
+		withMetricClientOptions(option.WithGRPCConn(conn)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+
+	if d.mClient == nil {
+		t.Fatal("metric client should be created when built-in metrics are enabled")
+	}
+	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mr := d.metricRecorder(ctx, cn, "POSTGRESQL")
+	if _, isNull := mr.(tel.NullMetricRecorder); isNull {
+		t.Fatal("want a real metric recorder when built-in metrics are enabled")
+	}
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{
+		IPType:        "public",
+		AttemptStatus: tel.ConnectSuccess,
+	})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if reqs := fake.requests(); len(reqs) > 0 {
+			if got, want := reqs[0].GetName(), "projects/my-project"; got != want {
+				t.Fatalf("time series project: got %q, want %q", got, want)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for the metric export to reach the in-memory server")
 }

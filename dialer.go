@@ -48,6 +48,7 @@ import (
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
 
+	"cloud.google.com/go/auth/oauth2adapt"
 	tel "cloud.google.com/go/cloudsqlconn/internal/tel"
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
@@ -63,6 +64,9 @@ const (
 	// iamLoginScope is the OAuth2 scope used for tokens embedded in the ephemeral
 	// certificate.
 	iamLoginScope = "https://www.googleapis.com/auth/sqlservice.login"
+	// monitoringWriteScope is the OAuth2 scope required to write time series
+	// to Cloud Monitoring. It is used for the built-in metrics export.
+	monitoringWriteScope = "https://www.googleapis.com/auth/monitoring.write"
 	// universeDomainEnvVar is the environment variable for setting the default
 	// service domain for a given Cloud universe.
 	universeDomainEnvVar = "GOOGLE_CLOUD_UNIVERSE_DOMAIN"
@@ -267,19 +271,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return nil, cfg.err
 		}
 	}
-	// Only create the Cloud Monitoring client when built-in metrics are
-	// enabled, so that callers who do not opt in pay no cost for it.
-	var mClient *monitoring.MetricClient
-	if cfg.enableBuiltInMetrics {
-		var err error
-		mClient, err = monitoring.NewMetricClient(ctx, cfg.clientOpts...)
-		if err != nil {
-			// Don't fail dialer initialization on metric client errors.
-			// Just disable metric collection below.
-			cfg.logger.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
-			mClient = nil
-		}
-	}
 
 	if cfg.useIAMAuthN && cfg.setTokenSource && !cfg.setIAMAuthNTokenSource {
 		return nil, errUseIAMTokenSource
@@ -377,6 +368,21 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		tp = cfg.authCredentials.TokenProvider
 	}
 
+	// Only create the Cloud Monitoring client when built-in metrics are
+	// enabled, so that callers who do not opt in pay no cost for it. The
+	// client is created after credentials are resolved so that the metric
+	// export uses the same identity as the Dialer's API calls.
+	var mClient *monitoring.MetricClient
+	if cfg.enableBuiltInMetrics {
+		mClient, err = newMetricClient(ctx, cfg, tp)
+		if err != nil {
+			// Don't fail dialer initialization on metric client errors.
+			// Just disable metric collection below.
+			cfg.logger.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
+			mClient = nil
+		}
+	}
+
 	var sqlDataDialer sqldataclient.Dialer
 	if cfg.sqlDataDialer != nil {
 		sqlDataDialer = cfg.sqlDataDialer
@@ -416,6 +422,55 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	d.logger.Debugf(ctx, "Cloud SQL Go Connector Dialer ID: %s", d.dialerID)
 
 	return d, nil
+}
+
+// newMetricClient creates the Cloud Monitoring client used for built-in
+// metrics. The client is configured with the same user agent, quota project,
+// and universe domain as the Dialer's other API clients, and authenticates
+// with the identity returned by metricTokenProvider.
+func newMetricClient(ctx context.Context, cfg *dialerConfig, apiTP auth.TokenProvider) (*monitoring.MetricClient, error) {
+	opts := []option.ClientOption{
+		option.WithUserAgent(strings.Join(cfg.useragents, " ")),
+		option.WithUniverseDomain(cfg.getClientUniverseDomain()),
+	}
+	if cfg.quotaProject != "" {
+		opts = append(opts, option.WithQuotaProject(cfg.quotaProject))
+	}
+	tp, err := metricTokenProvider(cfg, apiTP)
+	if err != nil {
+		return nil, err
+	}
+	if tp != nil {
+		opts = append(opts, option.WithTokenSource(oauth2adapt.TokenSourceFromTokenProvider(tp)))
+	}
+	// Caller-provided client options go last so they take precedence.
+	opts = append(opts, cfg.clientOpts...)
+	return monitoring.NewMetricClient(ctx, opts...)
+}
+
+// metricTokenProvider returns the token provider for the built-in metrics
+// export.
+//
+// When the Dialer detected credentials itself (Application Default
+// Credentials, WithCredentialsFile, or WithCredentialsJSON), the credentials
+// are re-detected with the monitoring.write scope so that the resulting
+// tokens are accepted by the Cloud Monitoring API. This yields the same
+// identity as the Dialer's API calls, with the scope the export needs.
+//
+// When the caller supplied a token source or credentials directly, that
+// token provider is used as-is because its scopes cannot be changed.
+func metricTokenProvider(cfg *dialerConfig, apiTP auth.TokenProvider) (auth.TokenProvider, error) {
+	if !cfg.setCredentials || cfg.credentialsJSON != nil {
+		c, err := credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes:          []string{monitoringWriteScope},
+			CredentialsJSON: cfg.credentialsJSON,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create credentials for built-in metrics: %w", err)
+		}
+		return c.TokenProvider, nil
+	}
+	return apiTP, nil
 }
 
 // metricRecorder does a lazy initialization of the metric exporter.
