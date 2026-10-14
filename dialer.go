@@ -222,10 +222,12 @@ type Dialer struct {
 	// applicationName is the name of the application using the dialer.
 	applicationName string
 
-	// disableBuiltInMetrics turns the internal metric export into a no-op.
-	disableBuiltInMetrics bool
+	// enableBuiltInMetrics controls whether the Dialer exports built-in
+	// metrics. When false (the default), the metric export is a no-op.
+	enableBuiltInMetrics bool
 
-	// mClient is used for built-in system metrics.
+	// mClient is used for built-in system metrics. It is nil when built-in
+	// metrics are disabled or the client failed to initialize.
 	mClient *monitoring.MetricClient
 
 	// userAgent is the combined user agent string.
@@ -265,11 +267,18 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return nil, cfg.err
 		}
 	}
-	mClient, err := monitoring.NewMetricClient(ctx, cfg.clientOpts...)
-	if err != nil {
-		// Don't fail dialer initialization on metric client errors.
-		// Just disable metric collection below.
-		cfg.logger.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
+	// Only create the Cloud Monitoring client when built-in metrics are
+	// enabled, so that callers who do not opt in pay no cost for it.
+	var mClient *monitoring.MetricClient
+	if cfg.enableBuiltInMetrics {
+		var err error
+		mClient, err = monitoring.NewMetricClient(ctx, cfg.clientOpts...)
+		if err != nil {
+			// Don't fail dialer initialization on metric client errors.
+			// Just disable metric collection below.
+			cfg.logger.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
+			mClient = nil
+		}
 	}
 
 	if cfg.useIAMAuthN && cfg.setTokenSource && !cfg.setIAMAuthNTokenSource {
@@ -380,7 +389,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqlDataConnState:                make(map[cacheKey]*sqlDataConnState),
 		cache:                           make(map[cacheKey]*monitoredCache),
 		lazyRefresh:                     cfg.lazyRefresh,
-		disableBuiltInMetrics:           cfg.disableBuiltInMetrics,
+		enableBuiltInMetrics:            cfg.enableBuiltInMetrics,
 		keyGenerator:                    g,
 		refreshTimeout:                  cfg.refreshTimeout,
 		sqladmin:                        client,
@@ -417,7 +426,7 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 		}
 	}
 	cfg := tel.Config{
-		Enabled:           !d.disableBuiltInMetrics,
+		Enabled:           d.enableBuiltInMetrics,
 		Version:           versionString,
 		ResourceContainer: inst.Project(),
 		// ResourceID is the Cloud SQL instance identifier formatted as [project_name:instance_name].

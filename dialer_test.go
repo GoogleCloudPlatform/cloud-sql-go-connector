@@ -36,6 +36,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/mdx"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
+	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	"golang.org/x/oauth2"
 )
 
@@ -1957,4 +1958,60 @@ func TestDialerDnsResolutionEmptyFallbackToPrivateIP(t *testing.T) {
 		context.Background(), t, d,
 		"db.example.com",
 	)
+}
+
+func TestBuiltInMetricsDisabledByDefault(t *testing.T) {
+	ctx := context.Background()
+	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+
+	if d.enableBuiltInMetrics {
+		t.Fatal("built-in metrics should be disabled by default")
+	}
+	if d.mClient != nil {
+		t.Fatal("metric client should not be created when built-in metrics are disabled")
+	}
+
+	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mr := d.metricRecorder(ctx, cn, "POSTGRESQL")
+	if _, ok := mr.(tel.NullMetricRecorder); !ok {
+		t.Fatalf("want tel.NullMetricRecorder when built-in metrics are disabled, got %T", mr)
+	}
+}
+
+func TestBuiltInMetricsOptIn(t *testing.T) {
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+
+	if !d.enableBuiltInMetrics {
+		t.Fatal("WithBuiltInMetrics should enable built-in metrics")
+	}
+	// The metric client depends on the environment's default credentials. If
+	// they are unavailable (e.g., in CI), the client is nil and the recorder
+	// must still degrade gracefully to a no-op.
+	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mr := d.metricRecorder(ctx, cn, "POSTGRESQL")
+	_, isNull := mr.(tel.NullMetricRecorder)
+	if d.mClient == nil && !isNull {
+		t.Fatalf("want tel.NullMetricRecorder when the metric client is nil, got %T", mr)
+	}
+	if d.mClient != nil && isNull {
+		t.Fatal("want a real metric recorder when built-in metrics are enabled and the metric client exists")
+	}
 }

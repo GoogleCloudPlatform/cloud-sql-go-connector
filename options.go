@@ -72,7 +72,7 @@ type dialerConfig struct {
 	sqlDataStreamTimeout            time.Duration
 	resourceExhaustedCooldownPeriod time.Duration
 	useDNSNameResolver              bool
-	disableBuiltInMetrics           bool
+	enableBuiltInMetrics            bool
 	// err tracks any dialer options that may have failed.
 	err    error
 	client *sqladmin.Service
@@ -380,15 +380,20 @@ func WithDisableMetadataExchange() Option {
 	}
 }
 
-// WithDisableBuiltInMetrics disables the internal metric export. By
-// default, the Dialer will report on its internal operations to the
-// cloudsql.googleapis.com system metric prefix. These metrics help Cloud SQL
-// improve performance and identify client connectivity problems. Presently,
-// these metrics aren't public, but will be made public in the future. To
-// disable this telemetry, provide this option when initializing a Dialer.
-func WithDisableBuiltInMetrics() Option {
+// WithBuiltInMetrics enables the built-in metric export. When enabled, the
+// Dialer reports on its internal operations (connection attempts, dial
+// latency, open connections, connection durations) to Cloud Monitoring under
+// the cloudsql.googleapis.com/client/connector metric prefix, using the
+// cloudsql.googleapis.com/InstanceClient monitored resource. These metrics
+// help Cloud SQL improve performance and identify client connectivity
+// problems.
+//
+// Built-in metrics are disabled by default. The identity used by the Dialer
+// must have the roles/monitoring.metricWriter role on the Cloud SQL
+// instance's project for the export to succeed.
+func WithBuiltInMetrics() Option {
 	return func(cfg *dialerConfig) {
-		cfg.disableBuiltInMetrics = true
+		cfg.enableBuiltInMetrics = true
 	}
 }
 
