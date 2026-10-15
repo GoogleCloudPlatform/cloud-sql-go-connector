@@ -231,6 +231,10 @@ type MetricRecorder interface {
 	RecordConnectionDuration(context.Context, Attributes, float64)
 	RecordOpenConnectionCount(context.Context, Attributes)
 	DatabaseEngine() string
+	// Shutdown flushes any buffered metrics and stops the periodic export.
+	// It must be called when the recorder is no longer needed, otherwise
+	// metrics recorded since the last export are lost.
+	Shutdown(context.Context) error
 }
 
 // DefaultExportInterval is the interval that the metric exporter runs. It
@@ -355,6 +359,13 @@ func (m *metricRecorder) DatabaseEngine() string {
 	return m.dbEngineType
 }
 
+// Shutdown flushes buffered metrics and stops the periodic export. Shutting
+// down the provider is sufficient: the provider shuts down its reader, and
+// the reader flushes and shuts down the exporter.
+func (m *metricRecorder) Shutdown(ctx context.Context) error {
+	return m.provider.Shutdown(ctx)
+}
+
 // RecordClosedConnectionCount records totals number of closed connections.
 func (m *metricRecorder) RecordClosedConnectionCount(ctx context.Context, a Attributes) {
 	m.mClosedConnectionCount.Add(ctx, 1,
@@ -443,3 +454,6 @@ func (n NullMetricRecorder) RecordOpenConnectionCount(context.Context, Attribute
 func (n NullMetricRecorder) DatabaseEngine() string {
 	return ""
 }
+
+// Shutdown is a no-op.
+func (n NullMetricRecorder) Shutdown(context.Context) error { return nil }
