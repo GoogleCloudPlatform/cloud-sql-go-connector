@@ -48,6 +48,7 @@ import (
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
 
+	"cloud.google.com/go/auth/oauth2adapt"
 	tel "cloud.google.com/go/cloudsqlconn/internal/tel"
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
@@ -58,11 +59,17 @@ import (
 const (
 	// defaultTCPKeepAlive is the default keep alive value used on connections to a Cloud SQL instance.
 	defaultTCPKeepAlive = 30 * time.Second
+	// metricShutdownTimeout bounds how long Dialer.Close waits for the
+	// built-in metrics exporters to flush.
+	metricShutdownTimeout = 3 * time.Second
 	// serverProxyPort is the port the server-side proxy receives connections on.
 	serverProxyPort = "3307"
 	// iamLoginScope is the OAuth2 scope used for tokens embedded in the ephemeral
 	// certificate.
 	iamLoginScope = "https://www.googleapis.com/auth/sqlservice.login"
+	// monitoringWriteScope is the OAuth2 scope required to write time series
+	// to Cloud Monitoring. It is used for the built-in metrics export.
+	monitoringWriteScope = "https://www.googleapis.com/auth/monitoring.write"
 	// universeDomainEnvVar is the environment variable for setting the default
 	// service domain for a given Cloud universe.
 	universeDomainEnvVar = "GOOGLE_CLOUD_UNIVERSE_DOMAIN"
@@ -267,19 +274,6 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return nil, cfg.err
 		}
 	}
-	// Only create the Cloud Monitoring client when built-in metrics are
-	// enabled, so that callers who do not opt in pay no cost for it.
-	var mClient *monitoring.MetricClient
-	if cfg.enableBuiltInMetrics {
-		var err error
-		mClient, err = monitoring.NewMetricClient(ctx, cfg.clientOpts...)
-		if err != nil {
-			// Don't fail dialer initialization on metric client errors.
-			// Just disable metric collection below.
-			cfg.logger.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
-			mClient = nil
-		}
-	}
 
 	if cfg.useIAMAuthN && cfg.setTokenSource && !cfg.setIAMAuthNTokenSource {
 		return nil, errUseIAMTokenSource
@@ -377,6 +371,26 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		tp = cfg.authCredentials.TokenProvider
 	}
 
+	// Only create the Cloud Monitoring client when built-in metrics are
+	// enabled, so that callers who do not opt in pay no cost for it.
+	//
+	// This must run here, after credentials have been resolved above (ADC
+	// detection, authCredentials, token providers) and tp is known, so that
+	// the metric export uses the same identity, user agent, quota project,
+	// and universe domain as the Dialer's other API clients. Creating the
+	// client earlier would silently fall back to Application Default
+	// Credentials regardless of the options the caller passed.
+	var mClient *monitoring.MetricClient
+	if cfg.enableBuiltInMetrics {
+		mClient, err = newMetricClient(ctx, cfg, tp)
+		if err != nil {
+			// Don't fail dialer initialization on metric client errors.
+			// Just disable metric collection below.
+			cfg.logger.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
+			mClient = nil
+		}
+	}
+
 	var sqlDataDialer sqldataclient.Dialer
 	if cfg.sqlDataDialer != nil {
 		sqlDataDialer = cfg.sqlDataDialer
@@ -418,13 +432,63 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	return d, nil
 }
 
+// newMetricClient creates the Cloud Monitoring client used for built-in
+// metrics. The client is configured with the same user agent, quota project,
+// and universe domain as the Dialer's other API clients, and authenticates
+// with the identity returned by metricTokenProvider.
+func newMetricClient(ctx context.Context, cfg *dialerConfig, apiTP auth.TokenProvider) (*monitoring.MetricClient, error) {
+	opts := []option.ClientOption{
+		option.WithUserAgent(strings.Join(cfg.useragents, " ")),
+		option.WithUniverseDomain(cfg.getClientUniverseDomain()),
+	}
+	if cfg.quotaProject != "" {
+		opts = append(opts, option.WithQuotaProject(cfg.quotaProject))
+	}
+	tp, err := metricTokenProvider(cfg, apiTP)
+	if err != nil {
+		return nil, err
+	}
+	if tp != nil {
+		opts = append(opts, option.WithTokenSource(oauth2adapt.TokenSourceFromTokenProvider(tp)))
+	}
+	// Caller-provided client options go last so they take precedence.
+	opts = append(opts, cfg.clientOpts...)
+	return monitoring.NewMetricClient(ctx, opts...)
+}
+
+// metricTokenProvider returns the token provider for the built-in metrics
+// export.
+//
+// When the Dialer detected credentials itself (Application Default
+// Credentials, WithCredentialsFile, or WithCredentialsJSON), the credentials
+// are re-detected with the monitoring.write scope so that the resulting
+// tokens are accepted by the Cloud Monitoring API. This yields the same
+// identity as the Dialer's API calls, with the scope the export needs.
+//
+// When the caller supplied a token source or credentials directly, that
+// token provider is used as-is because its scopes cannot be changed.
+func metricTokenProvider(cfg *dialerConfig, apiTP auth.TokenProvider) (auth.TokenProvider, error) {
+	if !cfg.setCredentials || cfg.credentialsJSON != nil {
+		c, err := credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes:          []string{monitoringWriteScope},
+			CredentialsJSON: cfg.credentialsJSON,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create credentials for built-in metrics: %w", err)
+		}
+		return c.TokenProvider, nil
+	}
+	return apiTP, nil
+}
+
 // metricRecorder does a lazy initialization of the metric exporter.
 func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbEngineType string) tel.MetricRecorder {
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
-	if mr, ok := d.metricRecorders[inst]; ok {
-		if dbEngineType == "UNKNOWN" || dbEngineType == "" || mr.DatabaseEngine() == dbEngineType {
-			return mr
+	old, ok := d.metricRecorders[inst]
+	if ok {
+		if dbEngineType == "UNKNOWN" || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
+			return old
 		}
 	}
 	cfg := tel.Config{
@@ -444,6 +508,16 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 	}
 	mr := tel.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
 	d.metricRecorders[inst] = mr
+	if ok {
+		// The previous recorder (created before the database engine was
+		// known) is being replaced. Flush it and stop its periodic export so
+		// it does not leak a goroutine or double-report.
+		sctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
+		defer cancel()
+		if err := old.Shutdown(sctx); err != nil {
+			d.logger.Debugf(ctx, "[%v] failed to shut down replaced metric recorder: %v", inst.String(), err)
+		}
+	}
 	return mr
 }
 
@@ -1045,6 +1119,25 @@ func (d *Dialer) Close() error {
 	if err := d.sqlDataDialer.Close(); err != nil {
 		d.logger.Debugf(context.Background(),
 			"failed to close SQL data connection: %v", err)
+	}
+
+	// Flush and stop the built-in metrics exporters. Without this, metrics
+	// recorded since the last periodic export (up to 60s worth) are lost
+	// when the process exits, which is the common case on Cloud Run.
+	d.metricsMu.Lock()
+	defer d.metricsMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
+	defer cancel()
+	for inst, mr := range d.metricRecorders {
+		// Best effort: an error here isn't actionable by the caller.
+		if err := mr.Shutdown(ctx); err != nil {
+			d.logger.Debugf(ctx, "[%v] failed to shut down metric recorder: %v", inst.String(), err)
+		}
+	}
+	if d.mClient != nil {
+		if err := d.mClient.Close(); err != nil {
+			d.logger.Debugf(ctx, "failed to close metric client: %v", err)
+		}
 	}
 	return nil
 }

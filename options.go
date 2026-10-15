@@ -43,7 +43,11 @@ type dialerConfig struct {
 	sqladminOpts []apiopt.ClientOption
 	// clientOpts are options to configure any Google Cloud API client. They
 	// should not include any CloudSQL-specific configuration.
-	clientOpts            []apiopt.ClientOption
+	clientOpts []apiopt.ClientOption
+	// credentialsJSON holds the raw credentials provided via
+	// WithCredentialsJSON or WithCredentialsFile, so that additional
+	// credentials with different scopes can be derived from them.
+	credentialsJSON       []byte
 	dialOpts              []DialOption
 	dialFunc              func(ctx context.Context, network, addr string) (net.Conn, error)
 	refreshTimeout        time.Duration
@@ -139,6 +143,7 @@ func WithCredentialsJSON(b []byte) Option {
 			return
 		}
 		d.iamLoginTokenProvider = scoped.TokenProvider
+		d.credentialsJSON = b
 		d.setCredentials = true
 	}
 }
@@ -391,9 +396,27 @@ func WithDisableMetadataExchange() Option {
 // Built-in metrics are disabled by default. The identity used by the Dialer
 // must have the roles/monitoring.metricWriter role on the Cloud SQL
 // instance's project for the export to succeed.
+//
+// The metric export uses the same identity as the Dialer's API calls. When
+// the Dialer detects credentials itself (Application Default Credentials,
+// WithCredentialsFile, or WithCredentialsJSON), it requests the
+// https://www.googleapis.com/auth/monitoring.write scope for the export.
+// When a token source or credentials are supplied directly (WithTokenSource,
+// WithCredentials, WithIAMAuthNTokenSources, WithIAMAuthNCredentials), the
+// supplied API token source is used as-is and must carry either the
+// monitoring.write or the cloud-platform scope.
 func WithBuiltInMetrics() Option {
 	return func(cfg *dialerConfig) {
 		cfg.enableBuiltInMetrics = true
+	}
+}
+
+// withMetricClientOptions appends options for the built-in metrics client.
+// It is unexported and intended for tests, e.g. to point the client at an
+// in-memory gRPC server.
+func withMetricClientOptions(opts ...apiopt.ClientOption) Option {
+	return func(cfg *dialerConfig) {
+		cfg.clientOpts = append(cfg.clientOpts, opts...)
 	}
 }
 
