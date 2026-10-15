@@ -2015,3 +2015,54 @@ func TestBuiltInMetricsOptIn(t *testing.T) {
 		t.Fatal("want a real metric recorder when built-in metrics are enabled and the metric client exists")
 	}
 }
+
+func TestDialerPropagatesMetricResourceFields(t *testing.T) {
+	ctx := context.Background()
+	tcs := []struct {
+		desc     string
+		opts     []Option
+		wantApp  string
+		wantUA   string
+		wantType string
+	}{
+		{
+			desc:     "defaults",
+			opts:     nil,
+			wantApp:  "unknown",
+			wantUA:   userAgent,
+			wantType: "go",
+		},
+		{
+			desc: "application name and proxy user agent",
+			opts: []Option{
+				WithApplicationName("my-app"),
+				WithUserAgent("cloud-sql-proxy/2.0.0"),
+			},
+			wantApp:  "my-app",
+			wantUA:   userAgent + " cloud-sql-proxy/2.0.0",
+			wantType: "cloud-sql-proxy",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			opts := append([]Option{WithTokenSource(mock.EmptyTokenSource{})}, tc.opts...)
+			d, err := NewDialer(ctx, opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = d.Close() }()
+			if d.applicationName != tc.wantApp {
+				t.Errorf("applicationName: got %q, want %q", d.applicationName, tc.wantApp)
+			}
+			if d.userAgent != tc.wantUA {
+				t.Errorf("userAgent: got %q, want %q", d.userAgent, tc.wantUA)
+			}
+			if got := tel.ConnectorTypeValue(d.userAgent); got != tc.wantType {
+				t.Errorf("connector type: got %q, want %q", got, tc.wantType)
+			}
+		})
+	}
+	if strings.ContainsAny(strings.TrimSpace(versionString), "\r\n") || strings.TrimSpace(versionString) == "" {
+		t.Fatalf("versionString must be a non-empty single line, got %q", versionString)
+	}
+}

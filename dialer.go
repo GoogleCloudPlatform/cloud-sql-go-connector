@@ -408,6 +408,8 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqlDataEndpoint:                 cfg.sqlDataEndpoint,
 		sqlDataDialer:                   sqlDataDialer,
 		resourceExhaustedCooldownPeriod: cfg.resourceExhaustedCooldownPeriod,
+		userAgent:                       strings.Join(cfg.useragents, " "),
+		applicationName:                 cfg.applicationName,
 	}
 
 	// log the Dialer ID
@@ -427,7 +429,7 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 	}
 	cfg := tel.Config{
 		Enabled:           d.enableBuiltInMetrics,
-		Version:           versionString,
+		Version:           strings.TrimSpace(versionString),
 		ResourceContainer: inst.Project(),
 		// ResourceID is the Cloud SQL instance identifier formatted as [project_name:instance_name].
 		ResourceID:         inst.Project() + ":" + inst.Name(),
@@ -437,7 +439,7 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 		ClientRegion:       tel.DetectClientRegion(),
 		ComputePlatform:    tel.DetectComputePlatform(),
 		ConnectorType:      tel.ConnectorTypeValue(d.userAgent),
-		ConnectorVersion:   versionString,
+		ConnectorVersion:   strings.TrimSpace(versionString),
 		DatabaseEngineType: dbEngineType,
 	}
 	mr := tel.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
