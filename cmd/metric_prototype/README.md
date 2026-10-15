@@ -57,13 +57,13 @@ go run ./cmd/metric_prototype/main.go
 
 ---
 
-## ⏱️ Important Note on Metric Export (60-Second Flush Interval)
+## ⏱️ Important Note on Metric Export
 
-OpenTelemetry exports metric snapshots periodically every **60 seconds** (`DefaultExportInterval = 60s`). 
+Built-in metrics are **disabled by default**. The prototype opts in with `cloudsqlconn.WithBuiltInMetrics()`; without that option nothing is exported.
 
-Because the connector's internal meter provider runs batch collection on a 60-second timer, `main.go` includes a **75-second wait step** after closing the connection. 
+OpenTelemetry exports metric snapshots periodically every **60 seconds** (`DefaultExportInterval = 60s`). In addition, `Dialer.Close()` flushes any buffered metrics and stops the exporter, so `main.go` simply closes the Dialer before exiting and does not need to wait for the periodic timer.
 
-> ⚠️ **Do not terminate the application early.** Let the script finish waiting so that the OpenTelemetry exporter has time to push the time-series points to Cloud Monitoring.
+> ⚠️ **Always close the Dialer before the process exits.** Exiting without `Close()` (for example via `log.Fatal` or an unhandled signal) loses any metrics recorded since the last periodic export.
 
 ---
 

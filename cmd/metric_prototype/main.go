@@ -37,18 +37,19 @@ func main() {
 
 	ctx := context.Background()
 
-	// 2. Initialize the Cloud SQL Dialer with custom debug logger and application name.
-	// Enabling WithContextDebugLogger allows you to observe internal telemetry logs
-	// and OpenTelemetry export operations in stdout.
+	// 2. Initialize the Cloud SQL Dialer with built-in metrics enabled.
+	// Built-in metrics are disabled by default and must be explicitly opted
+	// into with WithBuiltInMetrics. Enabling WithContextDebugLogger allows you
+	// to observe internal telemetry logs and OpenTelemetry export operations.
 	logger := &customLogger{}
 	d, err := cloudsqlconn.NewDialer(ctx,
+		cloudsqlconn.WithBuiltInMetrics(),
 		cloudsqlconn.WithContextDebugLogger(logger),
 		cloudsqlconn.WithApplicationName("metric-prototype-test"),
 	)
 	if err != nil {
 		log.Fatalf("Failed to initialize Cloud SQL Dialer: %v", err)
 	}
-	defer d.Close()
 
 	// 3. Dial the Cloud SQL instance.
 	// Dials trigger the following metric recordings:
@@ -58,7 +59,12 @@ func main() {
 	fmt.Printf("Dialing Cloud SQL instance: %s ...\n", inst)
 	conn, err := d.Dial(ctx, inst)
 	if err != nil {
-		log.Fatalf("Failed to establish connection: %v", err)
+		// A failed dial is itself recorded (open_connection_count with a
+		// non-success status). Close the Dialer so that metric is flushed
+		// before exiting.
+		fmt.Printf("Dial failed: %v\nClosing dialer to flush the failure metric...\n", err)
+		_ = d.Close()
+		os.Exit(1)
 	}
 	fmt.Println("Dial successful! Connection established.")
 
@@ -77,18 +83,14 @@ func main() {
 	}
 	fmt.Println("Connection closed successfully!")
 
-	// 6. CRITICAL WAITING STEP FOR OPENTELEMETRY EXPORTER:
-	// OpenTelemetry exports metric snapshots periodically every 60 seconds (DefaultExportInterval = 60s).
-	// Because the OpenTelemetry background meter provider flushes metrics on a 60s ticker,
-	// we must keep the main process alive for >60s (75 seconds) to ensure the batch exporter sends
-	// the collected metrics to Cloud Monitoring before the application exits.
-	fmt.Println("\n==========================================================================")
-	fmt.Println("Waiting 75 seconds for the 60-second periodic metric exporter to run...")
-	fmt.Println("Do not kill this process until export completes!")
-	fmt.Println("==========================================================================")
-
-	time.Sleep(75 * time.Second)
-	fmt.Println("\nFinished waiting! Metric export completed. Exiting now.")
+	// 6. Close the Dialer. This flushes any buffered metrics to Cloud
+	// Monitoring and stops the periodic exporter, so there is no need to keep
+	// the process alive for the 60-second export interval.
+	fmt.Println("Closing dialer to flush metrics to Cloud Monitoring...")
+	if err := d.Close(); err != nil {
+		log.Fatalf("Failed to close dialer: %v", err)
+	}
+	fmt.Println("Metrics flushed. Exiting now.")
 	fmt.Println("Check Google Cloud Monitoring Metrics Explorer under 'cloudsql.googleapis.com/client/connector/'.")
 }
 
