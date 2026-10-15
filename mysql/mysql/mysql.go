@@ -82,3 +82,20 @@ type mysqlDriver struct {
 func (d *mysqlDriver) Open(name string) (driver.Conn, error) {
 	return d.d.Open(name)
 }
+
+// OpenConnector implements driver.DriverContext, preserving the caller's context
+// when database/sql opens a connection.
+func (d *mysqlDriver) OpenConnector(name string) (driver.Connector, error) {
+	c, err := d.d.OpenConnector(name)
+	if err != nil {
+		return nil, err
+	}
+	return &mysqlConnector{Connector: c, driver: d}, nil
+}
+
+type mysqlConnector struct {
+	driver.Connector
+	driver *mysqlDriver
+}
+
+func (c *mysqlConnector) Driver() driver.Driver { return c.driver }

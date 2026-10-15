@@ -67,6 +67,27 @@ func (p *pgDriver) Open(name string) (driver.Conn, error) {
 
 }
 
+// OpenConnector implements driver.DriverContext, preserving the caller's context
+// when database/sql opens a connection.
+func (p *pgDriver) OpenConnector(name string) (driver.Connector, error) {
+	dbURI, err := p.dbURI(name)
+	if err != nil {
+		return nil, err
+	}
+	c, err := stdlib.GetDefaultDriver().(driver.DriverContext).OpenConnector(dbURI)
+	if err != nil {
+		return nil, err
+	}
+	return &pgConnector{Connector: c, driver: p}, nil
+}
+
+type pgConnector struct {
+	driver.Connector
+	driver *pgDriver
+}
+
+func (c *pgConnector) Driver() driver.Driver { return c.driver }
+
 // dbURI registers a driver using the provided DSN. If the name has already
 // been registered, dbURI returns the existing registration.
 func (p *pgDriver) dbURI(name string) (string, error) {
