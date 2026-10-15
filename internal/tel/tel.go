@@ -270,12 +270,18 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
 		return NullMetricRecorder{}
 	}
-	// The Cloud Monitoring exporter closes the MetricClient it was given when
-	// it is shut down. The client is shared by every recorder of a Dialer, so
-	// shutting down one recorder must not close it. Wrap the exporter so the
-	// periodic reader's shutdown flushes but leaves the client open; the
-	// Dialer closes the client once all recorders are shut down.
-	sexp := sharedClientExporter{Exporter: exp}
+	// A Dialer creates one recorder (provider + reader + exporter) per
+	// instance, but all of them share the single MetricClient passed in via
+	// WithMonitoringClient. The Cloud Monitoring exporter's Shutdown closes
+	// that client as if it owned it, which would break every other recorder
+	// still using it (observed as "grpc: the client connection is closing"
+	// when a recorder is replaced or when Close flushes multiple instances).
+	// sharedClientExporter delegates everything to the real exporter except
+	// Shutdown, which is a no-op. The periodic reader still performs its
+	// final collect-and-export before calling Shutdown, so flushing works;
+	// the Dialer closes the shared client once after all recorders are
+	// shut down.
+	sharedExp := sharedClientExporter{Exporter: exp}
 
 	res := resource.NewWithAttributes(monitoredResource,
 		// The gcp.resource_type is a special attribute that the exporter
@@ -295,7 +301,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 
 	p := sdkmetric.NewMeterProvider(
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(
-			sexp,
+			sharedExp,
 			// The periodic reader runs every 60 seconds by default, but set
 			// the value anyway to be defensive.
 			sdkmetric.WithInterval(DefaultExportInterval),
@@ -335,7 +341,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		return NullMetricRecorder{}
 	}
 	return &metricRecorder{
-		exporter:               sexp,
+		exporter:               sharedExp,
 		provider:               p,
 		dialerID:               cfg.ClientUID,
 		dbEngineType:           cfg.DatabaseEngineType,

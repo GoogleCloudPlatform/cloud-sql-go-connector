@@ -372,9 +372,14 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	}
 
 	// Only create the Cloud Monitoring client when built-in metrics are
-	// enabled, so that callers who do not opt in pay no cost for it. The
-	// client is created after credentials are resolved so that the metric
-	// export uses the same identity as the Dialer's API calls.
+	// enabled, so that callers who do not opt in pay no cost for it.
+	//
+	// This must run here, after credentials have been resolved above (ADC
+	// detection, authCredentials, token providers) and tp is known, so that
+	// the metric export uses the same identity, user agent, quota project,
+	// and universe domain as the Dialer's other API clients. Creating the
+	// client earlier would silently fall back to Application Default
+	// Credentials regardless of the options the caller passed.
 	var mClient *monitoring.MetricClient
 	if cfg.enableBuiltInMetrics {
 		mClient, err = newMetricClient(ctx, cfg, tp)
