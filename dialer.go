@@ -59,6 +59,9 @@ import (
 const (
 	// defaultTCPKeepAlive is the default keep alive value used on connections to a Cloud SQL instance.
 	defaultTCPKeepAlive = 30 * time.Second
+	// metricShutdownTimeout bounds how long Dialer.Close waits for the
+	// built-in metrics exporters to flush.
+	metricShutdownTimeout = 3 * time.Second
 	// serverProxyPort is the port the server-side proxy receives connections on.
 	serverProxyPort = "3307"
 	// iamLoginScope is the OAuth2 scope used for tokens embedded in the ephemeral
@@ -477,9 +480,10 @@ func metricTokenProvider(cfg *dialerConfig, apiTP auth.TokenProvider) (auth.Toke
 func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbEngineType string) tel.MetricRecorder {
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
-	if mr, ok := d.metricRecorders[inst]; ok {
-		if dbEngineType == "UNKNOWN" || dbEngineType == "" || mr.DatabaseEngine() == dbEngineType {
-			return mr
+	old, ok := d.metricRecorders[inst]
+	if ok {
+		if dbEngineType == "UNKNOWN" || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
+			return old
 		}
 	}
 	cfg := tel.Config{
@@ -499,6 +503,16 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 	}
 	mr := tel.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
 	d.metricRecorders[inst] = mr
+	if ok {
+		// The previous recorder (created before the database engine was
+		// known) is being replaced. Flush it and stop its periodic export so
+		// it does not leak a goroutine or double-report.
+		sctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
+		defer cancel()
+		if err := old.Shutdown(sctx); err != nil {
+			d.logger.Debugf(ctx, "[%v] failed to shut down replaced metric recorder: %v", inst.String(), err)
+		}
+	}
 	return mr
 }
 
@@ -1100,6 +1114,25 @@ func (d *Dialer) Close() error {
 	if err := d.sqlDataDialer.Close(); err != nil {
 		d.logger.Debugf(context.Background(),
 			"failed to close SQL data connection: %v", err)
+	}
+
+	// Flush and stop the built-in metrics exporters. Without this, metrics
+	// recorded since the last periodic export (up to 60s worth) are lost
+	// when the process exits, which is the common case on Cloud Run.
+	d.metricsMu.Lock()
+	defer d.metricsMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
+	defer cancel()
+	for inst, mr := range d.metricRecorders {
+		// Best effort: an error here isn't actionable by the caller.
+		if err := mr.Shutdown(ctx); err != nil {
+			d.logger.Debugf(ctx, "[%v] failed to shut down metric recorder: %v", inst.String(), err)
+		}
+	}
+	if d.mClient != nil {
+		if err := d.mClient.Close(); err != nil {
+			d.logger.Debugf(ctx, "failed to close metric client: %v", err)
+		}
 	}
 	return nil
 }

@@ -2222,3 +2222,161 @@ func TestBuiltInMetricsExportsThroughDialerClient(t *testing.T) {
 	}
 	t.Fatal("timed out waiting for the metric export to reach the in-memory server")
 }
+
+// resourceLabel returns the value of a monitored-resource label from the first
+// time series in the first recorded request, or "" if absent.
+func resourceLabel(reqs []*monitoringpb.CreateTimeSeriesRequest, key string) string {
+	if len(reqs) == 0 || len(reqs[0].GetTimeSeries()) == 0 {
+		return ""
+	}
+	return reqs[0].GetTimeSeries()[0].GetResource().GetLabels()[key]
+}
+
+func TestCloseFlushesBuiltInMetrics(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+
+	// Make the periodic export effectively never run, so that any export we
+	// observe must come from the flush in Close.
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(),
+		withMetricClientOptions(option.WithGRPCConn(conn)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mr := d.metricRecorder(ctx, cn, "POSTGRESQL")
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+
+	if got := len(fake.requests()); got != 0 {
+		t.Fatalf("expected no export before Close, got %d requests", got)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reqs := fake.requests()
+	if len(reqs) == 0 {
+		t.Fatal("Close did not flush buffered built-in metrics")
+	}
+	if got, want := reqs[0].GetName(), "projects/my-project"; got != want {
+		t.Fatalf("flushed time series project: got %q, want %q", got, want)
+	}
+	// Close must be idempotent and must not panic on already-shut-down
+	// recorders.
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMetricRecorderReplacementFlushesOldRecorder(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(),
+		withMetricClientOptions(option.WithGRPCConn(conn)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Dial starts with an UNKNOWN-engine recorder and swaps to the real
+	// engine once instance metadata is known. Metrics recorded on the first
+	// recorder must not be lost when it is replaced.
+	first := d.metricRecorder(ctx, cn, "UNKNOWN")
+	first.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: "connection_refused"})
+	second := d.metricRecorder(ctx, cn, "POSTGRESQL")
+	if first == second {
+		t.Fatal("expected a new recorder once the database engine is known")
+	}
+	reqs := fake.requests()
+	if len(reqs) == 0 {
+		t.Fatal("replacing the recorder did not flush the old recorder's metrics")
+	}
+	if got, want := resourceLabel(reqs, "database_engine_type"), "UNKNOWN"; got != want {
+		t.Fatalf("flushed resource database_engine_type: got %q, want %q", got, want)
+	}
+	// Recording on the replaced recorder must be safe (no panic) even though
+	// its provider is shut down.
+	first.RecordClosedConnectionCount(ctx, tel.Attributes{IPType: "public", DialStatus: tel.ConnectSuccess})
+
+	// The replacement is the one that stays registered.
+	if got := d.metricRecorder(ctx, cn, "POSTGRESQL"); got != second {
+		t.Fatal("expected the engine-specific recorder to remain registered")
+	}
+
+	// Shutting down the first recorder must not have closed the shared
+	// metric client: the replacement recorder must still be able to export.
+	second.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var sawEngine bool
+	for _, r := range fake.requests() {
+		if resourceLabel([]*monitoringpb.CreateTimeSeriesRequest{r}, "database_engine_type") == "POSTGRESQL" {
+			sawEngine = true
+		}
+	}
+	if !sawEngine {
+		t.Fatal("replacement recorder could not export after the old recorder was shut down (shared client closed?)")
+	}
+}
+
+func TestCloseFlushesAllRecorders(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(),
+		withMetricClientOptions(option.WithGRPCConn(conn)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two instances in different projects share one metric client. Closing
+	// the Dialer must flush both, not just the first one shut down.
+	for _, name := range []string{"proj-a:us-central1:inst-a", "proj-b:us-central1:inst-b"} {
+		cn, err := instance.ParseConnName(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mr := d.metricRecorder(ctx, cn, "MYSQL")
+		mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range fake.requests() {
+		got[r.GetName()] = true
+	}
+	for _, want := range []string{"projects/proj-a", "projects/proj-b"} {
+		if !got[want] {
+			t.Errorf("Close did not flush metrics for %s; flushed projects: %v", want, got)
+		}
+	}
+}
