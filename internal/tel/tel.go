@@ -270,6 +270,12 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
 		return NullMetricRecorder{}
 	}
+	// The Cloud Monitoring exporter closes the MetricClient it was given when
+	// it is shut down. The client is shared by every recorder of a Dialer, so
+	// shutting down one recorder must not close it. Wrap the exporter so the
+	// periodic reader's shutdown flushes but leaves the client open; the
+	// Dialer closes the client once all recorders are shut down.
+	sexp := sharedClientExporter{Exporter: exp}
 
 	res := resource.NewWithAttributes(monitoredResource,
 		// The gcp.resource_type is a special attribute that the exporter
@@ -289,7 +295,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 
 	p := sdkmetric.NewMeterProvider(
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(
-			exp,
+			sexp,
 			// The periodic reader runs every 60 seconds by default, but set
 			// the value anyway to be defensive.
 			sdkmetric.WithInterval(DefaultExportInterval),
@@ -300,36 +306,36 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 
 	mConnectLatency, err := m.Float64Histogram(connectLatency)
 	if err != nil {
-		_ = exp.Shutdown(ctx)
+		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize dial latency metric: %v", err)
 		return NullMetricRecorder{}
 	}
 	mOpenConns, err := m.Int64UpDownCounter(openConnections)
 	if err != nil {
-		_ = exp.Shutdown(ctx)
+		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize open connections metric: %v", err)
 		return NullMetricRecorder{}
 	}
 	mClosedConnectionCount, err := m.Int64Counter(closedConnectionCount)
 	if err != nil {
-		_ = exp.Shutdown(ctx)
+		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize refresh count metric: %v", err)
 		return NullMetricRecorder{}
 	}
 	mConnectionDuration, err := m.Float64Histogram(connectionDurations, metric.WithUnit("s"))
 	if err != nil {
-		_ = exp.Shutdown(ctx)
+		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize connection duration metric: %v", err)
 		return NullMetricRecorder{}
 	}
 	mOpenConnectionCount, err := m.Int64Counter(openConnectionCount)
 	if err != nil {
-		_ = exp.Shutdown(ctx)
+		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize open connection count metric: %v", err)
 		return NullMetricRecorder{}
 	}
 	return &metricRecorder{
-		exporter:               exp,
+		exporter:               sexp,
 		provider:               p,
 		dialerID:               cfg.ClientUID,
 		dbEngineType:           cfg.DatabaseEngineType,
@@ -361,10 +367,23 @@ func (m *metricRecorder) DatabaseEngine() string {
 
 // Shutdown flushes buffered metrics and stops the periodic export. Shutting
 // down the provider is sufficient: the provider shuts down its reader, and
-// the reader flushes and shuts down the exporter.
+// the reader performs a final export. The shared MetricClient is not closed
+// here (see sharedClientExporter); the Dialer owns and closes it.
 func (m *metricRecorder) Shutdown(ctx context.Context) error {
 	return m.provider.Shutdown(ctx)
 }
+
+// sharedClientExporter wraps a Cloud Monitoring exporter whose MetricClient
+// is shared with other exporters. Its Shutdown does not shut down the wrapped
+// exporter, because doing so would close the shared client and break every
+// other recorder still using it. The periodic reader still performs its final
+// collect-and-export before calling Shutdown, so no data is lost.
+type sharedClientExporter struct {
+	sdkmetric.Exporter
+}
+
+// Shutdown is a no-op that leaves the shared MetricClient open.
+func (sharedClientExporter) Shutdown(context.Context) error { return nil }
 
 // RecordClosedConnectionCount records totals number of closed connections.
 func (m *metricRecorder) RecordClosedConnectionCount(ctx context.Context, a Attributes) {

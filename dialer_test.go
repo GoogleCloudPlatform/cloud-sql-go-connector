@@ -2323,4 +2323,60 @@ func TestMetricRecorderReplacementFlushesOldRecorder(t *testing.T) {
 	if got := d.metricRecorder(ctx, cn, "POSTGRESQL"); got != second {
 		t.Fatal("expected the engine-specific recorder to remain registered")
 	}
+
+	// Shutting down the first recorder must not have closed the shared
+	// metric client: the replacement recorder must still be able to export.
+	second.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var sawEngine bool
+	for _, r := range fake.requests() {
+		if resourceLabel([]*monitoringpb.CreateTimeSeriesRequest{r}, "database_engine_type") == "POSTGRESQL" {
+			sawEngine = true
+		}
+	}
+	if !sawEngine {
+		t.Fatal("replacement recorder could not export after the old recorder was shut down (shared client closed?)")
+	}
+}
+
+func TestCloseFlushesAllRecorders(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(),
+		withMetricClientOptions(option.WithGRPCConn(conn)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two instances in different projects share one metric client. Closing
+	// the Dialer must flush both, not just the first one shut down.
+	for _, name := range []string{"proj-a:us-central1:inst-a", "proj-b:us-central1:inst-b"} {
+		cn, err := instance.ParseConnName(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mr := d.metricRecorder(ctx, cn, "MYSQL")
+		mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range fake.requests() {
+		got[r.GetName()] = true
+	}
+	for _, want := range []string{"projects/proj-a", "projects/proj-b"} {
+		if !got[want] {
+			t.Errorf("Close did not flush metrics for %s; flushed projects: %v", want, got)
+		}
+	}
 }
