@@ -78,6 +78,34 @@ const (
 	RefreshAheadType = "refresh_ahead"
 	// RefreshLazyType indicates the dialer is using a lazy cache.
 	RefreshLazyType = "lazy"
+
+	// UnknownValue is used for any label whose value could not be determined.
+	// All enum-like label values are lowercase snake_case, matching the
+	// published metric descriptors and the AlloyDB connector.
+	UnknownValue = "unknown"
+
+	// connector_type values.
+	ConnectorTypeGo        = "go"
+	ConnectorTypeAuthProxy = "auth_proxy"
+
+	// compute_platform values.
+	PlatformGKE            = "gke"
+	PlatformCloudRun       = "cloud_run"
+	PlatformAppEngine      = "app_engine"
+	PlatformCloudFunctions = "cloud_functions"
+	PlatformGCE            = "gce"
+
+	// database_engine_type values.
+	EngineMySQL      = "mysql"
+	EnginePostgreSQL = "postgresql"
+	EngineSQLServer  = "sqlserver"
+
+	// instance_ip_type values.
+	IPTypePublic  = "public"
+	IPTypePrivate = "private"
+	IPTypePSC     = "psc"
+	IPTypeAuto    = "auto"
+	IPTypeSQLData = "sql_data"
 )
 
 // Config holds all the necessary information to configure a MetricRecorder.
@@ -111,9 +139,30 @@ type Config struct {
 // ConnectorTypeValue returns the connector type based on the user agent.
 func ConnectorTypeValue(userAgent string) string {
 	if strings.Contains(userAgent, "cloud-sql-proxy") {
-		return "cloud-sql-proxy"
+		return ConnectorTypeAuthProxy
 	}
-	return "go"
+	return ConnectorTypeGo
+}
+
+// IPTypeValue maps a dial connection type (e.g. cloudsql.PublicIP) to the
+// instance_ip_type label value.
+func IPTypeValue(connectionType string) string {
+	switch strings.ToUpper(connectionType) {
+	case "PUBLIC":
+		return IPTypePublic
+	case "PRIVATE":
+		return IPTypePrivate
+	case "PSC":
+		return IPTypePSC
+	case "AUTOIP":
+		return IPTypeAuto
+	case "SQLDATA":
+		return IPTypeSQLData
+	case "":
+		return UnknownValue
+	default:
+		return strings.ToLower(connectionType)
+	}
 }
 
 // AuthTypeValue returns the auth type string based on whether IAM Authn is enabled.
@@ -125,58 +174,58 @@ func AuthTypeValue(iamAuthn bool) string {
 }
 
 // DetectClientRegion returns the client region from GCP metadata if running on GCE/GKE/Cloud Run.
-// Any panic or error fails silently and returns "UNKNOWN".
+// Any panic or error fails silently and returns UnknownValue.
 func DetectClientRegion() (region string) {
 	// Safeguard against unexpected panics to prevent hard crashes in client applications.
 	defer func() {
 		if r := recover(); r != nil {
-			region = "UNKNOWN"
+			region = UnknownValue
 		}
 	}()
 	if !metadata.OnGCE() {
-		return "UNKNOWN"
+		return UnknownValue
 	}
 	zone, err := metadata.Zone()
 	if err != nil || zone == "" {
-		return "UNKNOWN"
+		return UnknownValue
 	}
 	if idx := strings.LastIndex(zone, "-"); idx != -1 {
-		return zone[:idx]
+		return strings.ToLower(zone[:idx])
 	}
-	return zone
+	return strings.ToLower(zone)
 }
 
 // DetectComputePlatform detects the GCP compute platform environment.
-// Any panic or error fails silently and returns "UNKNOWN".
+// Any panic or error fails silently and returns UnknownValue.
 func DetectComputePlatform() (platform string) {
 	switch {
 	case os.Getenv("KUBERNETES_SERVICE_HOST") != "":
-		return "GKE"
+		return PlatformGKE
 	case os.Getenv("K_SERVICE") != "":
-		return "CLOUD_RUN"
+		return PlatformCloudRun
 	case os.Getenv("GAE_SERVICE") != "":
-		return "APP_ENGINE"
+		return PlatformAppEngine
 	case os.Getenv("FUNCTION_NAME") != "":
-		return "CLOUD_FUNCTIONS"
+		return PlatformCloudFunctions
 	case metadata.OnGCE():
-		return "GCE"
+		return PlatformGCE
 	default:
-		return "UNKNOWN"
+		return UnknownValue
 	}
 }
 
 // DetectDatabaseEngineType detects the database engine type from a Cloud SQL DBVersion string.
-// Any panic or error fails silently and returns "UNKNOWN".
+// Any panic or error fails silently and returns UnknownValue.
 func DetectDatabaseEngineType(dbVersion string) (engine string) {
 	switch {
 	case strings.HasPrefix(dbVersion, "MYSQL"):
-		return "MYSQL"
+		return EngineMySQL
 	case strings.HasPrefix(dbVersion, "POSTGRES"):
-		return "POSTGRESQL"
+		return EnginePostgreSQL
 	case strings.HasPrefix(dbVersion, "SQLSERVER"):
-		return "SQLSERVER"
+		return EngineSQLServer
 	default:
-		return "UNKNOWN"
+		return UnknownValue
 	}
 }
 
@@ -218,7 +267,7 @@ func ClassifyDialError(err error) (string, string) {
 	// to accurately map granular status codes and provide more accurate "connection_part"
 	// detection (especially distinguishing errors in the proxy_to_server path)
 	// without relying on string matching.
-	return "unknown", "unknown_error"
+	return UnknownValue, "unknown_error"
 }
 
 // MetricRecorder defines the interface for recording metrics related to the
@@ -396,7 +445,7 @@ func (m *metricRecorder) RecordClosedConnectionCount(ctx context.Context, a Attr
 	m.mClosedConnectionCount.Add(ctx, 1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, a.IPType),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
 			attribute.String(status, a.DialStatus)),
 		))
 }
@@ -406,7 +455,7 @@ func (m *metricRecorder) RecordOpenConnection(ctx context.Context, a Attributes)
 	m.mOpenConns.Add(ctx, 1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, a.IPType),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
 		)))
 }
 
@@ -415,7 +464,7 @@ func (m *metricRecorder) RecordClosedConnection(ctx context.Context, a Attribute
 	m.mOpenConns.Add(ctx, -1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, a.IPType),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
 		)))
 }
 
@@ -424,7 +473,7 @@ func (m *metricRecorder) RecordConnectLatencies(ctx context.Context, a Attribute
 	m.mConnectLatency.Record(ctx, float64(latencyMS),
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, a.IPType),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
 		)),
 	)
 }
@@ -434,7 +483,7 @@ func (m *metricRecorder) RecordConnectionDuration(ctx context.Context, a Attribu
 	m.mConnectionDuration.Record(ctx, durationSec,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, a.IPType),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
 		)),
 	)
 }
@@ -444,7 +493,7 @@ func (m *metricRecorder) RecordOpenConnectionCount(ctx context.Context, a Attrib
 	m.mOpenConnectionCount.Add(ctx, 1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, a.IPType),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
 			attribute.String(connectionPart, a.ConnectionPart),
 			attribute.String(status, a.AttemptStatus),
 		)),

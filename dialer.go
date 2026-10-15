@@ -487,7 +487,7 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 	defer d.metricsMu.Unlock()
 	old, ok := d.metricRecorders[inst]
 	if ok {
-		if dbEngineType == "UNKNOWN" || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
+		if dbEngineType == tel.UnknownValue || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
 			return old
 		}
 	}
@@ -542,7 +542,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	if err != nil {
 		return nil, err
 	}
-	mr := d.metricRecorder(ctx, cn, "UNKNOWN")
+	mr := d.metricRecorder(ctx, cn, tel.UnknownValue)
 
 	startTime := time.Now()
 	var endDial trace.EndSpanFunc

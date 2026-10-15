@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
+	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	"github.com/google/go-cmp/cmp"
 	"golang.org/x/oauth2"
@@ -293,7 +294,7 @@ func TestMetricRecorder(t *testing.T) {
 			wantMetricType:     "cloudsql.googleapis.com/client/connector/closed_connection_count",
 			wantMetricLabels: map[string]string{
 				"instance_auth_type": "built_in",
-				"instance_ip_type":   "",
+				"instance_ip_type":   tel.UnknownValue,
 				"status":             "success",
 			},
 		},
@@ -359,11 +360,11 @@ func TestDetectDatabaseEngineType(t *testing.T) {
 		dbVersion string
 		want      string
 	}{
-		{"MYSQL_8_0", "MYSQL"},
-		{"POSTGRES_15", "POSTGRESQL"},
-		{"SQLSERVER_2019_STANDARD", "SQLSERVER"},
-		{"UNKNOWN_DB", "UNKNOWN"},
-		{"", "UNKNOWN"},
+		{"MYSQL_8_0", tel.EngineMySQL},
+		{"POSTGRES_15", tel.EnginePostgreSQL},
+		{"SQLSERVER_2019_STANDARD", tel.EngineSQLServer},
+		{"UNKNOWN_DB", tel.UnknownValue},
+		{"", tel.UnknownValue},
 	}
 	for _, tc := range tests {
 		got := tel.DetectDatabaseEngineType(tc.dbVersion)
@@ -375,8 +376,8 @@ func TestDetectDatabaseEngineType(t *testing.T) {
 
 func TestDetectComputePlatform(t *testing.T) {
 	t.Setenv("K_SERVICE", "my-cloud-run-svc")
-	if got := tel.DetectComputePlatform(); got != "CLOUD_RUN" {
-		t.Errorf("DetectComputePlatform() = %q, want %q", got, "CLOUD_RUN")
+	if got := tel.DetectComputePlatform(); got != tel.PlatformCloudRun {
+		t.Errorf("DetectComputePlatform() = %q, want %q", got, tel.PlatformCloudRun)
 	}
 }
 
@@ -396,5 +397,132 @@ func TestClassifyDialError(t *testing.T) {
 		if gotPart != tc.wantPart || gotStatus != tc.wantStatus {
 			t.Errorf("ClassifyDialError(%v) = (%q, %q), want (%q, %q)", tc.err, gotPart, gotStatus, tc.wantPart, tc.wantStatus)
 		}
+	}
+}
+
+// TestLabelValuesAreLowercaseSnakeCase pins the public contract for every
+// enum-like label value. These values are part of the published metric
+// descriptors and are consumed by customer dashboards and alerts, so changing
+// any of them is a breaking change.
+func TestLabelValuesAreLowercaseSnakeCase(t *testing.T) {
+	want := map[string]string{
+		"UnknownValue":           "unknown",
+		"ConnectorTypeGo":        "go",
+		"ConnectorTypeAuthProxy": "auth_proxy",
+		"PlatformGKE":            "gke",
+		"PlatformCloudRun":       "cloud_run",
+		"PlatformAppEngine":      "app_engine",
+		"PlatformCloudFunctions": "cloud_functions",
+		"PlatformGCE":            "gce",
+		"EngineMySQL":            "mysql",
+		"EnginePostgreSQL":       "postgresql",
+		"EngineSQLServer":        "sqlserver",
+		"IPTypePublic":           "public",
+		"IPTypePrivate":          "private",
+		"IPTypePSC":              "psc",
+		"IPTypeAuto":             "auto",
+		"IPTypeSQLData":          "sql_data",
+		"ConnectSuccess":         "success",
+		"ConnectError":           "error",
+		"RefreshAheadType":       "refresh_ahead",
+		"RefreshLazyType":        "lazy",
+	}
+	got := map[string]string{
+		"UnknownValue":           tel.UnknownValue,
+		"ConnectorTypeGo":        tel.ConnectorTypeGo,
+		"ConnectorTypeAuthProxy": tel.ConnectorTypeAuthProxy,
+		"PlatformGKE":            tel.PlatformGKE,
+		"PlatformCloudRun":       tel.PlatformCloudRun,
+		"PlatformAppEngine":      tel.PlatformAppEngine,
+		"PlatformCloudFunctions": tel.PlatformCloudFunctions,
+		"PlatformGCE":            tel.PlatformGCE,
+		"EngineMySQL":            tel.EngineMySQL,
+		"EnginePostgreSQL":       tel.EnginePostgreSQL,
+		"EngineSQLServer":        tel.EngineSQLServer,
+		"IPTypePublic":           tel.IPTypePublic,
+		"IPTypePrivate":          tel.IPTypePrivate,
+		"IPTypePSC":              tel.IPTypePSC,
+		"IPTypeAuto":             tel.IPTypeAuto,
+		"IPTypeSQLData":          tel.IPTypeSQLData,
+		"ConnectSuccess":         tel.ConnectSuccess,
+		"ConnectError":           tel.ConnectError,
+		"RefreshAheadType":       tel.RefreshAheadType,
+		"RefreshLazyType":        tel.RefreshLazyType,
+	}
+	for name, w := range want {
+		g, ok := got[name]
+		if !ok {
+			t.Errorf("%s: missing from got map (update the test)", name)
+			continue
+		}
+		if g != w {
+			t.Errorf("%s = %q, want %q", name, g, w)
+		}
+		for _, r := range g {
+			if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_' {
+				t.Errorf("%s = %q is not lowercase snake_case", name, g)
+				break
+			}
+		}
+	}
+}
+
+func TestIPTypeValue(t *testing.T) {
+	tcs := []struct {
+		in   string
+		want string
+	}{
+		{cloudsql.PublicIP, tel.IPTypePublic},
+		{cloudsql.PrivateIP, tel.IPTypePrivate},
+		{cloudsql.PSC, tel.IPTypePSC},
+		{cloudsql.AutoIP, tel.IPTypeAuto},
+		{cloudsql.SQLData, tel.IPTypeSQLData},
+		{"", tel.UnknownValue},
+		{"public", tel.IPTypePublic},
+		{"SomethingNew", "somethingnew"},
+	}
+	for _, tc := range tcs {
+		if got := tel.IPTypeValue(tc.in); got != tc.want {
+			t.Errorf("IPTypeValue(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestConnectorTypeValue(t *testing.T) {
+	tcs := []struct {
+		ua   string
+		want string
+	}{
+		{"cloud-sql-go-connector/1.25.3", tel.ConnectorTypeGo},
+		{"cloud-sql-go-connector/1.25.3 cloud-sql-proxy/2.26.0", tel.ConnectorTypeAuthProxy},
+		{"", tel.ConnectorTypeGo},
+	}
+	for _, tc := range tcs {
+		if got := tel.ConnectorTypeValue(tc.ua); got != tc.want {
+			t.Errorf("ConnectorTypeValue(%q) = %q, want %q", tc.ua, got, tc.want)
+		}
+	}
+}
+
+func TestDetectComputePlatformValues(t *testing.T) {
+	tcs := []struct {
+		env  string
+		want string
+	}{
+		{"KUBERNETES_SERVICE_HOST", tel.PlatformGKE},
+		{"K_SERVICE", tel.PlatformCloudRun},
+		{"GAE_SERVICE", tel.PlatformAppEngine},
+		{"FUNCTION_NAME", tel.PlatformCloudFunctions},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.env, func(t *testing.T) {
+			for _, e := range []string{"KUBERNETES_SERVICE_HOST", "K_SERVICE", "GAE_SERVICE", "FUNCTION_NAME"} {
+				t.Setenv(e, "")
+			}
+			t.Setenv(tc.env, "x")
+			if got := tel.DetectComputePlatform(); got != tc.want {
+				t.Errorf("DetectComputePlatform() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
