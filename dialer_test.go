@@ -913,6 +913,8 @@ func (s *spyConnectionInfoCache) ForceRefresh() {
 
 func (s *spyConnectionInfoCache) UpdateRefresh(*bool) {}
 
+func (s *spyConnectionInfoCache) RecordIAMPrincipal(string, string) {}
+
 func (s *spyConnectionInfoCache) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

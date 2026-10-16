@@ -15,11 +15,16 @@
 package cloudsql
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
+	"io"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +32,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
+	"github.com/jackc/pgx/v5/pgproto3"
 	"golang.org/x/time/rate"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -108,6 +114,9 @@ type RefreshAheadCache struct {
 
 	mu              sync.RWMutex
 	useIAMAuthNDial bool
+	ipType          string
+	dialFunc        func(ctx context.Context, network, addr string) (net.Conn, error)
+	iamPrincipals   []pgPrincipal
 	// cur represents the current refreshOperation that will be used to
 	// create connections. If a valid complete refreshOperation isn't
 	// available it's possible for cur to be equal to next.
@@ -122,6 +131,36 @@ type RefreshAheadCache struct {
 	cancel context.CancelFunc
 }
 
+type pgPrincipal struct {
+	user     string
+	database string
+}
+
+func appendIAMPrincipal(principals []pgPrincipal, user, database string) []pgPrincipal {
+	if user == "" {
+		return principals
+	}
+	if database == "" {
+		database = user
+	}
+	principal := pgPrincipal{user: user, database: database}
+	for _, existing := range principals {
+		if existing == principal {
+			return principals
+		}
+	}
+	return append(principals, principal)
+}
+
+// RecordIAMPrincipal records a PostgreSQL (user, database) pair observed on an
+// active Auto-IAM connection so that subsequent background refresh probes can
+// send a StartupMessage and update PgBouncer's cached pool credentials.
+func (i *RefreshAheadCache) RecordIAMPrincipal(user, database string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.iamPrincipals = appendIAMPrincipal(i.iamPrincipals, user, database)
+}
+
 // NewRefreshAheadCache initializes a new Instance given an instance connection name
 func NewRefreshAheadCache(
 	cn instance.ConnName,
@@ -132,6 +171,8 @@ func NewRefreshAheadCache(
 	tp auth.TokenProvider,
 	dialerID string,
 	useIAMAuthNDial bool,
+	dialFunc func(ctx context.Context, network, addr string) (net.Conn, error),
+	ipType string,
 ) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &RefreshAheadCache{
@@ -147,6 +188,8 @@ func NewRefreshAheadCache(
 		),
 		refreshTimeout:  refreshTimeout,
 		useIAMAuthNDial: useIAMAuthNDial,
+		dialFunc:        dialFunc,
+		ipType:          ipType,
 		ctx:             ctx,
 		cancel:          cancel,
 	}
@@ -432,6 +475,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 
 		// avoid refreshing too often to try not to tax the SQL Admin
 		// API quotas
+		var useIAMAuthN bool
 		err := i.l.Wait(ctx)
 		if err != nil {
 			r.err = errtype.NewDialError(
@@ -440,16 +484,25 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 				nil,
 			)
 		} else {
-			var useIAMAuthN bool
-			i.mu.Lock()
+			i.mu.RLock()
 			useIAMAuthN = i.useIAMAuthNDial
-			i.mu.Unlock()
+			i.mu.RUnlock()
 			r.result, r.err = i.r.ConnectionInfo(
 				ctx, i.connName, useIAMAuthN,
 			)
 		}
 		switch r.err {
 		case nil:
+			if useIAMAuthN {
+				if probeErr := i.probeConnection(ctx, r.result); probeErr != nil {
+					i.logger.Debugf(
+						ctx,
+						"[%v] Proactive IAM token refresh probe encountered error: %v",
+						i.connName.String(),
+						probeErr,
+					)
+				}
+			}
 			i.logger.Debugf(
 				ctx,
 				"[%v] Connection info refresh operation complete",
@@ -470,12 +523,12 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			)
 		}
 
-		close(r.ready)
-
 		// Once the refresh is complete, update "current" with working
 		// refreshOperation and schedule a new refresh
 		i.mu.Lock()
 		defer i.mu.Unlock()
+
+		close(r.ready)
 
 		// if failed, scheduled the next refresh immediately
 		if r.err != nil {
@@ -511,4 +564,201 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		i.next = i.scheduleRefresh(t)
 	})
 	return r
+}
+
+const (
+	serverProxyPort       = "3307"
+	maxPgStartupPacketLen = 10000
+)
+
+func (i *RefreshAheadCache) probeConnection(ctx context.Context, ci ConnectionInfo) error {
+	var principals []pgPrincipal
+	if strings.HasPrefix(ci.DBVersion, "POSTGRES") {
+		i.mu.RLock()
+		principals = append(principals, i.iamPrincipals...)
+		i.mu.RUnlock()
+	}
+	return probeInstanceConnection(
+		ctx, ci, i.refreshTimeout, i.ipType, i.dialFunc, principals, i.logger,
+	)
+}
+
+func probeInstanceConnection(
+	ctx context.Context,
+	ci ConnectionInfo,
+	refreshTimeout time.Duration,
+	ipType string,
+	dialFunc func(ctx context.Context, network, addr string) (net.Conn, error),
+	principals []pgPrincipal,
+	logger debug.ContextLogger,
+) error {
+	ctx, cancel := context.WithTimeout(ctx, refreshTimeout)
+	defer cancel()
+
+	var targets []string
+	if ci.ConnectionName.HasDomainName() {
+		targets = []string{ci.ConnectionName.DomainName()}
+	} else {
+		if ipType == "" {
+			ipType = AutoIP
+		}
+		addrs, err := ci.Addrs(ipType)
+		if err != nil {
+			return fmt.Errorf("no valid connection targets found for instance %v (ipType %v): %w", ci.ConnectionName.String(), ipType, err)
+		}
+		targets = addrs
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("no valid connection targets found for instance %v", ci.ConnectionName.String())
+	}
+
+	dial := dialFunc
+	if dial == nil {
+		var netDialer net.Dialer
+		dial = netDialer.DialContext
+	}
+
+	if len(principals) == 0 {
+		principals = []pgPrincipal{{}}
+	}
+
+	var lastErr error
+	for _, principal := range principals {
+		if err := probeSinglePrincipal(ctx, ci, targets, dial, principal, logger); err != nil {
+			lastErr = err
+		}
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+
+	logger.Debugf(ctx, "[%v] Proactive IAM token refresh probe successful", ci.ConnectionName.String())
+	return nil
+}
+
+func probeSinglePrincipal(
+	ctx context.Context,
+	ci ConnectionInfo,
+	targets []string,
+	dial func(ctx context.Context, network, addr string) (net.Conn, error),
+	principal pgPrincipal,
+	logger debug.ContextLogger,
+) error {
+	var (
+		conn    net.Conn
+		dialErr error
+	)
+	for _, target := range targets {
+		dialAddr := net.JoinHostPort(target, serverProxyPort)
+		logger.Debugf(ctx, "[%v] Probing IAM token refresh on %v", ci.ConnectionName.String(), dialAddr)
+		conn, dialErr = dial(ctx, "tcp", dialAddr)
+		if dialErr == nil {
+			break
+		}
+		logger.Debugf(ctx, "[%v] Probing IAM token refresh on %v failed: %v", ci.ConnectionName.String(), dialAddr, dialErr)
+	}
+	if dialErr != nil {
+		return fmt.Errorf("failed to dial probe connection: %w", dialErr)
+	}
+	defer conn.Close()
+
+	tlsConn := tls.Client(conn, ci.TLSConfig())
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		return fmt.Errorf("probe TLS handshake failed: %w", err)
+	}
+
+	if principal.user != "" {
+		if dl, ok := ctx.Deadline(); ok {
+			_ = tlsConn.SetDeadline(dl)
+		}
+		database := principal.database
+		if database == "" {
+			database = principal.user
+		}
+		frontend := pgproto3.NewFrontend(tlsConn, tlsConn)
+		frontend.Send(&pgproto3.StartupMessage{
+			ProtocolVersion: pgproto3.ProtocolVersion30,
+			Parameters: map[string]string{
+				"user":     principal.user,
+				"database": database,
+			},
+		})
+		if err := frontend.Flush(); err == nil {
+			// Read server response (AuthenticationOk / ErrorResponse) so that
+			// PgBouncer completes auth_query and finish_set_pool, updating
+			// pool->user_credentials->passwd in db->user_tree before disconnect.
+			_, _ = frontend.Receive()
+			frontend.Send(&pgproto3.Terminate{})
+			_ = frontend.Flush()
+		}
+	}
+
+	_ = tlsConn.Close()
+	return nil
+}
+
+// NewPostgresStartupSnifferConn wraps conn so that the first PostgreSQL v3
+// StartupMessage written by the client is inspected to extract (user, database)
+// and passed to onStartup. Subsequent writes pass through with zero overhead.
+func NewPostgresStartupSnifferConn(conn net.Conn, onStartup func(user, database string)) net.Conn {
+	if onStartup == nil {
+		return conn
+	}
+	return &pgStartupSnifferConn{
+		Conn:      conn,
+		onStartup: onStartup,
+	}
+}
+
+type pgStartupSnifferConn struct {
+	net.Conn
+	done      bool
+	buf       []byte
+	onStartup func(user, database string)
+}
+
+func (s *pgStartupSnifferConn) Write(b []byte) (int, error) {
+	if s.done {
+		return s.Conn.Write(b)
+	}
+
+	s.buf = append(s.buf, b...)
+	if user, db, complete := parsePostgresStartupPacket(s.buf); complete {
+		s.done = true
+		s.buf = nil
+		if user != "" {
+			s.onStartup(user, db)
+		}
+	} else if len(s.buf) > maxPgStartupPacketLen+8 {
+		s.done = true
+		s.buf = nil
+	}
+
+	return s.Conn.Write(b)
+}
+
+func parsePostgresStartupPacket(buf []byte) (user, database string, complete bool) {
+	backend := pgproto3.NewBackend(bytes.NewReader(buf), io.Discard)
+	for {
+		msg, err := backend.ReceiveStartupMessage()
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return "", "", false
+			}
+			return "", "", true
+		}
+		switch m := msg.(type) {
+		case *pgproto3.SSLRequest, *pgproto3.GSSEncRequest:
+			continue
+		case *pgproto3.StartupMessage:
+			user = m.Parameters["user"]
+			database = m.Parameters["database"]
+			if user != "" && database == "" {
+				database = user
+			}
+			return user, database, true
+		default:
+			return "", "", true
+		}
+	}
 }

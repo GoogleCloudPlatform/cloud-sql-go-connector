@@ -22,12 +22,14 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
+	"github.com/jackc/pgx/v5/pgproto3"
 )
 
 type nullLogger struct{}
@@ -74,7 +76,7 @@ func TestConnectionInfoDBVersion(t *testing.T) {
 		}()
 		i := NewRefreshAheadCache(
 			testInstanceConnName(), nullLogger{}, client,
-			RSAKey, 30*time.Second, nil, "", false,
+			RSAKey, 30*time.Second, nil, "", false, nil, "",
 		)
 		if err != nil {
 			t.Fatalf("failed to init instance: %v", err)
@@ -113,7 +115,7 @@ func TestConnectionInfo(t *testing.T) {
 
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
-		RSAKey, 30*time.Second, nil, "", false,
+		RSAKey, 30*time.Second, nil, "", false, nil, "",
 	)
 
 	ci, err := i.ConnectionInfo(ctx)
@@ -265,7 +267,7 @@ func TestConnectInfoAutoIP(t *testing.T) {
 
 		i := NewRefreshAheadCache(
 			testInstanceConnName(), nullLogger{}, client,
-			RSAKey, 30*time.Second, nil, "", false,
+			RSAKey, 30*time.Second, nil, "", false, nil, "",
 		)
 		if err != nil {
 			t.Fatalf("failed to create mock instance: %v", err)
@@ -360,7 +362,7 @@ func TestConnectInfoSQLDataFallbackIP(t *testing.T) {
 
 			i := NewRefreshAheadCache(
 				testInstanceConnName(), nullLogger{}, client,
-				RSAKey, 30*time.Second, nil, "", false,
+				RSAKey, 30*time.Second, nil, "", false, nil, "",
 			)
 
 			ci, err := i.ConnectionInfo(context.Background())
@@ -405,7 +407,7 @@ func TestClose(t *testing.T) {
 	// Set up an instance and then close it immediately
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
-		RSAKey, 30*time.Second, nil, "", false,
+		RSAKey, 30*time.Second, nil, "", false, nil, "",
 	)
 	i.Close()
 
@@ -535,5 +537,237 @@ func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
 	}
 	if !got.RootCAs.Equal(wantRootCAs) {
 		t.Fatalf("unexpected root CAs, got %v, want %v", got.RootCAs, wantRootCAs)
+	}
+}
+
+func TestRefreshAheadCache_ProbeConnection_Success(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion("POSTGRES_14"))
+	client, cleanup, err := mock.NewSQLAdminService(
+		ctx,
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+	defer cleanup()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{{
+			Certificate: [][]byte{inst.Cert.Raw},
+			PrivateKey:  inst.Key,
+		}},
+	}
+	tlsLn := tls.NewListener(ln, tlsConfig)
+	defer tlsLn.Close()
+
+	probed := make(chan struct{})
+	go func() {
+		conn, err := tlsLn.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		close(probed)
+	}()
+
+	dialFunc := func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, ln.Addr().String())
+	}
+
+	i := NewRefreshAheadCache(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 30*time.Second, nil, "", true,
+		dialFunc, "",
+	)
+	defer i.Close()
+
+	_, err = i.ConnectionInfo(ctx)
+	if err != nil {
+		t.Fatalf("failed to retrieve connection info: %v", err)
+	}
+
+	select {
+	case <-probed:
+		// Success: probe connection was accepted and TLS handshake completed
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for probe connection to be established")
+	}
+}
+
+func TestRefreshAheadCache_ProbeConnection_DialErrorDoesNotFailRefresh(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion("POSTGRES_14"))
+	client, cleanup, err := mock.NewSQLAdminService(
+		ctx,
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+	defer cleanup()
+
+	dialFunc := func(_ context.Context, _, _ string) (net.Conn, error) {
+		return nil, errors.New("network unreachable")
+	}
+
+	i := NewRefreshAheadCache(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 30*time.Second, nil, "", true,
+		dialFunc, "",
+	)
+	defer i.Close()
+
+	ci, err := i.ConnectionInfo(ctx)
+	if err != nil {
+		t.Fatalf("ConnectionInfo failed despite non-fatal probe error: %v", err)
+	}
+	if ci.DBVersion != "POSTGRES_14" {
+		t.Fatalf("unexpected DBVersion: got %v, want POSTGRES_14", ci.DBVersion)
+	}
+}
+
+func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
+	ctx := context.Background()
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion("POSTGRES_14"))
+	client, cleanup, err := mock.NewSQLAdminService(
+		ctx,
+		mock.InstanceGetSuccess(inst, 2),
+		mock.CreateEphemeralSuccess(inst, 2),
+	)
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+	defer cleanup()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{{
+			Certificate: [][]byte{inst.Cert.Raw},
+			PrivateKey:  inst.Key,
+		}},
+	}
+	tlsLn := tls.NewListener(ln, tlsConfig)
+	defer tlsLn.Close()
+
+	type probeRecord struct {
+		user         string
+		database     string
+		sawTerminate bool
+	}
+	startupProbeCh := make(chan probeRecord, 2)
+	go func() {
+		for {
+			conn, err := tlsLn.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+				backend := pgproto3.NewBackend(c, c)
+				msg, err := backend.ReceiveStartupMessage()
+				if err != nil {
+					return
+				}
+				sm, ok := msg.(*pgproto3.StartupMessage)
+				if !ok || sm.Parameters["user"] == "" {
+					return
+				}
+				backend.Send(&pgproto3.AuthenticationOk{})
+				backend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
+				_ = backend.Flush()
+				nextMsg, _ := backend.Receive()
+				_, sawTerm := nextMsg.(*pgproto3.Terminate)
+				startupProbeCh <- probeRecord{
+					user:         sm.Parameters["user"],
+					database:     sm.Parameters["database"],
+					sawTerminate: sawTerm,
+				}
+			}(conn)
+		}
+	}()
+
+	dialFunc := func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, ln.Addr().String())
+	}
+
+	i := NewRefreshAheadCache(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 30*time.Second, nil, "", true,
+		dialFunc, "",
+	)
+	defer i.Close()
+
+	if _, err := i.ConnectionInfo(ctx); err != nil {
+		t.Fatalf("initial ConnectionInfo failed: %v", err)
+	}
+
+	// Simulate an application connection capturing the PostgreSQL startup packet via sniffer.
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	defer c2.Close()
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			if _, err := c2.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+	sniffer := NewPostgresStartupSnifferConn(c1, i.RecordIAMPrincipal)
+	// Write SSLRequest followed by StartupMessage using pgproto3
+	sslReq, err := (&pgproto3.SSLRequest{}).Encode(nil)
+	if err != nil {
+		t.Fatalf("encode SSLRequest failed: %v", err)
+	}
+	if _, err := sniffer.Write(sslReq); err != nil {
+		t.Fatalf("sniffer write SSLRequest failed: %v", err)
+	}
+	startupPkt, err := (&pgproto3.StartupMessage{
+		ProtocolVersion: pgproto3.ProtocolVersion30,
+		Parameters: map[string]string{
+			"user":     "iam-user@example.com",
+			"database": "mydb",
+		},
+	}).Encode(nil)
+	if err != nil {
+		t.Fatalf("encode StartupMessage failed: %v", err)
+	}
+	if _, err := sniffer.Write(startupPkt); err != nil {
+		t.Fatalf("sniffer write StartupMessage failed: %v", err)
+	}
+
+	// Trigger a background refresh and verify probeConnection sends StartupMessage + Terminate.
+	i.ForceRefresh()
+	if _, err := i.ConnectionInfo(ctx); err != nil {
+		t.Fatalf("refreshed ConnectionInfo failed: %v", err)
+	}
+
+	select {
+	case rec := <-startupProbeCh:
+		if rec.user != "iam-user@example.com" || rec.database != "mydb" {
+			t.Fatalf("unexpected startup probe principal: got (%q, %q), want (\"iam-user@example.com\", \"mydb\")", rec.user, rec.database)
+		}
+		if !rec.sawTerminate {
+			t.Fatal("expected probe connection to send Terminate ('X') after reading server response")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for PostgreSQL startup probe packet")
 	}
 }
