@@ -47,6 +47,10 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
+
+	"cloud.google.com/go/auth/oauth2adapt"
+	tel "cloud.google.com/go/cloudsqlconn/internal/tel"
+	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -55,11 +59,17 @@ import (
 const (
 	// defaultTCPKeepAlive is the default keep alive value used on connections to a Cloud SQL instance.
 	defaultTCPKeepAlive = 30 * time.Second
+	// metricShutdownTimeout bounds how long Dialer.Close waits for the
+	// built-in metrics exporters to flush.
+	metricShutdownTimeout = 3 * time.Second
 	// serverProxyPort is the port the server-side proxy receives connections on.
 	serverProxyPort = "3307"
 	// iamLoginScope is the OAuth2 scope used for tokens embedded in the ephemeral
 	// certificate.
 	iamLoginScope = "https://www.googleapis.com/auth/sqlservice.login"
+	// monitoringWriteScope is the OAuth2 scope required to write time series
+	// to Cloud Monitoring. It is used for the built-in metrics export.
+	monitoringWriteScope = "https://www.googleapis.com/auth/monitoring.write"
 	// universeDomainEnvVar is the environment variable for setting the default
 	// service domain for a given Cloud universe.
 	universeDomainEnvVar = "GOOGLE_CLOUD_UNIVERSE_DOMAIN"
@@ -76,6 +86,8 @@ var (
 	//go:embed version.txt
 	versionString string
 	userAgent     = "cloud-sql-go-connector/" + strings.TrimSpace(versionString)
+	// dialerID is a unique ID for the dialer process.
+	dialerID = uuid.New().String()
 )
 
 // keyGenerator encapsulates the details of RSA key generation to provide lazy
@@ -188,7 +200,9 @@ type Dialer struct {
 
 	// dialerID uniquely identifies a Dialer. Used for monitoring purposes,
 	// *only* when a client has configured OpenCensus exporters.
-	dialerID string
+	dialerID        string
+	metricsMu       sync.Mutex
+	metricRecorders map[instance.ConnName]tel.MetricRecorder
 
 	// dialFunc is the function used to connect to the address on the named
 	// network. By default, it is golang.org/x/net/proxy#Dial.
@@ -211,6 +225,20 @@ type Dialer struct {
 	tokenProvider                   auth.TokenProvider
 	sqlDataEndpoint                 string
 	resourceExhaustedCooldownPeriod time.Duration
+
+	// applicationName is the name of the application using the dialer.
+	applicationName string
+
+	// enableBuiltInMetrics controls whether the Dialer exports built-in
+	// metrics. When false (the default), the metric export is a no-op.
+	enableBuiltInMetrics bool
+
+	// mClient is used for built-in system metrics. It is nil when built-in
+	// metrics are disabled or the client failed to initialize.
+	mClient *monitoring.MetricClient
+
+	// userAgent is the combined user agent string.
+	userAgent string
 }
 
 var (
@@ -238,6 +266,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqlDataEndpoint:                 "sqladmin.googleapis.com:443",
 		sqlDataStreamTimeout:            2 * time.Hour,
 		resourceExhaustedCooldownPeriod: 5 * time.Second,
+		applicationName:                 "unknown",
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -245,6 +274,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 			return nil, cfg.err
 		}
 	}
+
 	if cfg.useIAMAuthN && cfg.setTokenSource && !cfg.setIAMAuthNTokenSource {
 		return nil, errUseIAMTokenSource
 	}
@@ -341,6 +371,26 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		tp = cfg.authCredentials.TokenProvider
 	}
 
+	// Only create the Cloud Monitoring client when built-in metrics are
+	// enabled, so that callers who do not opt in pay no cost for it.
+	//
+	// This must run here, after credentials have been resolved above (ADC
+	// detection, authCredentials, token providers) and tp is known, so that
+	// the metric export uses the same identity, user agent, quota project,
+	// and universe domain as the Dialer's other API clients. Creating the
+	// client earlier would silently fall back to Application Default
+	// Credentials regardless of the options the caller passed.
+	var mClient *monitoring.MetricClient
+	if cfg.enableBuiltInMetrics {
+		mClient, err = newMetricClient(ctx, cfg, tp)
+		if err != nil {
+			// Don't fail dialer initialization on metric client errors.
+			// Just disable metric collection below.
+			cfg.logger.Debugf(ctx, "built-in metrics exporter failed to initialize: %v", err)
+			mClient = nil
+		}
+	}
+
 	var sqlDataDialer sqldataclient.Dialer
 	if cfg.sqlDataDialer != nil {
 		sqlDataDialer = cfg.sqlDataDialer
@@ -353,13 +403,16 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqlDataConnState:                make(map[cacheKey]*sqlDataConnState),
 		cache:                           make(map[cacheKey]*monitoredCache),
 		lazyRefresh:                     cfg.lazyRefresh,
+		enableBuiltInMetrics:            cfg.enableBuiltInMetrics,
 		keyGenerator:                    g,
 		refreshTimeout:                  cfg.refreshTimeout,
 		sqladmin:                        client,
+		mClient:                         mClient,
 		logger:                          cfg.logger,
 		defaultDialConfig:               dc,
-		dialerID:                        uuid.New().String(),
+		dialerID:                        dialerID,
 		iamTokenProvider:                cfg.iamLoginTokenProvider,
+		metricRecorders:                 map[instance.ConnName]tel.MetricRecorder{},
 		dialFunc:                        cfg.dialFunc,
 		dnsResolver:                     cfg.dnsResolver,
 		resolver:                        r,
@@ -369,9 +422,103 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqlDataEndpoint:                 cfg.sqlDataEndpoint,
 		sqlDataDialer:                   sqlDataDialer,
 		resourceExhaustedCooldownPeriod: cfg.resourceExhaustedCooldownPeriod,
+		userAgent:                       strings.Join(cfg.useragents, " "),
+		applicationName:                 cfg.applicationName,
 	}
 
+	// log the Dialer ID
+	d.logger.Debugf(ctx, "Cloud SQL Go Connector Dialer ID: %s", d.dialerID)
+
 	return d, nil
+}
+
+// newMetricClient creates the Cloud Monitoring client used for built-in
+// metrics. The client is configured with the same user agent, quota project,
+// and universe domain as the Dialer's other API clients, and authenticates
+// with the identity returned by metricTokenProvider.
+func newMetricClient(ctx context.Context, cfg *dialerConfig, apiTP auth.TokenProvider) (*monitoring.MetricClient, error) {
+	opts := []option.ClientOption{
+		option.WithUserAgent(strings.Join(cfg.useragents, " ")),
+		option.WithUniverseDomain(cfg.getClientUniverseDomain()),
+	}
+	if cfg.quotaProject != "" {
+		opts = append(opts, option.WithQuotaProject(cfg.quotaProject))
+	}
+	tp, err := metricTokenProvider(cfg, apiTP)
+	if err != nil {
+		return nil, err
+	}
+	if tp != nil {
+		opts = append(opts, option.WithTokenSource(oauth2adapt.TokenSourceFromTokenProvider(tp)))
+	}
+	// Caller-provided client options go last so they take precedence.
+	opts = append(opts, cfg.clientOpts...)
+	return monitoring.NewMetricClient(ctx, opts...)
+}
+
+// metricTokenProvider returns the token provider for the built-in metrics
+// export.
+//
+// When the Dialer detected credentials itself (Application Default
+// Credentials, WithCredentialsFile, or WithCredentialsJSON), the credentials
+// are re-detected with the monitoring.write scope so that the resulting
+// tokens are accepted by the Cloud Monitoring API. This yields the same
+// identity as the Dialer's API calls, with the scope the export needs.
+//
+// When the caller supplied a token source or credentials directly, that
+// token provider is used as-is because its scopes cannot be changed.
+func metricTokenProvider(cfg *dialerConfig, apiTP auth.TokenProvider) (auth.TokenProvider, error) {
+	if !cfg.setCredentials || cfg.credentialsJSON != nil {
+		c, err := credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes:          []string{monitoringWriteScope},
+			CredentialsJSON: cfg.credentialsJSON,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create credentials for built-in metrics: %w", err)
+		}
+		return c.TokenProvider, nil
+	}
+	return apiTP, nil
+}
+
+// metricRecorder does a lazy initialization of the metric exporter.
+func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbEngineType string) tel.MetricRecorder {
+	d.metricsMu.Lock()
+	defer d.metricsMu.Unlock()
+	old, ok := d.metricRecorders[inst]
+	if ok {
+		if dbEngineType == tel.UnknownValue || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
+			return old
+		}
+	}
+	cfg := tel.Config{
+		Enabled:           d.enableBuiltInMetrics,
+		Version:           strings.TrimSpace(versionString),
+		ResourceContainer: inst.Project(),
+		// ResourceID is the Cloud SQL instance identifier formatted as [project_name:instance_name].
+		ResourceID:         inst.Project() + ":" + inst.Name(),
+		ClientUID:          d.dialerID,
+		ApplicationName:    d.applicationName,
+		Region:             inst.Region(),
+		ClientRegion:       tel.DetectClientRegion(),
+		ComputePlatform:    tel.DetectComputePlatform(),
+		ConnectorType:      tel.ConnectorTypeValue(d.userAgent),
+		ConnectorVersion:   strings.TrimSpace(versionString),
+		DatabaseEngineType: dbEngineType,
+	}
+	mr := tel.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
+	d.metricRecorders[inst] = mr
+	if ok {
+		// The previous recorder (created before the database engine was
+		// known) is being replaced. Flush it and stop its periodic export so
+		// it does not leak a goroutine or double-report.
+		sctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
+		defer cancel()
+		if err := old.Shutdown(sctx); err != nil {
+			d.logger.Debugf(ctx, "[%v] failed to shut down replaced metric recorder: %v", inst.String(), err)
+		}
+	}
+	return mr
 }
 
 // Dial returns a net.Conn connected to the specified Cloud SQL instance. The
@@ -384,8 +531,29 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		return nil, ErrDialerClosed
 	default:
 	}
+	cfg := d.defaultDialConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	// Resolve the instance connection name to a ConnName struct.
+	// Note: icn may be a domain name that resolves to an instance connection name.
+	cn, err := d.resolver.Resolve(ctx, icn)
+	if err != nil {
+		return nil, err
+	}
+	mr := d.metricRecorder(ctx, cn, tel.UnknownValue)
+
 	startTime := time.Now()
 	var endDial trace.EndSpanFunc
+	attrs := tel.Attributes{
+		IAMAuthN:    cfg.useIAMAuthN,
+		RefreshType: tel.RefreshAheadType,
+		IPType:      cfg.connectionType,
+	}
+	if d.lazyRefresh {
+		attrs.RefreshType = tel.RefreshLazyType
+	}
 	ctx, endDial = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn.Dial",
 		trace.AddInstanceName(icn),
 		trace.AddDialerID(d.dialerID),
@@ -395,11 +563,6 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		endDial(err)
 	}()
 
-	cn, err := d.resolver.Resolve(ctx, icn)
-	if err != nil {
-		return nil, err
-	}
-
 	// Log if resolver changed the instance name input string.
 	if cn.DomainName() != "" {
 		// icn is a domain name, which resolves to a actual icn
@@ -407,11 +570,6 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	} else if cn.String() != icn {
 		// icn was not a domain name, but the resolver changed it and cn != icn
 		d.logger.Debugf(ctx, "resolved instance connection string %s to %s", icn, cn.String())
-	}
-
-	cfg := d.defaultDialConfig
-	for _, opt := range opts {
-		opt(&cfg)
 	}
 
 	// When using NoIP connections, there is no need to retrieve connection
@@ -444,7 +602,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 			}
 
 			// Attempt to connect SqlDataService
-			sdcConn, sdcErr := d.connectSQLDataService(ctx, cn, cfg, startTime)
+			sdcConn, sdcErr := d.connectSQLDataService(ctx, cn, cfg, startTime, mr, attrs)
 			if sdcErr == nil {
 				// Connection succeeded, return the connection.
 				return sdcConn, nil
@@ -460,11 +618,11 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		}
 	}
 
-	return d.connectInstanceIP(ctx, cn, cfg, startTime)
+	return d.connectInstanceIP(ctx, cn, cfg, startTime, mr, attrs)
 }
 
 // connectSQLDataService dials a connection through the SqlDataService.
-func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time) (net.Conn, error) {
+func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time, mr tel.MetricRecorder, attrs tel.Attributes) (net.Conn, error) {
 	key := createKey(cn)
 	onResourceExhausted := func(err error) {
 		d.lock.RLock()
@@ -516,7 +674,7 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 			state.allowed = false
 			state.mu.Unlock()
 		}
-		return d.connectInstanceIP(ctx, cn, cfg, startTime)
+		return d.connectInstanceIP(ctx, cn, cfg, startTime, mr, attrs)
 	}
 
 	// Assuming the connection is successful if Recv doesn't return an error
@@ -531,21 +689,31 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 }
 
 // connectInstanceIP dials the IP address of the instance using a normal net.Conn.
-func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time) (conn net.Conn, err error) {
+func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time, mr tel.MetricRecorder, attrs tel.Attributes) (conn net.Conn, err error) {
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	c, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	c, cacheHit, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	attrs.CacheHit = cacheHit
 	if err != nil {
+		attrs.DialStatus = tel.ConnectError
+		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+		mr.RecordOpenConnectionCount(ctx, attrs)
 		endInfo(err)
 		return nil, err
 	}
 	ci, err := c.ConnectionInfo(ctx)
 	if err != nil {
 		d.removeCached(ctx, cn, c, err)
+		attrs.DialStatus = tel.ConnectError
+		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+		mr.RecordOpenConnectionCount(ctx, attrs)
 		endInfo(err)
 		return nil, err
 	}
-	endInfo(err)
+	mr = d.metricRecorder(ctx, cn, tel.DetectDatabaseEngineType(ci.DBVersion))
+	endInfo(nil)
 
 	// If the client certificate has expired (as when the computer goes to
 	// sleep, and the refresh cycle cannot run), force a refresh immediately.
@@ -559,6 +727,10 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		ci, err = c.ConnectionInfo(ctx)
 		if err != nil {
 			d.removeCached(ctx, cn, c, err)
+			attrs.DialStatus = tel.ConnectError
+			attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+			mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+			mr.RecordOpenConnectionCount(ctx, attrs)
 			return nil, err
 		}
 	}
@@ -570,6 +742,10 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	addrs, err := ci.Addrs(cfg.connectionType)
 	if err != nil {
 		d.removeCached(ctx, cn, c, err)
+		attrs.DialStatus = tel.ConnectError
+		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+		mr.RecordOpenConnectionCount(ctx, attrs)
 		return nil, err
 	}
 
@@ -621,13 +797,26 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	if len(dialErrs) > 0 {
 		// refresh the instance info in case it caused the connection failure
 		c.ForceRefresh()
-		return nil, errtype.NewDialError("failed to dial", cn.String(), errors.Join(dialErrs...))
+		dialErr := errors.Join(dialErrs...)
+		attrs.DialStatus = tel.ConnectError
+		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(dialErr)
+		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+		mr.RecordOpenConnectionCount(ctx, attrs)
+		return nil, errtype.NewDialError("failed to dial", cn.String(), dialErr)
 	}
 	if c, ok := conn.(*net.TCPConn); ok {
 		if err := c.SetKeepAlive(true); err != nil {
+			attrs.DialStatus = tel.ConnectError
+			attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+			mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+			mr.RecordOpenConnectionCount(ctx, attrs)
 			return nil, errtype.NewDialError("failed to set keep-alive", cn.String(), err)
 		}
 		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
+			attrs.DialStatus = tel.ConnectError
+			attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+			mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+			mr.RecordOpenConnectionCount(ctx, attrs)
 			return nil, errtype.NewDialError("failed to set keep-alive period", cn.String(), err)
 		}
 	}
@@ -641,6 +830,10 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		d.logger.Debugf(ctx, "[%v] TLS handshake failed: %v", cn.String(), err)
 		d.removeCached(ctx, cn, c, err)
 		_ = tlsConn.Close() // best effort close attempt
+		attrs.DialStatus = tel.ConnectError
+		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+		mr.RecordOpenConnectionCount(ctx, attrs)
 		return nil, errtype.NewDialError("handshake failed", cn.String(), err)
 	}
 
@@ -653,13 +846,24 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	}
 
 	latency := time.Since(startTime).Milliseconds()
+	openTime := time.Now()
 	n := c.openConnsCount.Add(1)
 	trace.RecordOpenConnections(ctx, int64(n), d.dialerID, cn.String())
 	trace.RecordDialLatency(ctx, cn.String(), d.dialerID, latency)
+	attrs.DialStatus = tel.ConnectSuccess
+	attrs.ConnectionPart = ""
+	attrs.AttemptStatus = tel.ConnectSuccess
+	mr.RecordOpenConnection(ctx, attrs)
+	mr.RecordConnectLatencies(ctx, attrs, latency)
+	mr.RecordOpenConnectionCount(ctx, attrs)
 
 	closeFunc := func() {
+		durationSec := time.Since(openTime).Seconds()
 		n := c.openConnsCount.Add(^uint64(0)) // c.openConnsCount = c.openConnsCount - 1
 		trace.RecordOpenConnections(context.Background(), int64(n), d.dialerID, cn.String())
+		mr.RecordClosedConnection(context.Background(), attrs)
+		mr.RecordClosedConnectionCount(context.Background(), attrs)
+		mr.RecordConnectionDuration(context.Background(), attrs, durationSec)
 	}
 	errFunc := func(err error) {
 		// io.EOF occurs when the server closes the connection. This is safe to
@@ -765,7 +969,7 @@ func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	c, err := d.connectionInfoCache(ctx, cn, &d.defaultDialConfig.useIAMAuthN)
+	c, _, err := d.connectionInfoCache(ctx, cn, &d.defaultDialConfig.useIAMAuthN)
 	if err != nil {
 		return "", err
 	}
@@ -789,7 +993,7 @@ func (d *Dialer) Warmup(ctx context.Context, icn string, opts ...DialOption) err
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	c, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	c, _, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
 	if err != nil {
 		return err
 	}
@@ -916,6 +1120,25 @@ func (d *Dialer) Close() error {
 		d.logger.Debugf(context.Background(),
 			"failed to close SQL data connection: %v", err)
 	}
+
+	// Flush and stop the built-in metrics exporters. Without this, metrics
+	// recorded since the last periodic export (up to 60s worth) are lost
+	// when the process exits, which is the common case on Cloud Run.
+	d.metricsMu.Lock()
+	defer d.metricsMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
+	defer cancel()
+	for inst, mr := range d.metricRecorders {
+		// Best effort: an error here isn't actionable by the caller.
+		if err := mr.Shutdown(ctx); err != nil {
+			d.logger.Debugf(ctx, "[%v] failed to shut down metric recorder: %v", inst.String(), err)
+		}
+	}
+	if d.mClient != nil {
+		if err := d.mClient.Close(); err != nil {
+			d.logger.Debugf(ctx, "failed to close metric client: %v", err)
+		}
+	}
 	return nil
 }
 
@@ -938,9 +1161,11 @@ func createKey(cn instance.ConnName) cacheKey {
 // connectionInfoCache is a helper function for returning the appropriate
 // connection info Cache in a threadsafe way. It will create a new cache,
 // modify the existing one, or leave it unchanged as needed.
+//
+// It returns a *monitoredCache, a bool indicating a cache hit, and an error.
 func (d *Dialer) connectionInfoCache(
 	ctx context.Context, cn instance.ConnName, useIAMAuthN *bool,
-) (*monitoredCache, error) {
+) (*monitoredCache, bool, error) {
 	k := createKey(cn)
 
 	d.lock.RLock()
@@ -949,7 +1174,7 @@ func (d *Dialer) connectionInfoCache(
 
 	if ok && !c.isClosed() {
 		c.UpdateRefresh(useIAMAuthN)
-		return c, nil
+		return c, ok, nil
 	}
 
 	d.lock.Lock()
@@ -961,7 +1186,7 @@ func (d *Dialer) connectionInfoCache(
 	// c exists and is not closed
 	if ok && !c.isClosed() {
 		c.UpdateRefresh(useIAMAuthN)
-		return c, nil
+		return c, ok, nil
 	}
 
 	// Create a new instance of monitoredCache
@@ -972,7 +1197,7 @@ func (d *Dialer) connectionInfoCache(
 	d.logger.Debugf(ctx, "[%v] Connection info added to cache", cn.String())
 	rsaKey, err := d.keyGenerator.rsaKey()
 	if err != nil {
-		return nil, err
+		return nil, ok, err
 	}
 	var cache connectionInfoCache
 	if d.lazyRefresh {
@@ -995,7 +1220,7 @@ func (d *Dialer) connectionInfoCache(
 	c = newMonitoredCache(cache, cn, d.failoverPeriod, d.resolver, d.logger)
 	d.cache[k] = c
 
-	return c, nil
+	return c, ok, nil
 }
 
 // newMDXRequest builds a metadata exchange request based on the connection

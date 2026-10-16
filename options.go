@@ -39,21 +39,30 @@ import (
 type Option func(d *dialerConfig)
 
 type dialerConfig struct {
-	rsaKey                          *rsa.PrivateKey
-	sqladminOpts                    []apiopt.ClientOption
-	dialOpts                        []DialOption
-	dialFunc                        func(ctx context.Context, network, addr string) (net.Conn, error)
-	refreshTimeout                  time.Duration
-	useIAMAuthN                     bool
-	logger                          debug.ContextLogger
-	lazyRefresh                     bool
-	sqlDataEndpoint                 string
-	clientUniverseDomain            string
-	quotaProject                    string
-	authCredentials                 *auth.Credentials
-	iamLoginTokenProvider           auth.TokenProvider
-	apiTokenProvider                auth.TokenProvider
-	useragents                      []string
+	rsaKey       *rsa.PrivateKey
+	sqladminOpts []apiopt.ClientOption
+	// clientOpts are options to configure any Google Cloud API client. They
+	// should not include any CloudSQL-specific configuration.
+	clientOpts []apiopt.ClientOption
+	// credentialsJSON holds the raw credentials provided via
+	// WithCredentialsJSON or WithCredentialsFile, so that additional
+	// credentials with different scopes can be derived from them.
+	credentialsJSON       []byte
+	dialOpts              []DialOption
+	dialFunc              func(ctx context.Context, network, addr string) (net.Conn, error)
+	refreshTimeout        time.Duration
+	useIAMAuthN           bool
+	logger                debug.ContextLogger
+	lazyRefresh           bool
+	sqlDataEndpoint       string
+	clientUniverseDomain  string
+	quotaProject          string
+	authCredentials       *auth.Credentials
+	iamLoginTokenProvider auth.TokenProvider
+	apiTokenProvider      auth.TokenProvider
+	useragents            []string
+	// TODO: Update to applicationID, which uses GCE VM Name, GKE Pod Name.
+	applicationName                 string
 	setAdminAPIEndpoint             bool
 	setCredentials                  bool
 	setHTTPClient                   bool
@@ -67,6 +76,7 @@ type dialerConfig struct {
 	sqlDataStreamTimeout            time.Duration
 	resourceExhaustedCooldownPeriod time.Duration
 	useDNSNameResolver              bool
+	enableBuiltInMetrics            bool
 	// err tracks any dialer options that may have failed.
 	err    error
 	client *sqladmin.Service
@@ -133,6 +143,7 @@ func WithCredentialsJSON(b []byte) Option {
 			return
 		}
 		d.iamLoginTokenProvider = scoped.TokenProvider
+		d.credentialsJSON = b
 		d.setCredentials = true
 	}
 }
@@ -141,6 +152,14 @@ func WithCredentialsJSON(b []byte) Option {
 func WithUserAgent(ua string) Option {
 	return func(d *dialerConfig) {
 		d.useragents = append(d.useragents, ua)
+	}
+}
+
+// WithApplicationName returns an Option that sets the Application Name.
+// This is used to identify the application in metrics.
+func WithApplicationName(name string) Option {
+	return func(d *dialerConfig) {
+		d.applicationName = name
 	}
 }
 
@@ -363,6 +382,41 @@ func WithFailoverPeriod(f time.Duration) Option {
 func WithDisableMetadataExchange() Option {
 	return func(cfg *dialerConfig) {
 		cfg.metadataExchangeDisabled = true
+	}
+}
+
+// WithBuiltInMetrics enables the built-in metric export. When enabled, the
+// Dialer reports on its internal operations (connection attempts, dial
+// latency, open connections, connection durations) to Cloud Monitoring under
+// the cloudsql.googleapis.com/client/connector metric prefix, using the
+// cloudsql.googleapis.com/InstanceClient monitored resource. These metrics
+// help Cloud SQL improve performance and identify client connectivity
+// problems.
+//
+// Built-in metrics are disabled by default. The identity used by the Dialer
+// must have the roles/monitoring.metricWriter role on the Cloud SQL
+// instance's project for the export to succeed.
+//
+// The metric export uses the same identity as the Dialer's API calls. When
+// the Dialer detects credentials itself (Application Default Credentials,
+// WithCredentialsFile, or WithCredentialsJSON), it requests the
+// https://www.googleapis.com/auth/monitoring.write scope for the export.
+// When a token source or credentials are supplied directly (WithTokenSource,
+// WithCredentials, WithIAMAuthNTokenSources, WithIAMAuthNCredentials), the
+// supplied API token source is used as-is and must carry either the
+// monitoring.write or the cloud-platform scope.
+func WithBuiltInMetrics() Option {
+	return func(cfg *dialerConfig) {
+		cfg.enableBuiltInMetrics = true
+	}
+}
+
+// withMetricClientOptions appends options for the built-in metrics client.
+// It is unexported and intended for tests, e.g. to point the client at an
+// in-memory gRPC server.
+func withMetricClientOptions(opts ...apiopt.ClientOption) Option {
+	return func(cfg *dialerConfig) {
+		cfg.clientOpts = append(cfg.clientOpts, opts...)
 	}
 }
 

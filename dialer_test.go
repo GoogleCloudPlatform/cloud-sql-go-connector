@@ -23,6 +23,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -36,7 +37,14 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/mdx"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
+	"cloud.google.com/go/cloudsqlconn/internal/tel"
+	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"golang.org/x/oauth2"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // testSuccessfulDial uses the provided dialer to dial the specified instance
@@ -1957,4 +1965,418 @@ func TestDialerDnsResolutionEmptyFallbackToPrivateIP(t *testing.T) {
 		context.Background(), t, d,
 		"db.example.com",
 	)
+}
+
+func TestBuiltInMetricsDisabledByDefault(t *testing.T) {
+	ctx := context.Background()
+	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+
+	if d.enableBuiltInMetrics {
+		t.Fatal("built-in metrics should be disabled by default")
+	}
+	if d.mClient != nil {
+		t.Fatal("metric client should not be created when built-in metrics are disabled")
+	}
+
+	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
+	if _, ok := mr.(tel.NullMetricRecorder); !ok {
+		t.Fatalf("want tel.NullMetricRecorder when built-in metrics are disabled, got %T", mr)
+	}
+}
+
+func TestBuiltInMetricsOptIn(t *testing.T) {
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+
+	if !d.enableBuiltInMetrics {
+		t.Fatal("WithBuiltInMetrics should enable built-in metrics")
+	}
+	// The metric client depends on the environment's default credentials. If
+	// they are unavailable (e.g., in CI), the client is nil and the recorder
+	// must still degrade gracefully to a no-op.
+	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
+	_, isNull := mr.(tel.NullMetricRecorder)
+	if d.mClient == nil && !isNull {
+		t.Fatalf("want tel.NullMetricRecorder when the metric client is nil, got %T", mr)
+	}
+	if d.mClient != nil && isNull {
+		t.Fatal("want a real metric recorder when built-in metrics are enabled and the metric client exists")
+	}
+}
+
+func TestDialerPropagatesMetricResourceFields(t *testing.T) {
+	ctx := context.Background()
+	tcs := []struct {
+		desc     string
+		opts     []Option
+		wantApp  string
+		wantUA   string
+		wantType string
+	}{
+		{
+			desc:     "defaults",
+			opts:     nil,
+			wantApp:  "unknown",
+			wantUA:   userAgent,
+			wantType: tel.ConnectorTypeGo,
+		},
+		{
+			desc: "application name and proxy user agent",
+			opts: []Option{
+				WithApplicationName("my-app"),
+				WithUserAgent("cloud-sql-proxy/2.0.0"),
+			},
+			wantApp:  "my-app",
+			wantUA:   userAgent + " cloud-sql-proxy/2.0.0",
+			wantType: tel.ConnectorTypeAuthProxy,
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			opts := append([]Option{WithTokenSource(mock.EmptyTokenSource{})}, tc.opts...)
+			d, err := NewDialer(ctx, opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = d.Close() }()
+			if d.applicationName != tc.wantApp {
+				t.Errorf("applicationName: got %q, want %q", d.applicationName, tc.wantApp)
+			}
+			if d.userAgent != tc.wantUA {
+				t.Errorf("userAgent: got %q, want %q", d.userAgent, tc.wantUA)
+			}
+			if got := tel.ConnectorTypeValue(d.userAgent); got != tc.wantType {
+				t.Errorf("connector type: got %q, want %q", got, tc.wantType)
+			}
+		})
+	}
+	if strings.ContainsAny(strings.TrimSpace(versionString), "\r\n") || strings.TrimSpace(versionString) == "" {
+		t.Fatalf("versionString must be a non-empty single line, got %q", versionString)
+	}
+}
+
+type sentinelTokenProvider struct{}
+
+func (sentinelTokenProvider) Token(context.Context) (*auth.Token, error) {
+	return &auth.Token{Value: "sentinel"}, nil
+}
+
+func TestMetricTokenProvider(t *testing.T) {
+	saFile := filepath.Join(t.TempDir(), "sa.json")
+	if err := os.WriteFile(saFile, fakeServiceAccount(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	apiTP := sentinelTokenProvider{}
+
+	tcs := []struct {
+		desc        string
+		cfg         *dialerConfig
+		env         map[string]string
+		wantSameAPI bool
+	}{
+		{
+			desc:        "caller-supplied token source is used as-is",
+			cfg:         &dialerConfig{setCredentials: true},
+			wantSameAPI: true,
+		},
+		{
+			desc: "credentials JSON is re-scoped for monitoring",
+			cfg: &dialerConfig{
+				setCredentials:  true,
+				credentialsJSON: fakeServiceAccount(""),
+			},
+			wantSameAPI: false,
+		},
+		{
+			desc:        "application default credentials are re-scoped for monitoring",
+			cfg:         &dialerConfig{setCredentials: false},
+			env:         map[string]string{"GOOGLE_APPLICATION_CREDENTIALS": saFile},
+			wantSameAPI: false,
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			got, err := metricTokenProvider(tc.cfg, apiTP)
+			if err != nil {
+				t.Fatalf("metricTokenProvider: %v", err)
+			}
+			if got == nil {
+				t.Fatal("metricTokenProvider returned nil token provider")
+			}
+			_, isSentinel := got.(sentinelTokenProvider)
+			if isSentinel != tc.wantSameAPI {
+				t.Fatalf("want same-as-API token provider = %v, got %v (%T)", tc.wantSameAPI, isSentinel, got)
+			}
+		})
+	}
+}
+
+// fakeMetricServer is an in-memory Cloud Monitoring server that records
+// CreateServiceTimeSeries requests.
+type fakeMetricServer struct {
+	monitoringpb.UnimplementedMetricServiceServer
+	mu   sync.Mutex
+	reqs []*monitoringpb.CreateTimeSeriesRequest
+}
+
+func (f *fakeMetricServer) CreateServiceTimeSeries(_ context.Context, req *monitoringpb.CreateTimeSeriesRequest) (*emptypb.Empty, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reqs = append(f.reqs, req)
+	return &emptypb.Empty{}, nil
+}
+
+func (f *fakeMetricServer) requests() []*monitoringpb.CreateTimeSeriesRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*monitoringpb.CreateTimeSeriesRequest(nil), f.reqs...)
+}
+
+func startFakeMetricServer(t *testing.T) (*fakeMetricServer, *grpc.ClientConn) {
+	t.Helper()
+	srv := grpc.NewServer()
+	fake := &fakeMetricServer{}
+	monitoringpb.RegisterMetricServiceServer(srv, fake)
+	lis := bufconn.Listen(1024 * 1024)
+	go func() { _ = srv.Serve(lis) }()
+	conn, err := grpc.NewClient("passthrough://bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return lis.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = conn.Close()
+		srv.Stop()
+		_ = lis.Close()
+	})
+	return fake, conn
+}
+
+func TestBuiltInMetricsExportsThroughDialerClient(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = 100 * time.Millisecond
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(),
+		withMetricClientOptions(option.WithGRPCConn(conn)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+
+	if d.mClient == nil {
+		t.Fatal("metric client should be created when built-in metrics are enabled")
+	}
+	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
+	if _, isNull := mr.(tel.NullMetricRecorder); isNull {
+		t.Fatal("want a real metric recorder when built-in metrics are enabled")
+	}
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{
+		IPType:        "public",
+		AttemptStatus: tel.ConnectSuccess,
+	})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if reqs := fake.requests(); len(reqs) > 0 {
+			if got, want := reqs[0].GetName(), "projects/my-project"; got != want {
+				t.Fatalf("time series project: got %q, want %q", got, want)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for the metric export to reach the in-memory server")
+}
+
+// resourceLabel returns the value of a monitored-resource label from the first
+// time series in the first recorded request, or "" if absent.
+func resourceLabel(reqs []*monitoringpb.CreateTimeSeriesRequest, key string) string {
+	if len(reqs) == 0 || len(reqs[0].GetTimeSeries()) == 0 {
+		return ""
+	}
+	return reqs[0].GetTimeSeries()[0].GetResource().GetLabels()[key]
+}
+
+func TestCloseFlushesBuiltInMetrics(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+
+	// Make the periodic export effectively never run, so that any export we
+	// observe must come from the flush in Close.
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(),
+		withMetricClientOptions(option.WithGRPCConn(conn)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+
+	if got := len(fake.requests()); got != 0 {
+		t.Fatalf("expected no export before Close, got %d requests", got)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reqs := fake.requests()
+	if len(reqs) == 0 {
+		t.Fatal("Close did not flush buffered built-in metrics")
+	}
+	if got, want := reqs[0].GetName(), "projects/my-project"; got != want {
+		t.Fatalf("flushed time series project: got %q, want %q", got, want)
+	}
+	// Close must be idempotent and must not panic on already-shut-down
+	// recorders.
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMetricRecorderReplacementFlushesOldRecorder(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(),
+		withMetricClientOptions(option.WithGRPCConn(conn)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Dial starts with an UNKNOWN-engine recorder and swaps to the real
+	// engine once instance metadata is known. Metrics recorded on the first
+	// recorder must not be lost when it is replaced.
+	first := d.metricRecorder(ctx, cn, tel.UnknownValue)
+	first.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: "connection_refused"})
+	second := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
+	if first == second {
+		t.Fatal("expected a new recorder once the database engine is known")
+	}
+	reqs := fake.requests()
+	if len(reqs) == 0 {
+		t.Fatal("replacing the recorder did not flush the old recorder's metrics")
+	}
+	if got, want := resourceLabel(reqs, "database_engine_type"), tel.UnknownValue; got != want {
+		t.Fatalf("flushed resource database_engine_type: got %q, want %q", got, want)
+	}
+	// Recording on the replaced recorder must be safe (no panic) even though
+	// its provider is shut down.
+	first.RecordClosedConnectionCount(ctx, tel.Attributes{IPType: "public", DialStatus: tel.ConnectSuccess})
+
+	// The replacement is the one that stays registered.
+	if got := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL); got != second {
+		t.Fatal("expected the engine-specific recorder to remain registered")
+	}
+
+	// Shutting down the first recorder must not have closed the shared
+	// metric client: the replacement recorder must still be able to export.
+	second.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var sawEngine bool
+	for _, r := range fake.requests() {
+		if resourceLabel([]*monitoringpb.CreateTimeSeriesRequest{r}, "database_engine_type") == tel.EnginePostgreSQL {
+			sawEngine = true
+		}
+	}
+	if !sawEngine {
+		t.Fatal("replacement recorder could not export after the old recorder was shut down (shared client closed?)")
+	}
+}
+
+func TestCloseFlushesAllRecorders(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(),
+		withMetricClientOptions(option.WithGRPCConn(conn)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two instances in different projects share one metric client. Closing
+	// the Dialer must flush both, not just the first one shut down.
+	for _, name := range []string{"proj-a:us-central1:inst-a", "proj-b:us-central1:inst-b"} {
+		cn, err := instance.ParseConnName(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mr := d.metricRecorder(ctx, cn, tel.EngineMySQL)
+		mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range fake.requests() {
+		got[r.GetName()] = true
+	}
+	for _, want := range []string{"projects/proj-a", "projects/proj-b"} {
+		if !got[want] {
+			t.Errorf("Close did not flush metrics for %s; flushed projects: %v", want, got)
+		}
+	}
 }
