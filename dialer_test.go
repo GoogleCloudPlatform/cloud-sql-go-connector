@@ -1986,7 +1986,7 @@ func TestBuiltInMetricsDisabledByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mr := d.metricRecorder(ctx, cn, "POSTGRESQL")
+	mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
 	if _, ok := mr.(tel.NullMetricRecorder); !ok {
 		t.Fatalf("want tel.NullMetricRecorder when built-in metrics are disabled, got %T", mr)
 	}
@@ -2013,7 +2013,7 @@ func TestBuiltInMetricsOptIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mr := d.metricRecorder(ctx, cn, "POSTGRESQL")
+	mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
 	_, isNull := mr.(tel.NullMetricRecorder)
 	if d.mClient == nil && !isNull {
 		t.Fatalf("want tel.NullMetricRecorder when the metric client is nil, got %T", mr)
@@ -2037,7 +2037,7 @@ func TestDialerPropagatesMetricResourceFields(t *testing.T) {
 			opts:     nil,
 			wantApp:  "unknown",
 			wantUA:   userAgent,
-			wantType: "go",
+			wantType: tel.ConnectorTypeGo,
 		},
 		{
 			desc: "application name and proxy user agent",
@@ -2047,7 +2047,7 @@ func TestDialerPropagatesMetricResourceFields(t *testing.T) {
 			},
 			wantApp:  "my-app",
 			wantUA:   userAgent + " cloud-sql-proxy/2.0.0",
-			wantType: "cloud-sql-proxy",
+			wantType: tel.ConnectorTypeAuthProxy,
 		},
 	}
 	for _, tc := range tcs {
@@ -2201,7 +2201,7 @@ func TestBuiltInMetricsExportsThroughDialerClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mr := d.metricRecorder(ctx, cn, "POSTGRESQL")
+	mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
 	if _, isNull := mr.(tel.NullMetricRecorder); isNull {
 		t.Fatal("want a real metric recorder when built-in metrics are enabled")
 	}
@@ -2254,7 +2254,7 @@ func TestCloseFlushesBuiltInMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mr := d.metricRecorder(ctx, cn, "POSTGRESQL")
+	mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
 	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
 
 	if got := len(fake.requests()); got != 0 {
@@ -2302,9 +2302,9 @@ func TestMetricRecorderReplacementFlushesOldRecorder(t *testing.T) {
 	// Dial starts with an UNKNOWN-engine recorder and swaps to the real
 	// engine once instance metadata is known. Metrics recorded on the first
 	// recorder must not be lost when it is replaced.
-	first := d.metricRecorder(ctx, cn, "UNKNOWN")
+	first := d.metricRecorder(ctx, cn, tel.UnknownValue)
 	first.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: "connection_refused"})
-	second := d.metricRecorder(ctx, cn, "POSTGRESQL")
+	second := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
 	if first == second {
 		t.Fatal("expected a new recorder once the database engine is known")
 	}
@@ -2312,7 +2312,7 @@ func TestMetricRecorderReplacementFlushesOldRecorder(t *testing.T) {
 	if len(reqs) == 0 {
 		t.Fatal("replacing the recorder did not flush the old recorder's metrics")
 	}
-	if got, want := resourceLabel(reqs, "database_engine_type"), "UNKNOWN"; got != want {
+	if got, want := resourceLabel(reqs, "database_engine_type"), tel.UnknownValue; got != want {
 		t.Fatalf("flushed resource database_engine_type: got %q, want %q", got, want)
 	}
 	// Recording on the replaced recorder must be safe (no panic) even though
@@ -2320,7 +2320,7 @@ func TestMetricRecorderReplacementFlushesOldRecorder(t *testing.T) {
 	first.RecordClosedConnectionCount(ctx, tel.Attributes{IPType: "public", DialStatus: tel.ConnectSuccess})
 
 	// The replacement is the one that stays registered.
-	if got := d.metricRecorder(ctx, cn, "POSTGRESQL"); got != second {
+	if got := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL); got != second {
 		t.Fatal("expected the engine-specific recorder to remain registered")
 	}
 
@@ -2332,7 +2332,7 @@ func TestMetricRecorderReplacementFlushesOldRecorder(t *testing.T) {
 	}
 	var sawEngine bool
 	for _, r := range fake.requests() {
-		if resourceLabel([]*monitoringpb.CreateTimeSeriesRequest{r}, "database_engine_type") == "POSTGRESQL" {
+		if resourceLabel([]*monitoringpb.CreateTimeSeriesRequest{r}, "database_engine_type") == tel.EnginePostgreSQL {
 			sawEngine = true
 		}
 	}
@@ -2364,7 +2364,7 @@ func TestCloseFlushesAllRecorders(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mr := d.metricRecorder(ctx, cn, "MYSQL")
+		mr := d.metricRecorder(ctx, cn, tel.EngineMySQL)
 		mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
 	}
 	if err := d.Close(); err != nil {
