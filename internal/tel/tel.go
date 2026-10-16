@@ -84,27 +84,43 @@ const (
 	// published metric descriptors and the AlloyDB connector.
 	UnknownValue = "unknown"
 
-	// connector_type values.
-	ConnectorTypeGo        = "go"
+	// ConnectorTypeGo is the connector_type value for the Go connector.
+	ConnectorTypeGo = "go"
+	// ConnectorTypeAuthProxy is the connector_type value for the Cloud SQL
+	// Auth Proxy, which embeds the Go connector.
 	ConnectorTypeAuthProxy = "auth_proxy"
 
-	// compute_platform values.
-	PlatformGKE            = "gke"
-	PlatformCloudRun       = "cloud_run"
-	PlatformAppEngine      = "app_engine"
+	// PlatformGKE is the compute_platform value for Google Kubernetes Engine.
+	PlatformGKE = "gke"
+	// PlatformCloudRun is the compute_platform value for Cloud Run.
+	PlatformCloudRun = "cloud_run"
+	// PlatformAppEngine is the compute_platform value for App Engine.
+	PlatformAppEngine = "app_engine"
+	// PlatformCloudFunctions is the compute_platform value for Cloud Functions.
 	PlatformCloudFunctions = "cloud_functions"
-	PlatformGCE            = "gce"
+	// PlatformGCE is the compute_platform value for Compute Engine.
+	PlatformGCE = "gce"
 
-	// database_engine_type values.
-	EngineMySQL      = "mysql"
+	// EngineMySQL is the database_engine_type value for MySQL.
+	EngineMySQL = "mysql"
+	// EnginePostgreSQL is the database_engine_type value for PostgreSQL.
 	EnginePostgreSQL = "postgresql"
-	EngineSQLServer  = "sqlserver"
+	// EngineSQLServer is the database_engine_type value for SQL Server.
+	EngineSQLServer = "sqlserver"
 
-	// instance_ip_type values.
-	IPTypePublic  = "public"
+	// IPTypePublic is the instance_ip_type value for public IP connections.
+	IPTypePublic = "public"
+	// IPTypePrivate is the instance_ip_type value for private IP (PSA)
+	// connections.
 	IPTypePrivate = "private"
-	IPTypePSC     = "psc"
-	IPTypeAuto    = "auto"
+	// IPTypePSC is the instance_ip_type value for Private Service Connect
+	// connections.
+	IPTypePSC = "psc"
+	// IPTypeAuto is the instance_ip_type value when the connection type was
+	// requested as AutoIP (public if available, otherwise private).
+	IPTypeAuto = "auto"
+	// IPTypeSQLData is the instance_ip_type value for connections through the
+	// SQL Data endpoint.
 	IPTypeSQLData = "sql_data"
 )
 
