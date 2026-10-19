@@ -751,7 +751,7 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
 	defer func() { connectEnd(err) }()
 
-	addrs, err := ci.Addrs(cfg.connectionType)
+	addrs, resolvedIPType, err := ci.ResolveAddrs(cfg.connectionType)
 	if err != nil {
 		d.removeCached(ctx, cn, c, err)
 		attrs.DialStatus = tel.ConnectError
@@ -760,6 +760,9 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		mr.RecordOpenConnectionCount(ctx, attrs)
 		return nil, err
 	}
+	// Report the IP type actually used rather than the requested strategy
+	// (e.g. "public" instead of "auto").
+	attrs.IPType = resolvedIPType
 
 	var targets []string
 
