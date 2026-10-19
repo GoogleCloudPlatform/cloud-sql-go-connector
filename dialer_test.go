@@ -2458,3 +2458,51 @@ func TestWithComputePlatform(t *testing.T) {
 		}
 	})
 }
+
+// TestAutoIPReportsResolvedIPType verifies that a dial requested with AutoIP
+// reports the IP type actually used (here: the private IP, since the fake
+// instance has no public IP) rather than the "auto" strategy.
+func TestAutoIPReportsResolvedIPType(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+		mock.WithNoIPAddrs(),
+		mock.WithPrivateIP("127.0.0.1"),
+	)
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithBuiltInMetrics(),
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+			WithDefaultDialOptions(WithAutoIP()),
+		},
+	})
+	testSuccessfulDial(context.Background(), t, d, "my-project:my-region:my-instance")
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string]bool{}
+	for _, r := range fake.requests() {
+		for _, ts := range r.GetTimeSeries() {
+			if v, ok := ts.GetMetric().GetLabels()["instance_ip_type"]; ok {
+				got[v] = true
+			}
+		}
+	}
+	if !got[tel.IPTypePrivate] {
+		t.Fatalf("want instance_ip_type=%q in exported series, got %v", tel.IPTypePrivate, got)
+	}
+	if got[tel.IPTypeAuto] {
+		t.Fatalf("instance_ip_type must report the resolved type, but %q was exported: %v", tel.IPTypeAuto, got)
+	}
+}
