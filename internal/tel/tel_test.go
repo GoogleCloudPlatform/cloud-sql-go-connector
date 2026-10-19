@@ -414,6 +414,7 @@ func TestLabelValuesAreLowercaseSnakeCase(t *testing.T) {
 		"PlatformAppEngine":      "app_engine",
 		"PlatformCloudFunctions": "cloud_functions",
 		"PlatformGCE":            "gce",
+		"PlatformAIStudio":       "ai_studio",
 		"EngineMySQL":            "mysql",
 		"EnginePostgreSQL":       "postgresql",
 		"EngineSQLServer":        "sqlserver",
@@ -436,6 +437,7 @@ func TestLabelValuesAreLowercaseSnakeCase(t *testing.T) {
 		"PlatformAppEngine":      tel.PlatformAppEngine,
 		"PlatformCloudFunctions": tel.PlatformCloudFunctions,
 		"PlatformGCE":            tel.PlatformGCE,
+		"PlatformAIStudio":       tel.PlatformAIStudio,
 		"EngineMySQL":            tel.EngineMySQL,
 		"EnginePostgreSQL":       tel.EnginePostgreSQL,
 		"EngineSQLServer":        tel.EngineSQLServer,
@@ -524,5 +526,21 @@ func TestDetectComputePlatformValues(t *testing.T) {
 				t.Errorf("DetectComputePlatform() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestIsValidComputePlatform(t *testing.T) {
+	for _, p := range []string{
+		tel.PlatformGKE, tel.PlatformCloudRun, tel.PlatformAppEngine,
+		tel.PlatformCloudFunctions, tel.PlatformGCE, tel.PlatformAIStudio, tel.UnknownValue,
+	} {
+		if !tel.IsValidComputePlatform(p) {
+			t.Errorf("IsValidComputePlatform(%q) = false, want true", p)
+		}
+	}
+	for _, p := range []string{"", "GCE", "AI_STUDIO", "ai-studio", "aws", "cloud_run "} {
+		if tel.IsValidComputePlatform(p) {
+			t.Errorf("IsValidComputePlatform(%q) = true, want false", p)
+		}
 	}
 }

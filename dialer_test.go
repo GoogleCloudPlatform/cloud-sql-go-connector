@@ -2380,3 +2380,81 @@ func TestCloseFlushesAllRecorders(t *testing.T) {
 		}
 	}
 }
+
+func TestWithComputePlatform(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("valid values are accepted and reported", func(t *testing.T) {
+		for _, p := range []ComputePlatform{
+			ComputePlatformGCE, ComputePlatformGKE, ComputePlatformCloudRun,
+			ComputePlatformAppEngine, ComputePlatformCloudFunctions, ComputePlatformAIStudio,
+		} {
+			d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}), WithComputePlatform(p))
+			if err != nil {
+				t.Fatalf("WithComputePlatform(%q): unexpected error: %v", p, err)
+			}
+			if d.computePlatform != string(p) {
+				t.Errorf("WithComputePlatform(%q): dialer has %q", p, d.computePlatform)
+			}
+			_ = d.Close()
+		}
+	})
+
+	t.Run("invalid values fail NewDialer", func(t *testing.T) {
+		for _, p := range []ComputePlatform{
+			"", "unknown", "AI_STUDIO", "ai-studio", "my-platform", "GCE",
+		} {
+			_, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}), WithComputePlatform(p))
+			if err == nil {
+				t.Errorf("WithComputePlatform(%q): want config error, got nil", p)
+				continue
+			}
+			var cfgErr *errtype.ConfigError
+			if !errors.As(err, &cfgErr) {
+				t.Errorf("WithComputePlatform(%q): want *errtype.ConfigError, got %T: %v", p, err, err)
+			}
+		}
+	})
+
+	t.Run("default is auto-detected", func(t *testing.T) {
+		t.Setenv("K_SERVICE", "svc")
+		d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = d.Close() }()
+		if d.computePlatform != tel.PlatformCloudRun {
+			t.Errorf("default computePlatform = %q, want %q", d.computePlatform, tel.PlatformCloudRun)
+		}
+	})
+
+	t.Run("override beats auto-detection and reaches the exported resource", func(t *testing.T) {
+		t.Setenv("K_SERVICE", "svc") // would detect cloud_run
+		fake, conn := startFakeMetricServer(t)
+		oldInterval := tel.DefaultExportInterval
+		tel.DefaultExportInterval = time.Hour
+		t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+		d, err := NewDialer(ctx,
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithBuiltInMetrics(),
+			WithComputePlatform(ComputePlatformAIStudio),
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cn, err := instance.ParseConnName("my-project:my-region:my-instance")
+		if err != nil {
+			t.Fatal(err)
+		}
+		mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
+		mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+		if err := d.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := resourceLabel(fake.requests(), "compute_platform"), tel.PlatformAIStudio; got != want {
+			t.Fatalf("exported compute_platform = %q, want %q", got, want)
+		}
+	})
+}

@@ -229,6 +229,10 @@ type Dialer struct {
 	// applicationName is the name of the application using the dialer.
 	applicationName string
 
+	// computePlatform is the compute_platform metric label. It is either
+	// detected from the environment or set explicitly via WithComputePlatform.
+	computePlatform string
+
 	// enableBuiltInMetrics controls whether the Dialer exports built-in
 	// metrics. When false (the default), the metric export is a no-op.
 	enableBuiltInMetrics bool
@@ -398,6 +402,13 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqlDataDialer = sqldataclient.NewGrpcDialer(cfg.sqlDataEndpoint, tp, cfg.quotaProject, cfg.logger, false, cfg.sqlDataStreamTimeout, strings.Join(cfg.useragents, " "))
 	}
 
+	// Resolve the compute platform once. An explicit WithComputePlatform wins
+	// over runtime detection.
+	computePlatform := cfg.computePlatform
+	if computePlatform == "" {
+		computePlatform = tel.DetectComputePlatform()
+	}
+
 	d := &Dialer{
 		closed:                          make(chan struct{}),
 		sqlDataConnState:                make(map[cacheKey]*sqlDataConnState),
@@ -424,6 +435,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		resourceExhaustedCooldownPeriod: cfg.resourceExhaustedCooldownPeriod,
 		userAgent:                       strings.Join(cfg.useragents, " "),
 		applicationName:                 cfg.applicationName,
+		computePlatform:                 computePlatform,
 	}
 
 	// log the Dialer ID
@@ -501,7 +513,7 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 		ApplicationName:    d.applicationName,
 		Region:             inst.Region(),
 		ClientRegion:       tel.DetectClientRegion(),
-		ComputePlatform:    tel.DetectComputePlatform(),
+		ComputePlatform:    d.computePlatform,
 		ConnectorType:      tel.ConnectorTypeValue(d.userAgent),
 		ConnectorVersion:   strings.TrimSpace(versionString),
 		DatabaseEngineType: dbEngineType,
