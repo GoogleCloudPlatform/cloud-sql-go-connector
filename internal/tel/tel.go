@@ -100,6 +100,10 @@ const (
 	PlatformCloudFunctions = "cloud_functions"
 	// PlatformGCE is the compute_platform value for Compute Engine.
 	PlatformGCE = "gce"
+	// PlatformAIStudio is the compute_platform value for applications
+	// deployed by Google AI Studio. It cannot be auto-detected and must be
+	// set explicitly by the embedding client (e.g. the Auth Proxy).
+	PlatformAIStudio = "ai_studio"
 
 	// EngineMySQL is the database_engine_type value for MySQL.
 	EngineMySQL = "mysql"
@@ -209,6 +213,25 @@ func DetectClientRegion() (region string) {
 		return strings.ToLower(zone[:idx])
 	}
 	return strings.ToLower(zone)
+}
+
+// validComputePlatforms is the closed set of values allowed for the
+// compute_platform label. Keeping this set small bounds the cardinality of the
+// InstanceClient monitored resource.
+var validComputePlatforms = map[string]bool{
+	PlatformGKE:            true,
+	PlatformCloudRun:       true,
+	PlatformAppEngine:      true,
+	PlatformCloudFunctions: true,
+	PlatformGCE:            true,
+	PlatformAIStudio:       true,
+	UnknownValue:           true,
+}
+
+// IsValidComputePlatform reports whether p is an allowed compute_platform
+// label value.
+func IsValidComputePlatform(p string) bool {
+	return validComputePlatforms[p]
 }
 
 // DetectComputePlatform detects the GCP compute platform environment.

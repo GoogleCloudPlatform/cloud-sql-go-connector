@@ -17,6 +17,7 @@ package cloudsqlconn
 import (
 	"context"
 	"crypto/rsa"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -30,6 +31,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/sqldataclient"
+	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	"golang.org/x/oauth2"
 	apiopt "google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
@@ -62,7 +64,10 @@ type dialerConfig struct {
 	apiTokenProvider      auth.TokenProvider
 	useragents            []string
 	// TODO: Update to applicationID, which uses GCE VM Name, GKE Pod Name.
-	applicationName                 string
+	applicationName string
+	// computePlatform, when set, overrides the auto-detected compute_platform
+	// metric label. It is validated by WithComputePlatform.
+	computePlatform                 string
 	setAdminAPIEndpoint             bool
 	setCredentials                  bool
 	setHTTPClient                   bool
@@ -160,6 +165,52 @@ func WithUserAgent(ua string) Option {
 func WithApplicationName(name string) Option {
 	return func(d *dialerConfig) {
 		d.applicationName = name
+	}
+}
+
+// ComputePlatform identifies the platform an application runs on. It is
+// reported as the compute_platform label of built-in metrics.
+//
+// The set of valid values is closed: only the ComputePlatform* constants
+// defined in this package are accepted by WithComputePlatform. This keeps the
+// cardinality of the metric's monitored resource bounded.
+type ComputePlatform string
+
+const (
+	// ComputePlatformGCE identifies Compute Engine.
+	ComputePlatformGCE ComputePlatform = tel.PlatformGCE
+	// ComputePlatformGKE identifies Google Kubernetes Engine.
+	ComputePlatformGKE ComputePlatform = tel.PlatformGKE
+	// ComputePlatformCloudRun identifies Cloud Run.
+	ComputePlatformCloudRun ComputePlatform = tel.PlatformCloudRun
+	// ComputePlatformAppEngine identifies App Engine.
+	ComputePlatformAppEngine ComputePlatform = tel.PlatformAppEngine
+	// ComputePlatformCloudFunctions identifies Cloud Functions.
+	ComputePlatformCloudFunctions ComputePlatform = tel.PlatformCloudFunctions
+	// ComputePlatformAIStudio identifies applications deployed by Google AI
+	// Studio. This platform cannot be auto-detected and must be set
+	// explicitly with WithComputePlatform.
+	ComputePlatformAIStudio ComputePlatform = tel.PlatformAIStudio
+)
+
+// WithComputePlatform returns an Option that overrides the auto-detected
+// compute platform reported in built-in metrics. Use it when the Dialer is
+// embedded in a client that knows its deployment environment better than
+// runtime heuristics can determine (for example, the Cloud SQL Auth Proxy
+// running as a sidecar for an AI Studio application).
+//
+// Only the ComputePlatform* constants are accepted; any other value causes
+// NewDialer to return a configuration error. When this option is not
+// provided, the platform is detected from the runtime environment.
+func WithComputePlatform(p ComputePlatform) Option {
+	return func(d *dialerConfig) {
+		if !tel.IsValidComputePlatform(string(p)) || p == ComputePlatform(tel.UnknownValue) {
+			d.err = errtype.NewConfigError(
+				fmt.Sprintf("invalid compute platform %q; must be one of the cloudsqlconn.ComputePlatform* constants", p),
+				"n/a")
+			return
+		}
+		d.computePlatform = string(p)
 	}
 }
 
