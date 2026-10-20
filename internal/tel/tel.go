@@ -486,13 +486,18 @@ func (m *metricRecorder) Shutdown(ctx context.Context) error {
 	return m.provider.Shutdown(ctx)
 }
 
-// PermanentExportErrorBackoff is how long exports are suspended after an
-// error that will not resolve on its own (missing IAM permission, disabled
-// API, invalid credentials). Suspending avoids hammering the Monitoring API
-// and the debug log once a minute while still retrying periodically in case
-// the operator fixes the configuration without restarting the process.
-// Exposed as a var to facilitate testing.
-var PermanentExportErrorBackoff = 10 * time.Minute
+// Backoff applied after an export error that will not resolve on its own
+// (missing IAM permission, disabled API, invalid credentials). Export is
+// suspended for PermanentExportErrorInitialBackoff after the first such
+// error, and the suspension doubles on each consecutive permanent error up to
+// PermanentExportErrorMaxBackoff; a successful export resets it. This keeps
+// clients that are missing roles/monitoring.metricWriter from retrying once a
+// minute forever, while still picking up an IAM fix without a restart.
+// Exposed as vars to facilitate testing.
+var (
+	PermanentExportErrorInitialBackoff = 10 * time.Minute
+	PermanentExportErrorMaxBackoff     = time.Hour
+)
 
 // permanentErrorOnce guards the single process-wide warning emitted on the
 // first permanent export error. Built-in metrics are opt-in, so a user who
@@ -523,9 +528,10 @@ var warnLogger = log.Default()
 //     once, so a persistent misconfiguration produces two lines, not one per
 //     export interval.
 //   - After a permanent error (PermissionDenied, Unauthenticated) exports are
-//     suspended for PermanentExportErrorBackoff before being retried, and a
-//     single warning is written to the standard logger, once per process, so
-//     the misconfiguration is discoverable without a debug logger.
+//     suspended with exponential backoff (PermanentExportErrorInitialBackoff,
+//     doubling up to PermanentExportErrorMaxBackoff) before being retried, and
+//     a single warning is written to the standard logger, once per process,
+//     so the misconfiguration is discoverable without a debug logger.
 //
 // Built-in metrics therefore never affect connectivity, write at most one
 // line to the application's standard logger, and never flood logs.
@@ -540,6 +546,9 @@ type sharedClientExporter struct {
 	mu             sync.Mutex
 	lastErr        string
 	suspendedUntil time.Time
+	// backoff is the current suspension length for permanent errors; zero
+	// until the first permanent error, reset to zero on success.
+	backoff time.Duration
 }
 
 // Export exports the metrics, swallowing and rate-limiting any error.
@@ -560,26 +569,38 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 			e.logger.Debugf(ctx, "[%v] built-in metrics export recovered", e.name)
 			e.lastErr = ""
 		}
+		e.backoff = 0
 		return nil
 	}
-	if isPermanentExportError(err) {
-		e.suspendedUntil = time.Now().Add(PermanentExportErrorBackoff)
+	permanent := isPermanentExportError(err)
+	if permanent {
+		e.backoff = nextBackoff(e.backoff)
+		e.suspendedUntil = time.Now().Add(e.backoff)
 		permanentErrorOnce.Do(func() {
 			warnLogger.Printf("cloudsqlconn: built-in metrics export failed for %s: %v. %s "+
-				"Export is suspended for %v between retries; further failures are reported via the debug logger only.",
-				e.name, err, e.remediationHint(), PermanentExportErrorBackoff)
+				"Retries back off exponentially up to %v; further failures are reported via the debug logger only.",
+				e.name, err, e.remediationHint(), PermanentExportErrorMaxBackoff)
 		})
 	}
 	if msg := err.Error(); msg != e.lastErr {
 		e.lastErr = msg
-		if e.suspendedUntil.After(time.Now()) {
-			e.logger.Debugf(ctx, "[%v] built-in metrics export failed, suspending export for %v: %v. %s",
-				e.name, PermanentExportErrorBackoff, err, e.remediationHint())
+		if permanent {
+			e.logger.Debugf(ctx, "[%v] built-in metrics export failed, suspending export (backoff %v, max %v): %v. %s",
+				e.name, e.backoff, PermanentExportErrorMaxBackoff, err, e.remediationHint())
 		} else {
 			e.logger.Debugf(ctx, "[%v] built-in metrics export failed (identical errors will not be logged again): %v", e.name, err)
 		}
 	}
 	return nil
+}
+
+// nextBackoff returns the suspension to apply after a permanent error given
+// the previous suspension: the initial backoff first, then doubling, capped.
+func nextBackoff(prev time.Duration) time.Duration {
+	if prev <= 0 {
+		return min(PermanentExportErrorInitialBackoff, PermanentExportErrorMaxBackoff)
+	}
+	return min(2*prev, PermanentExportErrorMaxBackoff)
 }
 
 // remediationHint explains how to fix a permission error and how to turn

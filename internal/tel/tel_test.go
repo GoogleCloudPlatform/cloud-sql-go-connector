@@ -612,12 +612,14 @@ func TestIsValidComputePlatform(t *testing.T) {
 // handler (stderr), identical errors are logged once at debug level, permanent
 // errors suspend export for a backoff period, and recovery is logged once.
 func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
-	oldInterval, oldBackoff := tel.DefaultExportInterval, tel.PermanentExportErrorBackoff
+	oldInterval, oldInit, oldMax := tel.DefaultExportInterval, tel.PermanentExportErrorInitialBackoff, tel.PermanentExportErrorMaxBackoff
 	tel.DefaultExportInterval = 20 * time.Millisecond
-	tel.PermanentExportErrorBackoff = 300 * time.Millisecond
+	tel.PermanentExportErrorInitialBackoff = 300 * time.Millisecond
+	tel.PermanentExportErrorMaxBackoff = 300 * time.Millisecond
 	t.Cleanup(func() {
 		tel.DefaultExportInterval = oldInterval
-		tel.PermanentExportErrorBackoff = oldBackoff
+		tel.PermanentExportErrorInitialBackoff = oldInit
+		tel.PermanentExportErrorMaxBackoff = oldMax
 	})
 
 	// Any error reaching the global handler fails the test: that is the
@@ -726,12 +728,12 @@ func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
 // TestRemediationHintWithoutPrincipal verifies the message degrades
 // gracefully when the principal cannot be determined.
 func TestRemediationHintWithoutPrincipal(t *testing.T) {
-	oldInterval, oldBackoff := tel.DefaultExportInterval, tel.PermanentExportErrorBackoff
+	oldInterval, oldInit := tel.DefaultExportInterval, tel.PermanentExportErrorInitialBackoff
 	tel.DefaultExportInterval = 20 * time.Millisecond
-	tel.PermanentExportErrorBackoff = time.Hour
+	tel.PermanentExportErrorInitialBackoff = time.Hour
 	t.Cleanup(func() {
 		tel.DefaultExportInterval = oldInterval
-		tel.PermanentExportErrorBackoff = oldBackoff
+		tel.PermanentExportErrorInitialBackoff = oldInit
 	})
 	var warnBuf lockedBuffer
 	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
@@ -802,4 +804,57 @@ func TestTransientExportFailuresAreDeduplicated(t *testing.T) {
 	if w := warnBuf.String(); w != "" {
 		t.Fatalf("transient errors must not write to the standard logger, got %q", w)
 	}
+}
+
+// TestPermanentErrorBackoffIsExponential verifies that consecutive permanent
+// errors double the suspension up to the cap, and that a success resets it.
+func TestPermanentErrorBackoffIsExponential(t *testing.T) {
+	oldInterval, oldInit, oldMax := tel.DefaultExportInterval, tel.PermanentExportErrorInitialBackoff, tel.PermanentExportErrorMaxBackoff
+	tel.DefaultExportInterval = 10 * time.Millisecond
+	tel.PermanentExportErrorInitialBackoff = 60 * time.Millisecond
+	tel.PermanentExportErrorMaxBackoff = 240 * time.Millisecond
+	t.Cleanup(func() {
+		tel.DefaultExportInterval = oldInterval
+		tel.PermanentExportErrorInitialBackoff = oldInit
+		tel.PermanentExportErrorMaxBackoff = oldMax
+	})
+	restore := tel.SetWarnLoggerForTest(log.New(&lockedBuffer{}, "", 0))
+	t.Cleanup(restore)
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mock.setFailure(codes.PermissionDenied)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, nullLogger{t}, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "p", ResourceID: "p:i", Region: "r",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+
+	// Expected attempt times with 60ms initial, doubling, 240ms cap:
+	// 0, 60, 180, 420, 660, 900 ms -> ~6 attempts in 1s. A constant 60ms
+	// backoff would give ~17; no backoff ~100.
+	time.Sleep(time.Second)
+	got := mock.requestCount()
+	if got < 4 || got > 8 {
+		t.Fatalf("with exponential backoff expected ~6 attempts in 1s, got %d", got)
+	}
+
+	// A success resets the backoff: after recovery the next permanent error
+	// should suspend for the initial backoff again (observable as a quick
+	// retry cadence rather than the capped one).
+	mock.setFailure(codes.OK)
+	time.Sleep(400 * time.Millisecond) // past the max backoff, so a retry succeeds
+	base := mock.requestCount()
+	mock.setFailure(codes.PermissionDenied)
+	time.Sleep(300 * time.Millisecond)
+	// With reset: attempts at +0, +60, +180 -> 3. Without reset (stuck at
+	// 240ms cap): +0, +240 -> 2.
+	if n := mock.requestCount() - base; n < 3 {
+		t.Fatalf("backoff did not reset after a successful export: %d attempts in 300ms after re-failing", n)
+	}
+	_ = mr.Shutdown(ctx)
 }
