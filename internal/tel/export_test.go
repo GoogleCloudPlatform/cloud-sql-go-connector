@@ -31,3 +31,6 @@ func SetWarnLoggerForTest(l *log.Logger) (restore func()) {
 		permanentErrorOnce = prevOnce
 	}
 }
+
+// IsPermanentExportError exposes the export error classifier for tests.
+var IsPermanentExportError = isPermanentExportError

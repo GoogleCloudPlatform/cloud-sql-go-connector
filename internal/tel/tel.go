@@ -621,10 +621,23 @@ func (e *sharedClientExporter) remediationHint() string {
 func (*sharedClientExporter) Shutdown(context.Context) error { return nil }
 
 // isPermanentExportError reports whether err indicates a configuration
-// problem that retrying every export interval will not fix.
+// problem that retrying every export interval will not fix. Per the
+// Monitoring API error contract:
+//
+//   - PermissionDenied: missing roles/monitoring.metricWriter, Monitoring API
+//     not enabled, billing disabled, project not visible, VPC-SC.
+//   - Unauthenticated: invalid/expired credentials or wrong scopes.
+//   - NotFound: project deleted or unrecognized region label.
+//   - FailedPrecondition: project/billing state that blocks writes.
+//
+// Everything else is treated as transient and retried next interval. That
+// deliberately includes InvalidArgument: it is returned for points written
+// out of order or too frequently and for partial-batch failures, all of
+// which resolve on the next export of these cumulative metrics, and
+// ResourceExhausted, for which a once-per-minute retry is the right cadence.
 func isPermanentExportError(err error) bool {
 	switch grpcstatus.Code(err) {
-	case codes.PermissionDenied, codes.Unauthenticated:
+	case codes.PermissionDenied, codes.Unauthenticated, codes.NotFound, codes.FailedPrecondition:
 		return true
 	}
 	return false

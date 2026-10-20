@@ -858,3 +858,35 @@ func TestPermanentErrorBackoffIsExponential(t *testing.T) {
 	}
 	_ = mr.Shutdown(ctx)
 }
+
+// TestIsPermanentExportError pins the classification of every gRPC code the
+// Monitoring API can return for a write, so a change here is deliberate.
+func TestIsPermanentExportError(t *testing.T) {
+	permanent := []codes.Code{codes.PermissionDenied, codes.Unauthenticated, codes.NotFound, codes.FailedPrecondition}
+	transient := []codes.Code{
+		codes.InvalidArgument, codes.ResourceExhausted, codes.Unavailable, codes.DeadlineExceeded,
+		codes.Internal, codes.Unknown, codes.Aborted, codes.Canceled, codes.OK,
+	}
+	for _, c := range permanent {
+		if !tel.IsPermanentExportError(grpcstatus.Error(c, "x")) {
+			t.Errorf("%v: want permanent", c)
+		}
+	}
+	for _, c := range transient {
+		if tel.IsPermanentExportError(grpcstatus.Error(c, "x")) {
+			t.Errorf("%v: want transient", c)
+		}
+	}
+	// Wrapped and joined errors (as returned by the exporter) still classify.
+	wrapped := fmt.Errorf("export: %w", grpcstatus.Error(codes.PermissionDenied, "x"))
+	if !tel.IsPermanentExportError(wrapped) {
+		t.Error("wrapped PermissionDenied: want permanent")
+	}
+	joined := errors.Join(nil, grpcstatus.Error(codes.NotFound, "x"))
+	if !tel.IsPermanentExportError(joined) {
+		t.Error("joined NotFound: want permanent")
+	}
+	if tel.IsPermanentExportError(errors.New("plain error")) {
+		t.Error("non-gRPC error: want transient")
+	}
+}
