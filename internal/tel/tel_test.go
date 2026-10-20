@@ -646,7 +646,7 @@ func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
 		mr := tel.NewMetricRecorder(ctx, logger, mClient, tel.Config{
 			Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "my-db-project", ResourceID: id, Region: "r",
 			Principal:   "sa@my-app.iam.gserviceaccount.com",
-			DisableHint: "remove the --enable-builtin-metrics flag",
+			DisableHint: "run the proxy with --enable-builtin-metrics=false",
 		})
 		if _, isNull := mr.(tel.NullMetricRecorder); isNull {
 			t.Fatal("expected a real recorder")
@@ -681,7 +681,7 @@ func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
 			"roles/monitoring.metricWriter",
 			"project my-db-project",
 			"principal sa@my-app.iam.gserviceaccount.com",
-			"remove the --enable-builtin-metrics flag",
+			"run the proxy with --enable-builtin-metrics=false",
 		} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("message missing %q: %q", want, msg)

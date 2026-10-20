@@ -47,6 +47,17 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+// TestMain turns built-in metrics off for the whole test process. The
+// production default is on; without this, every NewDialer in the suite
+// would create a Cloud Monitoring client and periodic exporters that try to
+// reach the real API. Tests that exercise metrics pass
+// WithBuiltInMetrics(true) explicitly, and TestBuiltInMetricsEnabledByDefault
+// checks the production default.
+func TestMain(m *testing.M) {
+	builtInMetricsDefault = false
+	os.Exit(m.Run())
+}
+
 // testSuccessfulDial uses the provided dialer to dial the specified instance
 // and verifies the connection works end to end.
 func testSuccessfulDial(
@@ -1967,21 +1978,39 @@ func TestDialerDnsResolutionEmptyFallbackToPrivateIP(t *testing.T) {
 	)
 }
 
-func TestBuiltInMetricsDisabledByDefault(t *testing.T) {
+func TestBuiltInMetricsEnabledByDefault(t *testing.T) {
+	// Restore the production default for this test only.
+	builtInMetricsDefault = true
+	t.Cleanup(func() { builtInMetricsDefault = false })
+
 	ctx := context.Background()
 	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = d.Close() }()
+	if !d.enableBuiltInMetrics {
+		t.Fatal("built-in metrics should be enabled by default")
+	}
+}
+
+func TestBuiltInMetricsExplicitlyDisabled(t *testing.T) {
+	builtInMetricsDefault = true
+	t.Cleanup(func() { builtInMetricsDefault = false })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}), WithBuiltInMetrics(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
 
 	if d.enableBuiltInMetrics {
-		t.Fatal("built-in metrics should be disabled by default")
+		t.Fatal("WithBuiltInMetrics(false) should disable built-in metrics")
 	}
 	if d.mClient != nil {
 		t.Fatal("metric client should not be created when built-in metrics are disabled")
 	}
-
 	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
 	if err != nil {
 		t.Fatal(err)
@@ -2578,7 +2607,7 @@ func TestMetricsDisableHint(t *testing.T) {
 	if got := metricsDisableHint(tel.ConnectorTypeGo); !strings.Contains(got, "WithBuiltInMetrics(false)") {
 		t.Errorf("go hint = %q", got)
 	}
-	if got := metricsDisableHint(tel.ConnectorTypeAuthProxy); !strings.Contains(got, authProxyMetricsFlag) {
+	if got := metricsDisableHint(tel.ConnectorTypeAuthProxy); !strings.Contains(got, authProxyMetricsFlag+"=false") {
 		t.Errorf("proxy hint = %q", got)
 	}
 }

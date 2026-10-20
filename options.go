@@ -444,13 +444,13 @@ func WithDisableMetadataExchange() Option {
 // metrics help Cloud SQL improve performance and identify client connectivity
 // problems.
 //
-// Built-in metrics are currently disabled by default and are in BETA. Passing
-// false is a no-op today; it is accepted so that callers who want metrics off
-// can say so explicitly and keep that behavior if the default changes in a
-// future minor release.
+// Built-in metrics are enabled by default and are in BETA. Pass false to turn
+// them off.
 //
-// Metrics never affect connectivity: if the exporter cannot be created or an
-// export fails (for example, missing IAM permission), the failure is reported
+// Metrics never affect connectivity. If the exporter cannot be created, or an
+// export fails (for example, a missing IAM permission), connections continue
+// to work: the first permanent failure is reported once per process on the
+// standard logger with remediation steps, further failures are reported
 // through the debug logger only, and exports are retried with backoff.
 //
 // The identity used by the Dialer must have the roles/monitoring.metricWriter

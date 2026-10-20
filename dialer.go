@@ -90,6 +90,11 @@ var (
 	userAgent     = "cloud-sql-go-connector/" + strings.TrimSpace(versionString)
 	// dialerID is a unique ID for the dialer process.
 	dialerID = uuid.New().String()
+
+	// builtInMetricsDefault is the default for WithBuiltInMetrics. Built-in
+	// metrics are on by default; this is a var so the unit tests can turn
+	// them off process-wide without touching the real Cloud Monitoring API.
+	builtInMetricsDefault = true
 )
 
 // keyGenerator encapsulates the details of RSA key generation to provide lazy
@@ -240,7 +245,7 @@ type Dialer struct {
 	metricsPrincipal string
 
 	// enableBuiltInMetrics controls whether the Dialer exports built-in
-	// metrics. When false (the default), the metric export is a no-op.
+	// metrics (on by default). When false, the metric export is a no-op.
 	enableBuiltInMetrics bool
 
 	// mClient is used for built-in system metrics. It is nil when built-in
@@ -277,6 +282,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqlDataStreamTimeout:            2 * time.Hour,
 		resourceExhaustedCooldownPeriod: 5 * time.Second,
 		applicationName:                 "unknown",
+		enableBuiltInMetrics:            builtInMetricsDefault,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -516,7 +522,7 @@ const authProxyMetricsFlag = "--enable-builtin-metrics"
 // that embeds this connector.
 func metricsDisableHint(connectorType string) string {
 	if connectorType == tel.ConnectorTypeAuthProxy {
-		return "remove the " + authProxyMetricsFlag + " flag (or set it to false)"
+		return "run the proxy with " + authProxyMetricsFlag + "=false"
 	}
 	return "pass cloudsqlconn.WithBuiltInMetrics(false) to NewDialer"
 }
