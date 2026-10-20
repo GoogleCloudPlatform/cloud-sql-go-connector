@@ -14,9 +14,11 @@
 package tel_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -82,6 +84,24 @@ func (m *mockServer) requestCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.gotReqs)
+}
+
+// lockedBuffer is a goroutine-safe bytes.Buffer for capturing log output.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // recordingLogger captures debug log lines.
@@ -607,6 +627,11 @@ func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) { handled.Add(1) }))
 	t.Cleanup(func() { otel.SetErrorHandler(prev) })
 
+	// Capture the once-per-process warning that goes to the standard logger.
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
+
 	mock, conn, cleanup := setupMockServer(t)
 	t.Cleanup(cleanup)
 	mock.setFailure(codes.PermissionDenied)
@@ -617,23 +642,37 @@ func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
 	}
 	logger := &recordingLogger{}
 	ctx := context.Background()
-	mr := tel.NewMetricRecorder(ctx, logger, mClient, tel.Config{
-		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "p", ResourceID: "p:i", Region: "r",
-	})
-	if _, isNull := mr.(tel.NullMetricRecorder); isNull {
-		t.Fatal("expected a real recorder")
+	newRecorder := func(id string) tel.MetricRecorder {
+		mr := tel.NewMetricRecorder(ctx, logger, mClient, tel.Config{
+			Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "p", ResourceID: id, Region: "r",
+		})
+		if _, isNull := mr.(tel.NullMetricRecorder); isNull {
+			t.Fatal("expected a real recorder")
+		}
+		return mr
 	}
+	mr := newRecorder("p:i")
+	// A second recorder (another instance) sharing the process: it must not
+	// produce a second standard-logger warning.
+	mr2 := newRecorder("p:j")
+	t.Cleanup(func() { _ = mr2.Shutdown(ctx) })
 	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	mr2.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
 
 	// Let several export intervals elapse while the server rejects writes.
 	time.Sleep(150 * time.Millisecond)
-	if got := mock.requestCount(); got != 1 {
-		t.Fatalf("after a PermissionDenied, exports should be suspended; server saw %d requests, want 1", got)
+	if got := mock.requestCount(); got != 2 {
+		t.Fatalf("after a PermissionDenied, exports should be suspended; server saw %d requests, want 2 (one per recorder)", got)
 	}
 	lines := logger.snapshot()
-	if len(lines) != 1 || !strings.Contains(lines[0], "suspending export") || !strings.Contains(lines[0], "metricWriter") {
-		t.Fatalf("want exactly one debug line about suspension with IAM hint, got %q", lines)
+	if len(lines) != 2 || !strings.Contains(lines[0], "suspending export") || !strings.Contains(lines[0], "metricWriter") {
+		t.Fatalf("want exactly one debug line per recorder about suspension with IAM hint, got %q", lines)
 	}
+	if w := warnBuf.String(); strings.Count(w, "cloudsqlconn: built-in metrics export failed") != 1 || !strings.Contains(w, "metricWriter") {
+		t.Fatalf("want exactly one standard-logger warning per process (two recorders, many intervals), got %q", w)
+	}
+	logger.lines = nil // keep the rest of the test focused on recorder 1
+	_ = mr2.Shutdown(ctx)
 
 	// Fix the "permission" and wait past the backoff: export resumes and
 	// recovery is logged exactly once.
@@ -646,12 +685,17 @@ func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
 		t.Fatalf("export did not resume after backoff; server saw %d requests", got)
 	}
 	deadline = time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && len(logger.snapshot()) < 2 {
+	for time.Now().Before(deadline) && len(logger.snapshot()) < 1 {
 		time.Sleep(10 * time.Millisecond)
 	}
+	// Give any erroneous extra lines a chance to appear before asserting.
+	time.Sleep(3 * tel.DefaultExportInterval)
 	lines = logger.snapshot()
-	if len(lines) != 2 || !strings.Contains(lines[1], "recovered") {
-		t.Fatalf("want exactly two debug lines (failure, recovery), got %q", lines)
+	if len(lines) != 1 || !strings.Contains(lines[0], "recovered") {
+		t.Fatalf("want exactly one debug line (recovery) after the failure line, got %q", lines)
+	}
+	if w := warnBuf.String(); strings.Count(w, "cloudsqlconn: built-in metrics export failed") != 1 {
+		t.Fatalf("recovery must not add standard-logger output; got %q", w)
 	}
 
 	if err := mr.Shutdown(ctx); err != nil {
@@ -669,6 +713,10 @@ func TestTransientExportFailuresAreDeduplicated(t *testing.T) {
 	oldInterval := tel.DefaultExportInterval
 	tel.DefaultExportInterval = 20 * time.Millisecond
 	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
 
 	mock, conn, cleanup := setupMockServer(t)
 	t.Cleanup(cleanup)
@@ -692,5 +740,8 @@ func TestTransientExportFailuresAreDeduplicated(t *testing.T) {
 	}
 	if lines := logger.snapshot(); len(lines) != 1 || !strings.Contains(lines[0], "will not be logged again") {
 		t.Fatalf("want exactly one deduplicated debug line, got %q", lines)
+	}
+	if w := warnBuf.String(); w != "" {
+		t.Fatalf("transient errors must not write to the standard logger, got %q", w)
 	}
 }

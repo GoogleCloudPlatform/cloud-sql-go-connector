@@ -17,6 +17,7 @@ package tel
 import (
 	"context"
 	"errors"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -478,6 +479,17 @@ func (m *metricRecorder) Shutdown(ctx context.Context) error {
 // Exposed as a var to facilitate testing.
 var PermanentExportErrorBackoff = 10 * time.Minute
 
+// permanentErrorOnce guards the single process-wide warning emitted on the
+// first permanent export error. Built-in metrics are opt-in, so a user who
+// enabled them but lacks the IAM role deserves to find out even without a
+// debug logger; one line per process is the most a library should write to
+// the application's log on its own.
+var permanentErrorOnce = new(sync.Once)
+
+// warnLogger is the destination for that single warning. It is a var so tests
+// can capture it; the default is the standard library logger (stderr).
+var warnLogger = log.Default()
+
 // sharedClientExporter wraps the Cloud Monitoring exporter to make built-in
 // metrics strictly fail-open and quiet:
 //
@@ -496,10 +508,12 @@ var PermanentExportErrorBackoff = 10 * time.Minute
 //     once, so a persistent misconfiguration produces two lines, not one per
 //     export interval.
 //   - After a permanent error (PermissionDenied, Unauthenticated) exports are
-//     suspended for PermanentExportErrorBackoff before being retried.
+//     suspended for PermanentExportErrorBackoff before being retried, and a
+//     single warning is written to the standard logger, once per process, so
+//     the misconfiguration is discoverable without a debug logger.
 //
-// Built-in metrics therefore never affect connectivity, never write to the
-// application's stderr, and never flood logs.
+// Built-in metrics therefore never affect connectivity, write at most one
+// line to the application's standard logger, and never flood logs.
 type sharedClientExporter struct {
 	sdkmetric.Exporter
 	logger debug.ContextLogger
@@ -532,6 +546,13 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 	}
 	if isPermanentExportError(err) {
 		e.suspendedUntil = time.Now().Add(PermanentExportErrorBackoff)
+		permanentErrorOnce.Do(func() {
+			warnLogger.Printf("cloudsqlconn: built-in metrics export failed for %s: %v. "+
+				"The identity used by the connector needs roles/monitoring.metricWriter on the "+
+				"Cloud SQL instance's project. Export is suspended for %v between retries; further "+
+				"failures are reported via the debug logger only.",
+				e.name, err, PermanentExportErrorBackoff)
+		})
 	}
 	if msg := err.Error(); msg != e.lastErr {
 		e.lastErr = msg
