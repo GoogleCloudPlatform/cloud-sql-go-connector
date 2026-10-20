@@ -1996,7 +1996,7 @@ func TestBuiltInMetricsOptIn(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithBuiltInMetrics(),
+		WithBuiltInMetrics(true),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -2186,7 +2186,7 @@ func TestBuiltInMetricsExportsThroughDialerClient(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithBuiltInMetrics(),
+		WithBuiltInMetrics(true),
 		withMetricClientOptions(option.WithGRPCConn(conn)),
 	)
 	if err != nil {
@@ -2244,7 +2244,7 @@ func TestCloseFlushesBuiltInMetrics(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithBuiltInMetrics(),
+		WithBuiltInMetrics(true),
 		withMetricClientOptions(option.WithGRPCConn(conn)),
 	)
 	if err != nil {
@@ -2287,7 +2287,7 @@ func TestMetricRecorderReplacementFlushesOldRecorder(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithBuiltInMetrics(),
+		WithBuiltInMetrics(true),
 		withMetricClientOptions(option.WithGRPCConn(conn)),
 	)
 	if err != nil {
@@ -2351,7 +2351,7 @@ func TestCloseFlushesAllRecorders(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithBuiltInMetrics(),
+		WithBuiltInMetrics(true),
 		withMetricClientOptions(option.WithGRPCConn(conn)),
 	)
 	if err != nil {
@@ -2437,7 +2437,7 @@ func TestWithComputePlatform(t *testing.T) {
 
 		d, err := NewDialer(ctx,
 			WithTokenSource(mock.EmptyTokenSource{}),
-			WithBuiltInMetrics(),
+			WithBuiltInMetrics(true),
 			WithComputePlatform(ComputePlatformAIStudio),
 			withMetricClientOptions(option.WithGRPCConn(conn)),
 		)
@@ -2481,7 +2481,7 @@ func TestAutoIPReportsResolvedIPType(t *testing.T) {
 		},
 		dialerOptions: []Option{
 			WithTokenSource(mock.EmptyTokenSource{}),
-			WithBuiltInMetrics(),
+			WithBuiltInMetrics(true),
 			withMetricClientOptions(option.WithGRPCConn(conn)),
 			WithDefaultDialOptions(WithAutoIP()),
 		},
@@ -2504,5 +2504,26 @@ func TestAutoIPReportsResolvedIPType(t *testing.T) {
 	}
 	if got[tel.IPTypeAuto] {
 		t.Fatalf("instance_ip_type must report the resolved type, but %q was exported: %v", tel.IPTypeAuto, got)
+	}
+}
+
+func TestWithBuiltInMetricsFalseIsExplicitOptOut(t *testing.T) {
+	ctx := context.Background()
+	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}), WithBuiltInMetrics(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	if d.enableBuiltInMetrics || d.mClient != nil {
+		t.Fatal("WithBuiltInMetrics(false) must leave built-in metrics disabled")
+	}
+	// Last option wins, as with every other Option.
+	d2, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}), WithBuiltInMetrics(true), WithBuiltInMetrics(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d2.Close() }()
+	if d2.enableBuiltInMetrics {
+		t.Fatal("a later WithBuiltInMetrics(false) must override an earlier true")
 	}
 }

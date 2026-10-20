@@ -19,6 +19,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/debug"
@@ -32,6 +33,8 @@ import (
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	cmexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 const (
@@ -364,12 +367,12 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 	// that client as if it owned it, which would break every other recorder
 	// still using it (observed as "grpc: the client connection is closing"
 	// when a recorder is replaced or when Close flushes multiple instances).
-	// sharedClientExporter delegates everything to the real exporter except
-	// Shutdown, which is a no-op. The periodic reader still performs its
-	// final collect-and-export before calling Shutdown, so flushing works;
-	// the Dialer closes the shared client once after all recorders are
-	// shut down.
-	sharedExp := sharedClientExporter{Exporter: exp}
+	// sharedClientExporter delegates to the real exporter but (1) makes
+	// Shutdown a no-op so the shared client stays open until the Dialer
+	// closes it, and (2) never surfaces export errors to the OpenTelemetry
+	// global error handler, which would otherwise print to stderr on every
+	// failed export. See the type documentation for details.
+	sharedExp := &sharedClientExporter{Exporter: exp, logger: l, name: cfg.ResourceID}
 
 	res := resource.NewWithAttributes(monitoredResource,
 		// The gcp.resource_type is a special attribute that the exporter
@@ -467,17 +470,94 @@ func (m *metricRecorder) Shutdown(ctx context.Context) error {
 	return m.provider.Shutdown(ctx)
 }
 
-// sharedClientExporter wraps a Cloud Monitoring exporter whose MetricClient
-// is shared with other exporters. Its Shutdown does not shut down the wrapped
-// exporter, because doing so would close the shared client and break every
-// other recorder still using it. The periodic reader still performs its final
-// collect-and-export before calling Shutdown, so no data is lost.
+// PermanentExportErrorBackoff is how long exports are suspended after an
+// error that will not resolve on its own (missing IAM permission, disabled
+// API, invalid credentials). Suspending avoids hammering the Monitoring API
+// and the debug log once a minute while still retrying periodically in case
+// the operator fixes the configuration without restarting the process.
+// Exposed as a var to facilitate testing.
+var PermanentExportErrorBackoff = 10 * time.Minute
+
+// sharedClientExporter wraps the Cloud Monitoring exporter to make built-in
+// metrics strictly fail-open and quiet:
+//
+//   - Shutdown is a no-op. The wrapped exporter's Shutdown closes the
+//     MetricClient it was given, but that client is shared by every recorder
+//     of a Dialer, so shutting down one recorder must not close it. The
+//     periodic reader still performs its final collect-and-export before
+//     calling Shutdown, so flushing works; the Dialer closes the client once.
+//   - Export never returns an error. Errors returned to the periodic reader
+//     are passed to the OpenTelemetry global error handler, whose default
+//     prints to stderr on every failed export (once a minute, forever, for a
+//     user who is merely missing an IAM role). Instead, errors are reported
+//     through the connector's debug logger, which is a no-op unless the
+//     caller opted into debug logging.
+//   - Identical consecutive errors are logged once, and recovery is logged
+//     once, so a persistent misconfiguration produces two lines, not one per
+//     export interval.
+//   - After a permanent error (PermissionDenied, Unauthenticated) exports are
+//     suspended for PermanentExportErrorBackoff before being retried.
+//
+// Built-in metrics therefore never affect connectivity, never write to the
+// application's stderr, and never flood logs.
 type sharedClientExporter struct {
 	sdkmetric.Exporter
+	logger debug.ContextLogger
+	name   string
+
+	mu             sync.Mutex
+	lastErr        string
+	suspendedUntil time.Time
+}
+
+// Export exports the metrics, swallowing and rate-limiting any error.
+func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.ResourceMetrics) error {
+	e.mu.Lock()
+	if time.Now().Before(e.suspendedUntil) {
+		e.mu.Unlock()
+		return nil
+	}
+	e.mu.Unlock()
+
+	err := e.Exporter.Export(ctx, rm)
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err == nil {
+		if e.lastErr != "" {
+			e.logger.Debugf(ctx, "[%v] built-in metrics export recovered", e.name)
+			e.lastErr = ""
+		}
+		return nil
+	}
+	if isPermanentExportError(err) {
+		e.suspendedUntil = time.Now().Add(PermanentExportErrorBackoff)
+	}
+	if msg := err.Error(); msg != e.lastErr {
+		e.lastErr = msg
+		if e.suspendedUntil.After(time.Now()) {
+			e.logger.Debugf(ctx, "[%v] built-in metrics export failed, suspending export for %v: %v "+
+				"(the identity used by the connector needs roles/monitoring.metricWriter on the instance's project)",
+				e.name, PermanentExportErrorBackoff, err)
+		} else {
+			e.logger.Debugf(ctx, "[%v] built-in metrics export failed (identical errors will not be logged again): %v", e.name, err)
+		}
+	}
+	return nil
 }
 
 // Shutdown is a no-op that leaves the shared MetricClient open.
-func (sharedClientExporter) Shutdown(context.Context) error { return nil }
+func (*sharedClientExporter) Shutdown(context.Context) error { return nil }
+
+// isPermanentExportError reports whether err indicates a configuration
+// problem that retrying every export interval will not fix.
+func isPermanentExportError(err error) bool {
+	switch grpcstatus.Code(err) {
+	case codes.PermissionDenied, codes.Unauthenticated:
+		return true
+	}
+	return false
+}
 
 // RecordClosedConnectionCount records totals number of closed connections.
 func (m *metricRecorder) RecordClosedConnectionCount(ctx context.Context, a Attributes) {

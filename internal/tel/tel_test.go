@@ -16,8 +16,11 @@ package tel_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,10 +28,13 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	"github.com/google/go-cmp/cmp"
+	"go.opentelemetry.io/otel"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -50,6 +56,9 @@ func (n nullLogger) Debugf(_ context.Context, format string, args ...any) {
 type mockServer struct {
 	mu      sync.Mutex
 	gotReqs []*monitoringpb.CreateTimeSeriesRequest
+	// failWith, when not OK, makes CreateServiceTimeSeries return a gRPC
+	// error with that code (the request is still recorded).
+	failWith codes.Code
 	monitoringpb.MetricServiceServer
 }
 
@@ -57,7 +66,40 @@ func (m *mockServer) CreateServiceTimeSeries(_ context.Context, req *monitoringp
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.gotReqs = append(m.gotReqs, req)
+	if m.failWith != codes.OK {
+		return nil, grpcstatus.Error(m.failWith, "simulated failure")
+	}
 	return &emptypb.Empty{}, nil
+}
+
+func (m *mockServer) setFailure(c codes.Code) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failWith = c
+}
+
+func (m *mockServer) requestCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.gotReqs)
+}
+
+// recordingLogger captures debug log lines.
+type recordingLogger struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (r *recordingLogger) Debugf(_ context.Context, format string, args ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, fmt.Sprintf(format, args...))
+}
+
+func (r *recordingLogger) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.lines...)
 }
 
 func equalLabels(want, got map[string]string) bool {
@@ -542,5 +584,113 @@ func TestIsValidComputePlatform(t *testing.T) {
 		if tel.IsValidComputePlatform(p) {
 			t.Errorf("IsValidComputePlatform(%q) = true, want false", p)
 		}
+	}
+}
+
+// TestExportFailuresAreQuietAndBackedOff verifies the fail-open contract of
+// built-in metrics: export errors never reach the OpenTelemetry global error
+// handler (stderr), identical errors are logged once at debug level, permanent
+// errors suspend export for a backoff period, and recovery is logged once.
+func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
+	oldInterval, oldBackoff := tel.DefaultExportInterval, tel.PermanentExportErrorBackoff
+	tel.DefaultExportInterval = 20 * time.Millisecond
+	tel.PermanentExportErrorBackoff = 300 * time.Millisecond
+	t.Cleanup(func() {
+		tel.DefaultExportInterval = oldInterval
+		tel.PermanentExportErrorBackoff = oldBackoff
+	})
+
+	// Any error reaching the global handler fails the test: that is the
+	// stderr-flooding path we are guarding against.
+	var handled atomic.Int32
+	prev := otel.GetErrorHandler()
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) { handled.Add(1) }))
+	t.Cleanup(func() { otel.SetErrorHandler(prev) })
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mock.setFailure(codes.PermissionDenied)
+
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := &recordingLogger{}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, logger, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "p", ResourceID: "p:i", Region: "r",
+	})
+	if _, isNull := mr.(tel.NullMetricRecorder); isNull {
+		t.Fatal("expected a real recorder")
+	}
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+
+	// Let several export intervals elapse while the server rejects writes.
+	time.Sleep(150 * time.Millisecond)
+	if got := mock.requestCount(); got != 1 {
+		t.Fatalf("after a PermissionDenied, exports should be suspended; server saw %d requests, want 1", got)
+	}
+	lines := logger.snapshot()
+	if len(lines) != 1 || !strings.Contains(lines[0], "suspending export") || !strings.Contains(lines[0], "metricWriter") {
+		t.Fatalf("want exactly one debug line about suspension with IAM hint, got %q", lines)
+	}
+
+	// Fix the "permission" and wait past the backoff: export resumes and
+	// recovery is logged exactly once.
+	mock.setFailure(codes.OK)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && mock.requestCount() < 2 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := mock.requestCount(); got < 2 {
+		t.Fatalf("export did not resume after backoff; server saw %d requests", got)
+	}
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && len(logger.snapshot()) < 2 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	lines = logger.snapshot()
+	if len(lines) != 2 || !strings.Contains(lines[1], "recovered") {
+		t.Fatalf("want exactly two debug lines (failure, recovery), got %q", lines)
+	}
+
+	if err := mr.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := handled.Load(); n != 0 {
+		t.Fatalf("%d error(s) reached the OpenTelemetry global error handler; built-in metrics must never do that", n)
+	}
+}
+
+// TestTransientExportFailuresAreDeduplicated verifies that a non-permanent
+// error (which is retried every interval) is logged once, not once per
+// interval.
+func TestTransientExportFailuresAreDeduplicated(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = 20 * time.Millisecond
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mock.setFailure(codes.Unavailable)
+
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := &recordingLogger{}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, logger, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "p", ResourceID: "p:i", Region: "r",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	time.Sleep(150 * time.Millisecond)
+	_ = mr.Shutdown(ctx)
+
+	if got := mock.requestCount(); got < 3 {
+		t.Fatalf("transient errors should keep retrying every interval; server saw only %d requests", got)
+	}
+	if lines := logger.snapshot(); len(lines) != 1 || !strings.Contains(lines[0], "will not be logged again") {
+		t.Fatalf("want exactly one deduplicated debug line, got %q", lines)
 	}
 }

@@ -436,17 +436,25 @@ func WithDisableMetadataExchange() Option {
 	}
 }
 
-// WithBuiltInMetrics enables the built-in metric export. When enabled, the
-// Dialer reports on its internal operations (connection attempts, dial
-// latency, open connections, connection durations) to Cloud Monitoring under
-// the cloudsql.googleapis.com/client/connector metric prefix, using the
-// cloudsql.googleapis.com/InstanceClient monitored resource. These metrics
-// help Cloud SQL improve performance and identify client connectivity
+// WithBuiltInMetrics enables or disables the built-in metric export. When
+// enabled, the Dialer reports on its internal operations (connection
+// attempts, dial latency, open connections, connection durations) to Cloud
+// Monitoring under the cloudsql.googleapis.com/client/connector metric prefix,
+// using the cloudsql.googleapis.com/InstanceClient monitored resource. These
+// metrics help Cloud SQL improve performance and identify client connectivity
 // problems.
 //
-// Built-in metrics are disabled by default. The identity used by the Dialer
-// must have the roles/monitoring.metricWriter role on the Cloud SQL
-// instance's project for the export to succeed.
+// Built-in metrics are currently disabled by default and are in BETA. Passing
+// false is a no-op today; it is accepted so that callers who want metrics off
+// can say so explicitly and keep that behavior if the default changes in a
+// future minor release.
+//
+// Metrics never affect connectivity: if the exporter cannot be created or an
+// export fails (for example, missing IAM permission), the failure is reported
+// through the debug logger only, and exports are retried with backoff.
+//
+// The identity used by the Dialer must have the roles/monitoring.metricWriter
+// role on the Cloud SQL instance's project for the export to succeed.
 //
 // The metric export uses the same identity as the Dialer's API calls. When
 // the Dialer detects credentials itself (Application Default Credentials,
@@ -456,9 +464,9 @@ func WithDisableMetadataExchange() Option {
 // WithCredentials, WithIAMAuthNTokenSources, WithIAMAuthNCredentials), the
 // supplied API token source is used as-is and must carry either the
 // monitoring.write or the cloud-platform scope.
-func WithBuiltInMetrics() Option {
+func WithBuiltInMetrics(enabled bool) Option {
 	return func(cfg *dialerConfig) {
-		cfg.enableBuiltInMetrics = true
+		cfg.enableBuiltInMetrics = enabled
 	}
 }
 
