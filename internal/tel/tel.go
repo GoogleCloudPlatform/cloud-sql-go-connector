@@ -158,6 +158,14 @@ type Config struct {
 	ConnectorVersion string
 	// Database engine type [MySQL, PostgreSQL, SQL Server].
 	DatabaseEngineType string
+	// Principal is the identity (e.g. service account email) the connector
+	// authenticates with, when it can be determined. Used only to make
+	// permission errors actionable. May be empty.
+	Principal string
+	// DisableHint tells the user how to turn built-in metrics off in the
+	// client that embeds this connector (Go API vs. Auth Proxy flag). Used
+	// only in error messages. May be empty.
+	DisableHint string
 }
 
 // ConnectorTypeValue returns the connector type based on the user agent.
@@ -373,7 +381,14 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 	// closes it, and (2) never surfaces export errors to the OpenTelemetry
 	// global error handler, which would otherwise print to stderr on every
 	// failed export. See the type documentation for details.
-	sharedExp := &sharedClientExporter{Exporter: exp, logger: l, name: cfg.ResourceID}
+	sharedExp := &sharedClientExporter{
+		Exporter:    exp,
+		logger:      l,
+		name:        cfg.ResourceID,
+		project:     cfg.ResourceContainer,
+		principal:   cfg.Principal,
+		disableHint: cfg.DisableHint,
+	}
 
 	res := resource.NewWithAttributes(monitoredResource,
 		// The gcp.resource_type is a special attribute that the exporter
@@ -516,8 +531,11 @@ var warnLogger = log.Default()
 // line to the application's standard logger, and never flood logs.
 type sharedClientExporter struct {
 	sdkmetric.Exporter
-	logger debug.ContextLogger
-	name   string
+	logger      debug.ContextLogger
+	name        string
+	project     string
+	principal   string
+	disableHint string
 
 	mu             sync.Mutex
 	lastErr        string
@@ -547,24 +565,35 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 	if isPermanentExportError(err) {
 		e.suspendedUntil = time.Now().Add(PermanentExportErrorBackoff)
 		permanentErrorOnce.Do(func() {
-			warnLogger.Printf("cloudsqlconn: built-in metrics export failed for %s: %v. "+
-				"The identity used by the connector needs roles/monitoring.metricWriter on the "+
-				"Cloud SQL instance's project. Export is suspended for %v between retries; further "+
-				"failures are reported via the debug logger only.",
-				e.name, err, PermanentExportErrorBackoff)
+			warnLogger.Printf("cloudsqlconn: built-in metrics export failed for %s: %v. %s "+
+				"Export is suspended for %v between retries; further failures are reported via the debug logger only.",
+				e.name, err, e.remediationHint(), PermanentExportErrorBackoff)
 		})
 	}
 	if msg := err.Error(); msg != e.lastErr {
 		e.lastErr = msg
 		if e.suspendedUntil.After(time.Now()) {
-			e.logger.Debugf(ctx, "[%v] built-in metrics export failed, suspending export for %v: %v "+
-				"(the identity used by the connector needs roles/monitoring.metricWriter on the instance's project)",
-				e.name, PermanentExportErrorBackoff, err)
+			e.logger.Debugf(ctx, "[%v] built-in metrics export failed, suspending export for %v: %v. %s",
+				e.name, PermanentExportErrorBackoff, err, e.remediationHint())
 		} else {
 			e.logger.Debugf(ctx, "[%v] built-in metrics export failed (identical errors will not be logged again): %v", e.name, err)
 		}
 	}
 	return nil
+}
+
+// remediationHint explains how to fix a permission error and how to turn
+// built-in metrics off, naming the principal and project when known.
+func (e *sharedClientExporter) remediationHint() string {
+	who := "the identity used by the connector"
+	if e.principal != "" {
+		who = "principal " + e.principal
+	}
+	hint := "To fix, grant roles/monitoring.metricWriter on project " + e.project + " to " + who + "."
+	if e.disableHint != "" {
+		hint += " To turn built-in metrics off, " + e.disableHint + "."
+	}
+	return hint
 }
 
 // Shutdown is a no-op that leaves the shared MetricClient open.

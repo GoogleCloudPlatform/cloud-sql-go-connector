@@ -644,7 +644,9 @@ func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
 	ctx := context.Background()
 	newRecorder := func(id string) tel.MetricRecorder {
 		mr := tel.NewMetricRecorder(ctx, logger, mClient, tel.Config{
-			Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "p", ResourceID: id, Region: "r",
+			Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "my-db-project", ResourceID: id, Region: "r",
+			Principal:   "sa@my-app.iam.gserviceaccount.com",
+			DisableHint: "remove the --enable-builtin-metrics flag",
 		})
 		if _, isNull := mr.(tel.NullMetricRecorder); isNull {
 			t.Fatal("expected a real recorder")
@@ -665,11 +667,26 @@ func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
 		t.Fatalf("after a PermissionDenied, exports should be suspended; server saw %d requests, want 2 (one per recorder)", got)
 	}
 	lines := logger.snapshot()
-	if len(lines) != 2 || !strings.Contains(lines[0], "suspending export") || !strings.Contains(lines[0], "metricWriter") {
-		t.Fatalf("want exactly one debug line per recorder about suspension with IAM hint, got %q", lines)
+	if len(lines) != 2 || !strings.Contains(lines[0], "suspending export") {
+		t.Fatalf("want exactly one debug line per recorder about suspension, got %q", lines)
 	}
-	if w := warnBuf.String(); strings.Count(w, "cloudsqlconn: built-in metrics export failed") != 1 || !strings.Contains(w, "metricWriter") {
+	w := warnBuf.String()
+	if strings.Count(w, "cloudsqlconn: built-in metrics export failed") != 1 {
 		t.Fatalf("want exactly one standard-logger warning per process (two recorders, many intervals), got %q", w)
+	}
+	// Both the debug line and the warning must be actionable: role, project,
+	// principal, and how to turn metrics off.
+	for _, msg := range []string{lines[0], w} {
+		for _, want := range []string{
+			"roles/monitoring.metricWriter",
+			"project my-db-project",
+			"principal sa@my-app.iam.gserviceaccount.com",
+			"remove the --enable-builtin-metrics flag",
+		} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("message missing %q: %q", want, msg)
+			}
+		}
 	}
 	logger.lines = nil // keep the rest of the test focused on recorder 1
 	_ = mr2.Shutdown(ctx)
@@ -703,6 +720,47 @@ func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
 	}
 	if n := handled.Load(); n != 0 {
 		t.Fatalf("%d error(s) reached the OpenTelemetry global error handler; built-in metrics must never do that", n)
+	}
+}
+
+// TestRemediationHintWithoutPrincipal verifies the message degrades
+// gracefully when the principal cannot be determined.
+func TestRemediationHintWithoutPrincipal(t *testing.T) {
+	oldInterval, oldBackoff := tel.DefaultExportInterval, tel.PermanentExportErrorBackoff
+	tel.DefaultExportInterval = 20 * time.Millisecond
+	tel.PermanentExportErrorBackoff = time.Hour
+	t.Cleanup(func() {
+		tel.DefaultExportInterval = oldInterval
+		tel.PermanentExportErrorBackoff = oldBackoff
+	})
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mock.setFailure(codes.PermissionDenied)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, nullLogger{t}, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "proj", ResourceID: "proj:inst", Region: "r",
+		DisableHint: "pass cloudsqlconn.WithBuiltInMetrics(false) to NewDialer",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	time.Sleep(100 * time.Millisecond)
+	_ = mr.Shutdown(ctx)
+
+	w := warnBuf.String()
+	for _, want := range []string{"project proj", "to the identity used by the connector", "WithBuiltInMetrics(false)"} {
+		if !strings.Contains(w, want) {
+			t.Errorf("warning missing %q: %q", want, w)
+		}
+	}
+	if strings.Contains(w, "principal ") {
+		t.Errorf("warning must not name a principal when unknown: %q", w)
 	}
 }
 

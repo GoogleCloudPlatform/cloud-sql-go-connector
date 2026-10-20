@@ -2527,3 +2527,58 @@ func TestWithBuiltInMetricsFalseIsExplicitOptOut(t *testing.T) {
 		t.Fatal("a later WithBuiltInMetrics(false) must override an earlier true")
 	}
 }
+
+func TestDetectPrincipal(t *testing.T) {
+	ctx := context.Background()
+	saFile := filepath.Join(t.TempDir(), "sa.json")
+	if err := os.WriteFile(saFile, fakeServiceAccount(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tcs := []struct {
+		desc string
+		cfg  *dialerConfig
+		env  map[string]string
+		want string
+	}{
+		{
+			desc: "credentials JSON exposes client_email",
+			cfg:  &dialerConfig{setCredentials: true, credentialsJSON: fakeServiceAccount("")},
+			want: "email@example.com",
+		},
+		{
+			desc: "ADC via GOOGLE_APPLICATION_CREDENTIALS file",
+			cfg:  &dialerConfig{},
+			env:  map[string]string{"GOOGLE_APPLICATION_CREDENTIALS": saFile},
+			want: "email@example.com",
+		},
+		{
+			desc: "caller-supplied token source is opaque",
+			cfg:  &dialerConfig{setCredentials: true},
+			want: "",
+		},
+		{
+			desc: "malformed credentials JSON yields empty, not an error",
+			cfg:  &dialerConfig{setCredentials: true, credentialsJSON: []byte("not json")},
+			want: "",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			if got := detectPrincipal(ctx, tc.cfg); got != tc.want {
+				t.Errorf("detectPrincipal() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMetricsDisableHint(t *testing.T) {
+	if got := metricsDisableHint(tel.ConnectorTypeGo); !strings.Contains(got, "WithBuiltInMetrics(false)") {
+		t.Errorf("go hint = %q", got)
+	}
+	if got := metricsDisableHint(tel.ConnectorTypeAuthProxy); !strings.Contains(got, authProxyMetricsFlag) {
+		t.Errorf("proxy hint = %q", got)
+	}
+}
