@@ -64,10 +64,7 @@ type dialerConfig struct {
 	apiTokenProvider      auth.TokenProvider
 	useragents            []string
 	// TODO: Update to applicationID, which uses GCE VM Name, GKE Pod Name.
-	applicationName string
-	// computePlatform, when set, overrides the auto-detected compute_platform
-	// metric label. It is validated by WithComputePlatform.
-	computePlatform                 string
+	applicationName                 string
 	setAdminAPIEndpoint             bool
 	setCredentials                  bool
 	setHTTPClient                   bool
@@ -82,6 +79,9 @@ type dialerConfig struct {
 	resourceExhaustedCooldownPeriod time.Duration
 	useDNSNameResolver              bool
 	enableBuiltInMetrics            bool
+	// computePlatform, when set, overrides the auto-detected compute_platform
+	// metric label. It is validated by WithComputePlatform.
+	computePlatform string
 	// err tracks any dialer options that may have failed.
 	err    error
 	client *sqladmin.Service
