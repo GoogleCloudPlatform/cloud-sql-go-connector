@@ -14,10 +14,15 @@
 package tel_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log"
 	"net"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,10 +30,13 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	"github.com/google/go-cmp/cmp"
+	"go.opentelemetry.io/otel"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -50,6 +58,9 @@ func (n nullLogger) Debugf(_ context.Context, format string, args ...any) {
 type mockServer struct {
 	mu      sync.Mutex
 	gotReqs []*monitoringpb.CreateTimeSeriesRequest
+	// failWith, when not OK, makes CreateServiceTimeSeries return a gRPC
+	// error with that code (the request is still recorded).
+	failWith codes.Code
 	monitoringpb.MetricServiceServer
 }
 
@@ -57,7 +68,58 @@ func (m *mockServer) CreateServiceTimeSeries(_ context.Context, req *monitoringp
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.gotReqs = append(m.gotReqs, req)
+	if m.failWith != codes.OK {
+		return nil, grpcstatus.Error(m.failWith, "simulated failure")
+	}
 	return &emptypb.Empty{}, nil
+}
+
+func (m *mockServer) setFailure(c codes.Code) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failWith = c
+}
+
+func (m *mockServer) requestCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.gotReqs)
+}
+
+// lockedBuffer is a goroutine-safe bytes.Buffer for capturing log output.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// recordingLogger captures debug log lines.
+type recordingLogger struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (r *recordingLogger) Debugf(_ context.Context, format string, args ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, fmt.Sprintf(format, args...))
+}
+
+func (r *recordingLogger) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.lines...)
 }
 
 func equalLabels(want, got map[string]string) bool {
@@ -542,5 +604,321 @@ func TestIsValidComputePlatform(t *testing.T) {
 		if tel.IsValidComputePlatform(p) {
 			t.Errorf("IsValidComputePlatform(%q) = true, want false", p)
 		}
+	}
+}
+
+// TestExportFailuresAreQuietAndBackedOff verifies the fail-open contract of
+// built-in metrics: export errors never reach the OpenTelemetry global error
+// handler (stderr), identical errors are logged once at debug level, permanent
+// errors suspend export for a backoff period, and recovery is logged once.
+func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
+	oldInterval, oldInit, oldMax := tel.DefaultExportInterval, tel.PermanentExportErrorInitialBackoff, tel.PermanentExportErrorMaxBackoff
+	tel.DefaultExportInterval = 20 * time.Millisecond
+	tel.PermanentExportErrorInitialBackoff = 300 * time.Millisecond
+	tel.PermanentExportErrorMaxBackoff = 300 * time.Millisecond
+	t.Cleanup(func() {
+		tel.DefaultExportInterval = oldInterval
+		tel.PermanentExportErrorInitialBackoff = oldInit
+		tel.PermanentExportErrorMaxBackoff = oldMax
+	})
+
+	// Any error reaching the global handler fails the test: that is the
+	// stderr-flooding path we are guarding against.
+	var handled atomic.Int32
+	prev := otel.GetErrorHandler()
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) { handled.Add(1) }))
+	t.Cleanup(func() { otel.SetErrorHandler(prev) })
+
+	// Capture the once-per-process warning that goes to the standard logger.
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mock.setFailure(codes.PermissionDenied)
+
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := &recordingLogger{}
+	ctx := context.Background()
+	newRecorder := func(id string) tel.MetricRecorder {
+		mr := tel.NewMetricRecorder(ctx, logger, mClient, tel.Config{
+			Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "my-db-project", ResourceID: id, Region: "r",
+			Principal:   "sa@my-app.iam.gserviceaccount.com",
+			DisableHint: "run the proxy with --enable-builtin-metrics=false",
+		})
+		if _, isNull := mr.(tel.NullMetricRecorder); isNull {
+			t.Fatal("expected a real recorder")
+		}
+		return mr
+	}
+	mr := newRecorder("p:i")
+	// A second recorder (another instance) sharing the process: it must not
+	// produce a second standard-logger warning.
+	mr2 := newRecorder("p:j")
+	t.Cleanup(func() { _ = mr2.Shutdown(ctx) })
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	mr2.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+
+	// Let several export intervals elapse while the server rejects writes.
+	time.Sleep(150 * time.Millisecond)
+	if got := mock.requestCount(); got != 2 {
+		t.Fatalf("after a PermissionDenied, exports should be suspended; server saw %d requests, want 2 (one per recorder)", got)
+	}
+	lines := logger.snapshot()
+	if len(lines) != 2 || !strings.Contains(lines[0], "suspending export") {
+		t.Fatalf("want exactly one debug line per recorder about suspension, got %q", lines)
+	}
+	w := warnBuf.String()
+	if strings.Count(w, "cloudsqlconn: built-in metrics export failed") != 1 {
+		t.Fatalf("want exactly one standard-logger warning per process (two recorders, many intervals), got %q", w)
+	}
+	// Both the debug line and the warning must be actionable: role, project,
+	// principal, and how to turn metrics off.
+	for _, msg := range []string{lines[0], w} {
+		for _, want := range []string{
+			"roles/monitoring.metricWriter",
+			"project my-db-project",
+			"principal sa@my-app.iam.gserviceaccount.com",
+			"run the proxy with --enable-builtin-metrics=false",
+		} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("message missing %q: %q", want, msg)
+			}
+		}
+	}
+	logger.lines = nil // keep the rest of the test focused on recorder 1
+	_ = mr2.Shutdown(ctx)
+
+	// Fix the "permission" and wait past the backoff: export resumes and
+	// recovery is logged exactly once.
+	mock.setFailure(codes.OK)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && mock.requestCount() < 2 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := mock.requestCount(); got < 2 {
+		t.Fatalf("export did not resume after backoff; server saw %d requests", got)
+	}
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && len(logger.snapshot()) < 1 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Give any erroneous extra lines a chance to appear before asserting.
+	time.Sleep(3 * tel.DefaultExportInterval)
+	lines = logger.snapshot()
+	if len(lines) != 1 || !strings.Contains(lines[0], "recovered") {
+		t.Fatalf("want exactly one debug line (recovery) after the failure line, got %q", lines)
+	}
+	if w := warnBuf.String(); strings.Count(w, "cloudsqlconn: built-in metrics export failed") != 1 {
+		t.Fatalf("recovery must not add standard-logger output; got %q", w)
+	}
+
+	if err := mr.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := handled.Load(); n != 0 {
+		t.Fatalf("%d error(s) reached the OpenTelemetry global error handler; built-in metrics must never do that", n)
+	}
+}
+
+// TestRemediationHintWithoutPrincipal verifies the message degrades
+// gracefully when the principal cannot be determined.
+func TestRemediationHintWithoutPrincipal(t *testing.T) {
+	oldInterval, oldInit := tel.DefaultExportInterval, tel.PermanentExportErrorInitialBackoff
+	tel.DefaultExportInterval = 20 * time.Millisecond
+	tel.PermanentExportErrorInitialBackoff = time.Hour
+	t.Cleanup(func() {
+		tel.DefaultExportInterval = oldInterval
+		tel.PermanentExportErrorInitialBackoff = oldInit
+	})
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mock.setFailure(codes.PermissionDenied)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, nullLogger{t}, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "proj", ResourceID: "proj:inst", Region: "r",
+		DisableHint: "pass cloudsqlconn.WithBuiltInMetrics(false) to NewDialer",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	time.Sleep(100 * time.Millisecond)
+	_ = mr.Shutdown(ctx)
+
+	w := warnBuf.String()
+	for _, want := range []string{"project proj", "to the identity used by the connector", "WithBuiltInMetrics(false)"} {
+		if !strings.Contains(w, want) {
+			t.Errorf("warning missing %q: %q", want, w)
+		}
+	}
+	if strings.Contains(w, "principal ") {
+		t.Errorf("warning must not name a principal when unknown: %q", w)
+	}
+}
+
+// TestTransientExportFailuresBackOffAndAreDeduplicated verifies that a
+// non-permanent error is retried with the short backoff tier (not every
+// interval), is debug-logged once, and never touches the standard logger.
+func TestTransientExportFailuresBackOffAndAreDeduplicated(t *testing.T) {
+	oldInterval, oldInit, oldMax := tel.DefaultExportInterval, tel.TransientExportErrorInitialBackoff, tel.TransientExportErrorMaxBackoff
+	tel.DefaultExportInterval = 10 * time.Millisecond
+	tel.TransientExportErrorInitialBackoff = 60 * time.Millisecond
+	tel.TransientExportErrorMaxBackoff = 240 * time.Millisecond
+	t.Cleanup(func() {
+		tel.DefaultExportInterval = oldInterval
+		tel.TransientExportErrorInitialBackoff = oldInit
+		tel.TransientExportErrorMaxBackoff = oldMax
+	})
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mock.setFailure(codes.Unavailable)
+
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := &recordingLogger{}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, logger, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "p", ResourceID: "p:i", Region: "r",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	// Expected attempts with 60ms initial, doubling, 240ms cap, ±20% jitter:
+	// ~0, 60, 180, 420, 660, 900 ms -> ~6 in 1s. Every-interval would be ~100.
+	time.Sleep(time.Second)
+	_ = mr.Shutdown(ctx)
+
+	if got := mock.requestCount(); got < 4 || got > 9 {
+		t.Fatalf("transient errors should back off (expected ~6 attempts in 1s), server saw %d", got)
+	}
+	if lines := logger.snapshot(); len(lines) != 1 || !strings.Contains(lines[0], "retrying with backoff") {
+		t.Fatalf("want exactly one deduplicated debug line, got %q", lines)
+	}
+	if w := warnBuf.String(); w != "" {
+		t.Fatalf("transient errors must not write to the standard logger, got %q", w)
+	}
+}
+
+// TestBackoffTierSwitchRestartsSchedule verifies that moving from a transient
+// error to a permanent one (or back) starts the new tier at its initial value
+// instead of continuing the previous tier's doubled value.
+func TestBackoffTierSwitchRestartsSchedule(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	oldTI, oldTM := tel.TransientExportErrorInitialBackoff, tel.TransientExportErrorMaxBackoff
+	oldPI, oldPM := tel.PermanentExportErrorInitialBackoff, tel.PermanentExportErrorMaxBackoff
+	tel.DefaultExportInterval = 10 * time.Millisecond
+	tel.TransientExportErrorInitialBackoff, tel.TransientExportErrorMaxBackoff = 40*time.Millisecond, 400*time.Millisecond
+	tel.PermanentExportErrorInitialBackoff, tel.PermanentExportErrorMaxBackoff = 150*time.Millisecond, time.Hour
+	t.Cleanup(func() {
+		tel.DefaultExportInterval = oldInterval
+		tel.TransientExportErrorInitialBackoff, tel.TransientExportErrorMaxBackoff = oldTI, oldTM
+		tel.PermanentExportErrorInitialBackoff, tel.PermanentExportErrorMaxBackoff = oldPI, oldPM
+	})
+	restore := tel.SetWarnLoggerForTest(log.New(&lockedBuffer{}, "", 0))
+	t.Cleanup(restore)
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mock.setFailure(codes.Unavailable)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, nullLogger{t}, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "p", ResourceID: "p:i", Region: "r",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+
+	// Let the transient tier climb to its 400ms cap (40, 80, 160, 320, 400).
+	time.Sleep(1200 * time.Millisecond)
+	// Switch to a permanent error: the next suspension must be the permanent
+	// tier's *initial* 150ms, not 2x the transient cap (800ms) nor the cap.
+	mock.setFailure(codes.PermissionDenied)
+	// Wait for the first PermissionDenied attempt to be made.
+	deadline := time.Now().Add(time.Second)
+	base := mock.requestCount()
+	for time.Now().Before(deadline) && mock.requestCount() == base {
+		time.Sleep(5 * time.Millisecond)
+	}
+	afterSwitch := mock.requestCount()
+	// Within ~250ms (initial 150ms + jitter + a tick) there must be a second
+	// permanent attempt; if the schedule had continued from 400ms there
+	// would not be.
+	time.Sleep(260 * time.Millisecond)
+	if n := mock.requestCount() - afterSwitch; n < 1 {
+		t.Fatalf("after switching to a permanent error the schedule should restart at the permanent initial backoff; saw %d attempts in 260ms", n)
+	}
+	_ = mr.Shutdown(ctx)
+}
+
+// TestJitterBounds verifies the jitter stays within ±20% and NextBackoff
+// doubles to the cap.
+func TestJitterBounds(t *testing.T) {
+	d := 10 * time.Second
+	for i := 0; i < 1000; i++ {
+		j := tel.Jitter(d)
+		if j < 8*time.Second || j > 12*time.Second {
+			t.Fatalf("jitter(%v) = %v, want within ±20%%", d, j)
+		}
+	}
+	initial, maxB := 10*time.Minute, time.Hour
+	want := []time.Duration{10 * time.Minute, 20 * time.Minute, 40 * time.Minute, time.Hour, time.Hour}
+	var prev time.Duration
+	for i, w := range want {
+		got := tel.NextBackoff(prev, initial, maxB)
+		if got != w {
+			t.Fatalf("step %d: NextBackoff = %v, want %v", i, got, w)
+		}
+		prev = got
+	}
+	if got := tel.NextBackoff(0, 2*time.Hour, time.Hour); got != time.Hour {
+		t.Fatalf("initial above max should be capped, got %v", got)
+	}
+}
+
+// TestIsPermanentExportError pins the classification of every gRPC code the
+// Monitoring API can return for a write, so a change here is deliberate.
+func TestIsPermanentExportError(t *testing.T) {
+	permanent := []codes.Code{codes.PermissionDenied, codes.Unauthenticated, codes.NotFound, codes.FailedPrecondition}
+	transient := []codes.Code{
+		codes.InvalidArgument, codes.ResourceExhausted, codes.Unavailable, codes.DeadlineExceeded,
+		codes.Internal, codes.Unknown, codes.Aborted, codes.Canceled, codes.OK,
+	}
+	for _, c := range permanent {
+		if !tel.IsPermanentExportError(grpcstatus.Error(c, "x")) {
+			t.Errorf("%v: want permanent", c)
+		}
+	}
+	for _, c := range transient {
+		if tel.IsPermanentExportError(grpcstatus.Error(c, "x")) {
+			t.Errorf("%v: want transient", c)
+		}
+	}
+	// Wrapped and joined errors (as returned by the exporter) still classify.
+	wrapped := fmt.Errorf("export: %w", grpcstatus.Error(codes.PermissionDenied, "x"))
+	if !tel.IsPermanentExportError(wrapped) {
+		t.Error("wrapped PermissionDenied: want permanent")
+	}
+	joined := errors.Join(nil, grpcstatus.Error(codes.NotFound, "x"))
+	if !tel.IsPermanentExportError(joined) {
+		t.Error("joined NotFound: want permanent")
+	}
+	if tel.IsPermanentExportError(errors.New("plain error")) {
+		t.Error("non-gRPC error: want transient")
 	}
 }

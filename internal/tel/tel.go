@@ -17,8 +17,11 @@ package tel
 import (
 	"context"
 	"errors"
+	"log"
+	"math/rand/v2"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/debug"
@@ -32,6 +35,8 @@ import (
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	cmexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 const (
@@ -154,6 +159,14 @@ type Config struct {
 	ConnectorVersion string
 	// Database engine type [MySQL, PostgreSQL, SQL Server].
 	DatabaseEngineType string
+	// Principal is the identity (e.g. service account email) the connector
+	// authenticates with, when it can be determined. Used only to make
+	// permission errors actionable. May be empty.
+	Principal string
+	// DisableHint tells the user how to turn built-in metrics off in the
+	// client that embeds this connector (Go API vs. Auth Proxy flag). Used
+	// only in error messages. May be empty.
+	DisableHint string
 }
 
 // ConnectorTypeValue returns the connector type based on the user agent.
@@ -364,12 +377,19 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 	// that client as if it owned it, which would break every other recorder
 	// still using it (observed as "grpc: the client connection is closing"
 	// when a recorder is replaced or when Close flushes multiple instances).
-	// sharedClientExporter delegates everything to the real exporter except
-	// Shutdown, which is a no-op. The periodic reader still performs its
-	// final collect-and-export before calling Shutdown, so flushing works;
-	// the Dialer closes the shared client once after all recorders are
-	// shut down.
-	sharedExp := sharedClientExporter{Exporter: exp}
+	// sharedClientExporter delegates to the real exporter but (1) makes
+	// Shutdown a no-op so the shared client stays open until the Dialer
+	// closes it, and (2) never surfaces export errors to the OpenTelemetry
+	// global error handler, which would otherwise print to stderr on every
+	// failed export. See the type documentation for details.
+	sharedExp := &sharedClientExporter{
+		Exporter:    exp,
+		logger:      l,
+		name:        cfg.ResourceID,
+		project:     cfg.ResourceContainer,
+		principal:   cfg.Principal,
+		disableHint: cfg.DisableHint,
+	}
 
 	res := resource.NewWithAttributes(monitoredResource,
 		// The gcp.resource_type is a special attribute that the exporter
@@ -467,17 +487,204 @@ func (m *metricRecorder) Shutdown(ctx context.Context) error {
 	return m.provider.Shutdown(ctx)
 }
 
-// sharedClientExporter wraps a Cloud Monitoring exporter whose MetricClient
-// is shared with other exporters. Its Shutdown does not shut down the wrapped
-// exporter, because doing so would close the shared client and break every
-// other recorder still using it. The periodic reader still performs its final
-// collect-and-export before calling Shutdown, so no data is lost.
+// Backoff applied after a failed export. Export is suspended after a failure
+// and the suspension doubles on each consecutive failure up to a cap; a
+// successful export resets it. There are two tiers:
+//
+//   - Permanent errors (missing IAM permission, invalid credentials, disabled
+//     API, deleted project) will not resolve on their own, so they back off
+//     from PermanentExportErrorInitialBackoff up to
+//     PermanentExportErrorMaxBackoff. A client missing
+//     roles/monitoring.metricWriter settles at one attempt per hour while an
+//     IAM fix is still picked up within an hour without a restart.
+//   - Transient errors (Monitoring API unavailable, timeouts, quota) usually
+//     clear on their own, so they back off from
+//     TransientExportErrorInitialBackoff up to TransientExportErrorMaxBackoff.
+//     This sheds load from the Monitoring API during an outage (a fleet of
+//     connectors retrying at full rate would otherwise hold it at 100% of
+//     normal load while it recovers) while bounding the gap in a customer's
+//     dashboard after recovery to roughly the max backoff.
+//
+// A small jitter is applied to every suspension so that clients that failed
+// together do not all retry on the same tick. Exposed as vars to facilitate
+// testing.
+var (
+	PermanentExportErrorInitialBackoff = 10 * time.Minute
+	PermanentExportErrorMaxBackoff     = time.Hour
+	TransientExportErrorInitialBackoff = 2 * time.Minute
+	TransientExportErrorMaxBackoff     = 16 * time.Minute
+)
+
+// backoffJitter is the fraction of a suspension by which it is randomly
+// shortened or lengthened (±).
+const backoffJitter = 0.2
+
+// permanentErrorOnce guards the single process-wide warning emitted on the
+// first permanent export error. Built-in metrics are opt-in, so a user who
+// enabled them but lacks the IAM role deserves to find out even without a
+// debug logger; one line per process is the most a library should write to
+// the application's log on its own.
+var permanentErrorOnce = new(sync.Once)
+
+// warnLogger is the destination for that single warning. It is a var so tests
+// can capture it; the default is the standard library logger (stderr).
+var warnLogger = log.Default()
+
+// sharedClientExporter wraps the Cloud Monitoring exporter to make built-in
+// metrics strictly fail-open and quiet:
+//
+//   - Shutdown is a no-op. The wrapped exporter's Shutdown closes the
+//     MetricClient it was given, but that client is shared by every recorder
+//     of a Dialer, so shutting down one recorder must not close it. The
+//     periodic reader still performs its final collect-and-export before
+//     calling Shutdown, so flushing works; the Dialer closes the client once.
+//   - Export never returns an error. Errors returned to the periodic reader
+//     are passed to the OpenTelemetry global error handler, whose default
+//     prints to stderr on every failed export (once a minute, forever, for a
+//     user who is merely missing an IAM role). Instead, errors are reported
+//     through the connector's debug logger, which is a no-op unless the
+//     caller opted into debug logging.
+//   - Identical consecutive errors are logged once, and recovery is logged
+//     once, so a persistent misconfiguration produces two lines, not one per
+//     export interval.
+//   - Every failure suspends export with exponential, jittered backoff: a
+//     short schedule for transient errors (so a Monitoring API outage is not
+//     hit at full rate by the whole fleet) and a long one for permanent
+//     errors (PermissionDenied, Unauthenticated, NotFound, FailedPrecondition),
+//     for which a single warning is also written to the standard logger, once
+//     per process, so the misconfiguration is discoverable without a debug
+//     logger.
+//
+// Built-in metrics therefore never affect connectivity, write at most one
+// line to the application's standard logger, and never flood logs.
 type sharedClientExporter struct {
 	sdkmetric.Exporter
+	logger      debug.ContextLogger
+	name        string
+	project     string
+	principal   string
+	disableHint string
+
+	mu             sync.Mutex
+	lastErr        string
+	suspendedUntil time.Time
+	// backoff is the current (un-jittered) suspension length; zero until the
+	// first failure, reset to zero on success.
+	backoff time.Duration
+	// permanent records which backoff tier backoff belongs to, so that a
+	// change of error class restarts the schedule.
+	permanent bool
+}
+
+// Export exports the metrics, swallowing and rate-limiting any error.
+func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.ResourceMetrics) error {
+	e.mu.Lock()
+	if time.Now().Before(e.suspendedUntil) {
+		e.mu.Unlock()
+		return nil
+	}
+	e.mu.Unlock()
+
+	err := e.Exporter.Export(ctx, rm)
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err == nil {
+		if e.lastErr != "" {
+			e.logger.Debugf(ctx, "[%v] built-in metrics export recovered", e.name)
+			e.lastErr = ""
+		}
+		e.backoff = 0
+		return nil
+	}
+	permanent := isPermanentExportError(err)
+	initial, maxBackoff := TransientExportErrorInitialBackoff, TransientExportErrorMaxBackoff
+	if permanent {
+		initial, maxBackoff = PermanentExportErrorInitialBackoff, PermanentExportErrorMaxBackoff
+	}
+	// If the error class changed (e.g. transient outage followed by a
+	// permission error), start that class's schedule from its initial value
+	// rather than continuing the previous class's.
+	if e.permanent != permanent {
+		e.backoff = 0
+		e.permanent = permanent
+	}
+	e.backoff = nextBackoff(e.backoff, initial, maxBackoff)
+	e.suspendedUntil = time.Now().Add(jitter(e.backoff))
+	if permanent {
+		permanentErrorOnce.Do(func() {
+			warnLogger.Printf("cloudsqlconn: built-in metrics export failed for %s: %v. %s "+
+				"Retries back off exponentially up to %v; further failures are reported via the debug logger only.",
+				e.name, err, e.remediationHint(), PermanentExportErrorMaxBackoff)
+		})
+	}
+	if msg := err.Error(); msg != e.lastErr {
+		e.lastErr = msg
+		if permanent {
+			e.logger.Debugf(ctx, "[%v] built-in metrics export failed, suspending export (backoff %v, max %v): %v. %s",
+				e.name, e.backoff, maxBackoff, err, e.remediationHint())
+		} else {
+			e.logger.Debugf(ctx, "[%v] built-in metrics export failed, retrying with backoff (%v, max %v); identical errors will not be logged again: %v",
+				e.name, e.backoff, maxBackoff, err)
+		}
+	}
+	return nil
+}
+
+// nextBackoff returns the suspension to apply after a failure given the
+// previous suspension: the initial backoff first, then doubling, capped.
+func nextBackoff(prev, initial, maxBackoff time.Duration) time.Duration {
+	if prev <= 0 {
+		return min(initial, maxBackoff)
+	}
+	return min(2*prev, maxBackoff)
+}
+
+// jitter returns d adjusted by a random factor in [1-backoffJitter, 1+backoffJitter].
+func jitter(d time.Duration) time.Duration {
+	f := 1 + backoffJitter*(2*rand.Float64()-1)
+	return time.Duration(float64(d) * f)
+}
+
+// remediationHint explains how to fix a permission error and how to turn
+// built-in metrics off, naming the principal and project when known.
+func (e *sharedClientExporter) remediationHint() string {
+	who := "the identity used by the connector"
+	if e.principal != "" {
+		who = "principal " + e.principal
+	}
+	hint := "To fix, grant roles/monitoring.metricWriter on project " + e.project + " to " + who + "."
+	if e.disableHint != "" {
+		hint += " To turn built-in metrics off, " + e.disableHint + "."
+	}
+	return hint
 }
 
 // Shutdown is a no-op that leaves the shared MetricClient open.
-func (sharedClientExporter) Shutdown(context.Context) error { return nil }
+func (*sharedClientExporter) Shutdown(context.Context) error { return nil }
+
+// isPermanentExportError reports whether err indicates a configuration
+// problem that retrying every export interval will not fix. Per the
+// Monitoring API error contract:
+//
+//   - PermissionDenied: missing roles/monitoring.metricWriter, Monitoring API
+//     not enabled, billing disabled, project not visible, VPC-SC.
+//   - Unauthenticated: invalid/expired credentials or wrong scopes.
+//   - NotFound: project deleted or unrecognized region label.
+//   - FailedPrecondition: project/billing state that blocks writes.
+//
+// Everything else is treated as transient and retried next interval. That
+// deliberately includes InvalidArgument: it is returned for points written
+// out of order or too frequently and for partial-batch failures, all of
+// which resolve on the next export of these cumulative metrics, and
+// ResourceExhausted, for which a once-per-minute retry is the right cadence.
+func isPermanentExportError(err error) bool {
+	switch grpcstatus.Code(err) {
+	case codes.PermissionDenied, codes.Unauthenticated, codes.NotFound, codes.FailedPrecondition:
+		return true
+	}
+	return false
+}
 
 // RecordClosedConnectionCount records totals number of closed connections.
 func (m *metricRecorder) RecordClosedConnectionCount(ctx context.Context, a Attributes) {

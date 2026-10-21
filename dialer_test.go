@@ -47,6 +47,17 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+// TestMain turns built-in metrics off for the whole test process. The
+// production default is on; without this, every NewDialer in the suite
+// would create a Cloud Monitoring client and periodic exporters that try to
+// reach the real API. Tests that exercise metrics pass
+// WithBuiltInMetrics(true) explicitly, and TestBuiltInMetricsEnabledByDefault
+// checks the production default.
+func TestMain(m *testing.M) {
+	builtInMetricsDefault = false
+	os.Exit(m.Run())
+}
+
 // testSuccessfulDial uses the provided dialer to dial the specified instance
 // and verifies the connection works end to end.
 func testSuccessfulDial(
@@ -1967,21 +1978,39 @@ func TestDialerDnsResolutionEmptyFallbackToPrivateIP(t *testing.T) {
 	)
 }
 
-func TestBuiltInMetricsDisabledByDefault(t *testing.T) {
+func TestBuiltInMetricsEnabledByDefault(t *testing.T) {
+	// Restore the production default for this test only.
+	builtInMetricsDefault = true
+	t.Cleanup(func() { builtInMetricsDefault = false })
+
 	ctx := context.Background()
 	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = d.Close() }()
+	if !d.enableBuiltInMetrics {
+		t.Fatal("built-in metrics should be enabled by default")
+	}
+}
+
+func TestBuiltInMetricsExplicitlyDisabled(t *testing.T) {
+	builtInMetricsDefault = true
+	t.Cleanup(func() { builtInMetricsDefault = false })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}), WithBuiltInMetrics(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
 
 	if d.enableBuiltInMetrics {
-		t.Fatal("built-in metrics should be disabled by default")
+		t.Fatal("WithBuiltInMetrics(false) should disable built-in metrics")
 	}
 	if d.mClient != nil {
 		t.Fatal("metric client should not be created when built-in metrics are disabled")
 	}
-
 	cn, err := instance.ParseConnName("my-project:my-region:my-instance")
 	if err != nil {
 		t.Fatal(err)
@@ -1996,7 +2025,7 @@ func TestBuiltInMetricsOptIn(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithBuiltInMetrics(),
+		WithBuiltInMetrics(true),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -2186,7 +2215,7 @@ func TestBuiltInMetricsExportsThroughDialerClient(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithBuiltInMetrics(),
+		WithBuiltInMetrics(true),
 		withMetricClientOptions(option.WithGRPCConn(conn)),
 	)
 	if err != nil {
@@ -2244,7 +2273,7 @@ func TestCloseFlushesBuiltInMetrics(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithBuiltInMetrics(),
+		WithBuiltInMetrics(true),
 		withMetricClientOptions(option.WithGRPCConn(conn)),
 	)
 	if err != nil {
@@ -2287,7 +2316,7 @@ func TestMetricRecorderReplacementFlushesOldRecorder(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithBuiltInMetrics(),
+		WithBuiltInMetrics(true),
 		withMetricClientOptions(option.WithGRPCConn(conn)),
 	)
 	if err != nil {
@@ -2351,7 +2380,7 @@ func TestCloseFlushesAllRecorders(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithBuiltInMetrics(),
+		WithBuiltInMetrics(true),
 		withMetricClientOptions(option.WithGRPCConn(conn)),
 	)
 	if err != nil {
@@ -2437,7 +2466,7 @@ func TestWithComputePlatform(t *testing.T) {
 
 		d, err := NewDialer(ctx,
 			WithTokenSource(mock.EmptyTokenSource{}),
-			WithBuiltInMetrics(),
+			WithBuiltInMetrics(true),
 			WithComputePlatform(ComputePlatformAIStudio),
 			withMetricClientOptions(option.WithGRPCConn(conn)),
 		)
@@ -2481,7 +2510,7 @@ func TestAutoIPReportsResolvedIPType(t *testing.T) {
 		},
 		dialerOptions: []Option{
 			WithTokenSource(mock.EmptyTokenSource{}),
-			WithBuiltInMetrics(),
+			WithBuiltInMetrics(true),
 			withMetricClientOptions(option.WithGRPCConn(conn)),
 			WithDefaultDialOptions(WithAutoIP()),
 		},
@@ -2504,5 +2533,81 @@ func TestAutoIPReportsResolvedIPType(t *testing.T) {
 	}
 	if got[tel.IPTypeAuto] {
 		t.Fatalf("instance_ip_type must report the resolved type, but %q was exported: %v", tel.IPTypeAuto, got)
+	}
+}
+
+func TestWithBuiltInMetricsFalseIsExplicitOptOut(t *testing.T) {
+	ctx := context.Background()
+	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}), WithBuiltInMetrics(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	if d.enableBuiltInMetrics || d.mClient != nil {
+		t.Fatal("WithBuiltInMetrics(false) must leave built-in metrics disabled")
+	}
+	// Last option wins, as with every other Option.
+	d2, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}), WithBuiltInMetrics(true), WithBuiltInMetrics(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d2.Close() }()
+	if d2.enableBuiltInMetrics {
+		t.Fatal("a later WithBuiltInMetrics(false) must override an earlier true")
+	}
+}
+
+func TestDetectPrincipal(t *testing.T) {
+	ctx := context.Background()
+	saFile := filepath.Join(t.TempDir(), "sa.json")
+	if err := os.WriteFile(saFile, fakeServiceAccount(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tcs := []struct {
+		desc string
+		cfg  *dialerConfig
+		env  map[string]string
+		want string
+	}{
+		{
+			desc: "credentials JSON exposes client_email",
+			cfg:  &dialerConfig{setCredentials: true, credentialsJSON: fakeServiceAccount("")},
+			want: "email@example.com",
+		},
+		{
+			desc: "ADC via GOOGLE_APPLICATION_CREDENTIALS file",
+			cfg:  &dialerConfig{},
+			env:  map[string]string{"GOOGLE_APPLICATION_CREDENTIALS": saFile},
+			want: "email@example.com",
+		},
+		{
+			desc: "caller-supplied token source is opaque",
+			cfg:  &dialerConfig{setCredentials: true},
+			want: "",
+		},
+		{
+			desc: "malformed credentials JSON yields empty, not an error",
+			cfg:  &dialerConfig{setCredentials: true, credentialsJSON: []byte("not json")},
+			want: "",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			if got := detectPrincipal(ctx, tc.cfg); got != tc.want {
+				t.Errorf("detectPrincipal() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMetricsDisableHint(t *testing.T) {
+	if got := metricsDisableHint(tel.ConnectorTypeGo); !strings.Contains(got, "WithBuiltInMetrics(false)") {
+		t.Errorf("go hint = %q", got)
+	}
+	if got := metricsDisableHint(tel.ConnectorTypeAuthProxy); !strings.Contains(got, authProxyMetricsFlag+"=false") {
+		t.Errorf("proxy hint = %q", got)
 	}
 }

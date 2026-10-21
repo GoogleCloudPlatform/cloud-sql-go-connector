@@ -20,6 +20,7 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -44,6 +45,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/mdx"
 	"cloud.google.com/go/cloudsqlconn/internal/sqldataclient"
 	"cloud.google.com/go/cloudsqlconn/internal/trace"
+	"cloud.google.com/go/compute/metadata"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
@@ -88,6 +90,11 @@ var (
 	userAgent     = "cloud-sql-go-connector/" + strings.TrimSpace(versionString)
 	// dialerID is a unique ID for the dialer process.
 	dialerID = uuid.New().String()
+
+	// builtInMetricsDefault is the default for WithBuiltInMetrics. Built-in
+	// metrics are on by default; this is a var so the unit tests can turn
+	// them off process-wide without touching the real Cloud Monitoring API.
+	builtInMetricsDefault = true
 )
 
 // keyGenerator encapsulates the details of RSA key generation to provide lazy
@@ -233,8 +240,12 @@ type Dialer struct {
 	// detected from the environment or set explicitly via WithComputePlatform.
 	computePlatform string
 
+	// metricsPrincipal is the best-effort identity used for the metric
+	// export, for error messages only. May be empty.
+	metricsPrincipal string
+
 	// enableBuiltInMetrics controls whether the Dialer exports built-in
-	// metrics. When false (the default), the metric export is a no-op.
+	// metrics (on by default). When false, the metric export is a no-op.
 	enableBuiltInMetrics bool
 
 	// mClient is used for built-in system metrics. It is nil when built-in
@@ -271,6 +282,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqlDataStreamTimeout:            2 * time.Hour,
 		resourceExhaustedCooldownPeriod: 5 * time.Second,
 		applicationName:                 "unknown",
+		enableBuiltInMetrics:            builtInMetricsDefault,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -409,6 +421,13 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		computePlatform = tel.DetectComputePlatform()
 	}
 
+	// Best-effort identity for metric error messages; only looked up when
+	// metrics are enabled since it may consult the metadata server.
+	var metricsPrincipal string
+	if cfg.enableBuiltInMetrics {
+		metricsPrincipal = detectPrincipal(ctx, cfg)
+	}
+
 	d := &Dialer{
 		closed:                          make(chan struct{}),
 		sqlDataConnState:                make(map[cacheKey]*sqlDataConnState),
@@ -436,6 +455,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		userAgent:                       strings.Join(cfg.useragents, " "),
 		applicationName:                 cfg.applicationName,
 		computePlatform:                 computePlatform,
+		metricsPrincipal:                metricsPrincipal,
 	}
 
 	// log the Dialer ID
@@ -493,6 +513,62 @@ func metricTokenProvider(cfg *dialerConfig, apiTP auth.TokenProvider) (auth.Toke
 	return apiTP, nil
 }
 
+// authProxyMetricsFlag is the Cloud SQL Auth Proxy flag that controls
+// built-in metrics. It is referenced in error messages so proxy users learn
+// how to turn metrics off; the proxy must use this exact flag name.
+const authProxyMetricsFlag = "--enable-builtin-metrics"
+
+// metricsDisableHint returns how to turn built-in metrics off in the client
+// that embeds this connector.
+func metricsDisableHint(connectorType string) string {
+	if connectorType == tel.ConnectorTypeAuthProxy {
+		return "run the proxy with " + authProxyMetricsFlag + "=false"
+	}
+	return "pass cloudsqlconn.WithBuiltInMetrics(false) to NewDialer"
+}
+
+// detectPrincipal returns the identity the Dialer authenticates with, when
+// it can be determined cheaply: the client_email of service account JSON
+// credentials, or the default service account on GCE/Cloud Run/GKE when
+// using Application Default Credentials. Returns "" otherwise (for example
+// caller-supplied token sources, whose principal is opaque). Used only to
+// make permission errors actionable.
+func detectPrincipal(ctx context.Context, cfg *dialerConfig) string {
+	if len(cfg.credentialsJSON) > 0 {
+		var sa struct {
+			ClientEmail string `json:"client_email"`
+		}
+		if err := json.Unmarshal(cfg.credentialsJSON, &sa); err == nil && sa.ClientEmail != "" {
+			return sa.ClientEmail
+		}
+		return ""
+	}
+	if cfg.setCredentials {
+		// Token source / credentials supplied by the caller: principal unknown.
+		return ""
+	}
+	// Application Default Credentials.
+	if f := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); f != "" {
+		if b, err := os.ReadFile(f); err == nil {
+			var sa struct {
+				ClientEmail string `json:"client_email"`
+			}
+			if err := json.Unmarshal(b, &sa); err == nil && sa.ClientEmail != "" {
+				return sa.ClientEmail
+			}
+		}
+		return ""
+	}
+	if metadata.OnGCE() {
+		mctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if email, err := metadata.EmailWithContext(mctx, "default"); err == nil {
+			return email
+		}
+	}
+	return ""
+}
+
 // metricRecorder does a lazy initialization of the metric exporter.
 func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbEngineType string) tel.MetricRecorder {
 	d.metricsMu.Lock()
@@ -515,6 +591,8 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 		ClientRegion:       tel.DetectClientRegion(),
 		ComputePlatform:    d.computePlatform,
 		ConnectorType:      tel.ConnectorTypeValue(d.userAgent),
+		Principal:          d.metricsPrincipal,
+		DisableHint:        metricsDisableHint(tel.ConnectorTypeValue(d.userAgent)),
 		ConnectorVersion:   strings.TrimSpace(versionString),
 		DatabaseEngineType: dbEngineType,
 	}
