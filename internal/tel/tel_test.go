@@ -766,14 +766,19 @@ func TestRemediationHintWithoutPrincipal(t *testing.T) {
 	}
 }
 
-// TestTransientExportFailuresAreDeduplicated verifies that a non-permanent
-// error (which is retried every interval) is logged once, not once per
-// interval.
-func TestTransientExportFailuresAreDeduplicated(t *testing.T) {
-	oldInterval := tel.DefaultExportInterval
-	tel.DefaultExportInterval = 20 * time.Millisecond
-	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
-
+// TestTransientExportFailuresBackOffAndAreDeduplicated verifies that a
+// non-permanent error is retried with the short backoff tier (not every
+// interval), is debug-logged once, and never touches the standard logger.
+func TestTransientExportFailuresBackOffAndAreDeduplicated(t *testing.T) {
+	oldInterval, oldInit, oldMax := tel.DefaultExportInterval, tel.TransientExportErrorInitialBackoff, tel.TransientExportErrorMaxBackoff
+	tel.DefaultExportInterval = 10 * time.Millisecond
+	tel.TransientExportErrorInitialBackoff = 60 * time.Millisecond
+	tel.TransientExportErrorMaxBackoff = 240 * time.Millisecond
+	t.Cleanup(func() {
+		tel.DefaultExportInterval = oldInterval
+		tel.TransientExportErrorInitialBackoff = oldInit
+		tel.TransientExportErrorMaxBackoff = oldMax
+	})
 	var warnBuf lockedBuffer
 	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
 	t.Cleanup(restore)
@@ -792,13 +797,15 @@ func TestTransientExportFailuresAreDeduplicated(t *testing.T) {
 		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "p", ResourceID: "p:i", Region: "r",
 	})
 	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
-	time.Sleep(150 * time.Millisecond)
+	// Expected attempts with 60ms initial, doubling, 240ms cap, ±20% jitter:
+	// ~0, 60, 180, 420, 660, 900 ms -> ~6 in 1s. Every-interval would be ~100.
+	time.Sleep(time.Second)
 	_ = mr.Shutdown(ctx)
 
-	if got := mock.requestCount(); got < 3 {
-		t.Fatalf("transient errors should keep retrying every interval; server saw only %d requests", got)
+	if got := mock.requestCount(); got < 4 || got > 9 {
+		t.Fatalf("transient errors should back off (expected ~6 attempts in 1s), server saw %d", got)
 	}
-	if lines := logger.snapshot(); len(lines) != 1 || !strings.Contains(lines[0], "will not be logged again") {
+	if lines := logger.snapshot(); len(lines) != 1 || !strings.Contains(lines[0], "retrying with backoff") {
 		t.Fatalf("want exactly one deduplicated debug line, got %q", lines)
 	}
 	if w := warnBuf.String(); w != "" {
@@ -806,24 +813,27 @@ func TestTransientExportFailuresAreDeduplicated(t *testing.T) {
 	}
 }
 
-// TestPermanentErrorBackoffIsExponential verifies that consecutive permanent
-// errors double the suspension up to the cap, and that a success resets it.
-func TestPermanentErrorBackoffIsExponential(t *testing.T) {
-	oldInterval, oldInit, oldMax := tel.DefaultExportInterval, tel.PermanentExportErrorInitialBackoff, tel.PermanentExportErrorMaxBackoff
+// TestBackoffTierSwitchRestartsSchedule verifies that moving from a transient
+// error to a permanent one (or back) starts the new tier at its initial value
+// instead of continuing the previous tier's doubled value.
+func TestBackoffTierSwitchRestartsSchedule(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	oldTI, oldTM := tel.TransientExportErrorInitialBackoff, tel.TransientExportErrorMaxBackoff
+	oldPI, oldPM := tel.PermanentExportErrorInitialBackoff, tel.PermanentExportErrorMaxBackoff
 	tel.DefaultExportInterval = 10 * time.Millisecond
-	tel.PermanentExportErrorInitialBackoff = 60 * time.Millisecond
-	tel.PermanentExportErrorMaxBackoff = 240 * time.Millisecond
+	tel.TransientExportErrorInitialBackoff, tel.TransientExportErrorMaxBackoff = 40*time.Millisecond, 400*time.Millisecond
+	tel.PermanentExportErrorInitialBackoff, tel.PermanentExportErrorMaxBackoff = 150*time.Millisecond, time.Hour
 	t.Cleanup(func() {
 		tel.DefaultExportInterval = oldInterval
-		tel.PermanentExportErrorInitialBackoff = oldInit
-		tel.PermanentExportErrorMaxBackoff = oldMax
+		tel.TransientExportErrorInitialBackoff, tel.TransientExportErrorMaxBackoff = oldTI, oldTM
+		tel.PermanentExportErrorInitialBackoff, tel.PermanentExportErrorMaxBackoff = oldPI, oldPM
 	})
 	restore := tel.SetWarnLoggerForTest(log.New(&lockedBuffer{}, "", 0))
 	t.Cleanup(restore)
 
 	mock, conn, cleanup := setupMockServer(t)
 	t.Cleanup(cleanup)
-	mock.setFailure(codes.PermissionDenied)
+	mock.setFailure(codes.Unavailable)
 	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
 	if err != nil {
 		t.Fatal(err)
@@ -834,29 +844,51 @@ func TestPermanentErrorBackoffIsExponential(t *testing.T) {
 	})
 	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
 
-	// Expected attempt times with 60ms initial, doubling, 240ms cap:
-	// 0, 60, 180, 420, 660, 900 ms -> ~6 attempts in 1s. A constant 60ms
-	// backoff would give ~17; no backoff ~100.
-	time.Sleep(time.Second)
-	got := mock.requestCount()
-	if got < 4 || got > 8 {
-		t.Fatalf("with exponential backoff expected ~6 attempts in 1s, got %d", got)
-	}
-
-	// A success resets the backoff: after recovery the next permanent error
-	// should suspend for the initial backoff again (observable as a quick
-	// retry cadence rather than the capped one).
-	mock.setFailure(codes.OK)
-	time.Sleep(400 * time.Millisecond) // past the max backoff, so a retry succeeds
-	base := mock.requestCount()
+	// Let the transient tier climb to its 400ms cap (40, 80, 160, 320, 400).
+	time.Sleep(1200 * time.Millisecond)
+	// Switch to a permanent error: the next suspension must be the permanent
+	// tier's *initial* 150ms, not 2x the transient cap (800ms) nor the cap.
 	mock.setFailure(codes.PermissionDenied)
-	time.Sleep(300 * time.Millisecond)
-	// With reset: attempts at +0, +60, +180 -> 3. Without reset (stuck at
-	// 240ms cap): +0, +240 -> 2.
-	if n := mock.requestCount() - base; n < 3 {
-		t.Fatalf("backoff did not reset after a successful export: %d attempts in 300ms after re-failing", n)
+	// Wait for the first PermissionDenied attempt to be made.
+	deadline := time.Now().Add(time.Second)
+	base := mock.requestCount()
+	for time.Now().Before(deadline) && mock.requestCount() == base {
+		time.Sleep(5 * time.Millisecond)
+	}
+	afterSwitch := mock.requestCount()
+	// Within ~250ms (initial 150ms + jitter + a tick) there must be a second
+	// permanent attempt; if the schedule had continued from 400ms there
+	// would not be.
+	time.Sleep(260 * time.Millisecond)
+	if n := mock.requestCount() - afterSwitch; n < 1 {
+		t.Fatalf("after switching to a permanent error the schedule should restart at the permanent initial backoff; saw %d attempts in 260ms", n)
 	}
 	_ = mr.Shutdown(ctx)
+}
+
+// TestJitterBounds verifies the jitter stays within ±20% and NextBackoff
+// doubles to the cap.
+func TestJitterBounds(t *testing.T) {
+	d := 10 * time.Second
+	for i := 0; i < 1000; i++ {
+		j := tel.Jitter(d)
+		if j < 8*time.Second || j > 12*time.Second {
+			t.Fatalf("jitter(%v) = %v, want within ±20%%", d, j)
+		}
+	}
+	initial, maxB := 10*time.Minute, time.Hour
+	want := []time.Duration{10 * time.Minute, 20 * time.Minute, 40 * time.Minute, time.Hour, time.Hour}
+	var prev time.Duration
+	for i, w := range want {
+		got := tel.NextBackoff(prev, initial, maxB)
+		if got != w {
+			t.Fatalf("step %d: NextBackoff = %v, want %v", i, got, w)
+		}
+		prev = got
+	}
+	if got := tel.NextBackoff(0, 2*time.Hour, time.Hour); got != time.Hour {
+		t.Fatalf("initial above max should be capped, got %v", got)
+	}
 }
 
 // TestIsPermanentExportError pins the classification of every gRPC code the

@@ -34,3 +34,9 @@ func SetWarnLoggerForTest(l *log.Logger) (restore func()) {
 
 // IsPermanentExportError exposes the export error classifier for tests.
 var IsPermanentExportError = isPermanentExportError
+
+// NextBackoff and Jitter expose the backoff helpers for tests.
+var (
+	NextBackoff = nextBackoff
+	Jitter      = jitter
+)
