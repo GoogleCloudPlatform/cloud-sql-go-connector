@@ -22,6 +22,8 @@ package tel
 import (
 	"log"
 	"sync"
+
+	"cloud.google.com/go/cloudsqlconn/debug"
 )
 
 // SetWarnLoggerForTest redirects the once-per-process permanent-error warning
@@ -47,7 +49,10 @@ var (
 )
 
 // NewPanickingRecorderForTest returns a metricRecorder whose instruments are
-// nil, so every Record* call would panic without the neverPanic guard.
-func NewPanickingRecorderForTest() MetricRecorder {
-	return &metricRecorder{}
+// nil, so every Record* call would panic without the recoverPanic guard.
+func NewPanickingRecorderForTest(l debug.ContextLogger) MetricRecorder {
+	return &metricRecorder{logger: l, name: "p:i"}
 }
+
+// ResetPanicWarnOnceForTest re-arms the process-wide panic warning.
+func ResetPanicWarnOnceForTest() { panicWarnOnce = sync.Once{} }

@@ -22,6 +22,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn/debug"
@@ -451,6 +452,8 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 	return &metricRecorder{
 		exporter:               sharedExp,
 		provider:               p,
+		logger:                 l,
+		name:                   cfg.ResourceID,
 		dialerID:               cfg.ClientUID,
 		dbEngineType:           cfg.DatabaseEngineType,
 		mClosedConnectionCount: mClosedConnectionCount,
@@ -463,10 +466,15 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 
 // metricRecorder holds the various counters that track internal operations.
 type metricRecorder struct {
-	exporter               sdkmetric.Exporter
-	provider               *sdkmetric.MeterProvider
-	dialerID               string
-	dbEngineType           string
+	exporter     sdkmetric.Exporter
+	provider     *sdkmetric.MeterProvider
+	logger       debug.ContextLogger
+	name         string
+	dialerID     string
+	dbEngineType string
+	// panicLogged ensures a recovered panic is debug-logged once per
+	// recorder rather than on every dial.
+	panicLogged            atomic.Bool
 	mClosedConnectionCount metric.Int64Counter
 	mConnectLatency        metric.Float64Histogram
 	mConnectionDuration    metric.Float64Histogram
@@ -479,12 +487,35 @@ func (m *metricRecorder) DatabaseEngine() string {
 	return m.dbEngineType
 }
 
-// neverPanic is deferred by every Record* method so that a panic inside the
+// RecoveredPanics counts panics recovered on the metrics record path across
+// the process. It is exported for tests and diagnostics; a non-zero value
+// indicates a bug in the metrics pipeline that should be reported.
+var RecoveredPanics atomic.Int64
+
+// panicWarnOnce guards the single process-wide standard-logger line about a
+// recovered panic, mirroring the permanent-export-error warning.
+var panicWarnOnce sync.Once
+
+// recoverPanic is deferred by every Record* method so that a panic inside the
 // metrics SDK can never propagate into the dial path. Built-in metrics must
 // not be able to break connectivity under any circumstances; the measurement
-// is simply dropped.
-func neverPanic() {
-	_ = recover()
+// is dropped. The panic is not hidden, though: it is counted, debug-logged
+// once per recorder, and reported once per process on the standard logger so
+// that the bug gets noticed and fixed.
+func (m *metricRecorder) recoverPanic(ctx context.Context, op string) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	RecoveredPanics.Add(1)
+	if m.panicLogged.CompareAndSwap(false, true) && m.logger != nil {
+		m.logger.Debugf(ctx, "[%v] built-in metrics: recovered panic in %s (measurement dropped; further panics for this instance are not logged): %v", m.name, op, r)
+	}
+	panicWarnOnce.Do(func() {
+		warnLogger.Printf("cloudsqlconn: built-in metrics recovered a panic in %s and dropped the measurement; "+
+			"connectivity is unaffected. This is a bug in the connector's metrics pipeline, please report it at "+
+			"https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues: %v", op, r)
+	})
 }
 
 // Shutdown flushes buffered metrics and stops the periodic export. Shutting
@@ -696,7 +727,7 @@ func isPermanentExportError(err error) bool {
 
 // RecordClosedConnectionCount records totals number of closed connections.
 func (m *metricRecorder) RecordClosedConnectionCount(ctx context.Context, a Attributes) {
-	defer neverPanic()
+	defer m.recoverPanic(ctx, "RecordClosedConnectionCount")
 	m.mClosedConnectionCount.Add(ctx, 1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
@@ -707,7 +738,7 @@ func (m *metricRecorder) RecordClosedConnectionCount(ctx context.Context, a Attr
 
 // RecordOpenConnection records current number of open connections.
 func (m *metricRecorder) RecordOpenConnection(ctx context.Context, a Attributes) {
-	defer neverPanic()
+	defer m.recoverPanic(ctx, "RecordOpenConnection")
 	m.mOpenConns.Add(ctx, 1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
@@ -717,7 +748,7 @@ func (m *metricRecorder) RecordOpenConnection(ctx context.Context, a Attributes)
 
 // RecordClosedConnection decreases current number of open connections.
 func (m *metricRecorder) RecordClosedConnection(ctx context.Context, a Attributes) {
-	defer neverPanic()
+	defer m.recoverPanic(ctx, "RecordClosedConnection")
 	m.mOpenConns.Add(ctx, -1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
@@ -727,7 +758,7 @@ func (m *metricRecorder) RecordClosedConnection(ctx context.Context, a Attribute
 
 // RecordConnectLatencies records dial latencies.
 func (m *metricRecorder) RecordConnectLatencies(ctx context.Context, a Attributes, latencyMS int64) {
-	defer neverPanic()
+	defer m.recoverPanic(ctx, "RecordConnectLatencies")
 	m.mConnectLatency.Record(ctx, float64(latencyMS),
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
@@ -738,7 +769,7 @@ func (m *metricRecorder) RecordConnectLatencies(ctx context.Context, a Attribute
 
 // RecordConnectionDuration records established connection duration in seconds.
 func (m *metricRecorder) RecordConnectionDuration(ctx context.Context, a Attributes, durationSec float64) {
-	defer neverPanic()
+	defer m.recoverPanic(ctx, "RecordConnectionDuration")
 	m.mConnectionDuration.Record(ctx, durationSec,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
@@ -749,7 +780,7 @@ func (m *metricRecorder) RecordConnectionDuration(ctx context.Context, a Attribu
 
 // RecordOpenConnectionCount records connection attempts and error classifications.
 func (m *metricRecorder) RecordOpenConnectionCount(ctx context.Context, a Attributes) {
-	defer neverPanic()
+	defer m.recoverPanic(ctx, "RecordOpenConnectionCount")
 	m.mOpenConnectionCount.Add(ctx, 1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),

@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -365,14 +366,11 @@ func TestMetricsE2EFailOpenBadCredentials(t *testing.T) {
 	t.Cleanup(restore)
 	logger := &e2eLogger{}
 
-	var calls int32
-	var mu sync.Mutex
+	var calls atomic.Int32
 	count := func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, inv grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		err := inv(ctx, method, req, reply, cc, opts...)
 		if strings.HasSuffix(method, "CreateServiceTimeSeries") {
-			mu.Lock()
-			calls++
-			mu.Unlock()
+			calls.Add(1)
 		}
 		return err
 	}
@@ -397,10 +395,7 @@ func TestMetricsE2EFailOpenBadCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mu.Lock()
-	n := calls
-	mu.Unlock()
-	if n < 1 || n > 3 {
+	if n := calls.Load(); n < 1 || n > 3 {
 		t.Errorf("with a permanent error expected 1-3 export attempts in the window (backoff), got %d", n)
 	}
 	w := warn.String()

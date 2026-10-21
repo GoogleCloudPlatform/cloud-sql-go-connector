@@ -924,11 +924,17 @@ func TestIsPermanentExportError(t *testing.T) {
 }
 
 // TestRecordNeverPanics verifies that a panic inside an instrument cannot
-// escape the Record* methods onto the dial path.
+// escape the Record* methods onto the dial path, and that it is not hidden:
+// counted, debug-logged once per recorder, and reported once per process.
 func TestRecordNeverPanics(t *testing.T) {
-	// A recorder whose instruments are nil would panic on use without the
-	// guard; the guard must swallow it.
-	mr := tel.NewPanickingRecorderForTest()
+	var warn lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warn, "", 0))
+	t.Cleanup(restore)
+	tel.ResetPanicWarnOnceForTest()
+	before := tel.RecoveredPanics.Load()
+
+	logger := &recordingLogger{}
+	mr := tel.NewPanickingRecorderForTest(logger)
 	ctx := context.Background()
 	a := tel.Attributes{IPType: "public"}
 	func() {
@@ -944,4 +950,20 @@ func TestRecordNeverPanics(t *testing.T) {
 		mr.RecordConnectionDuration(ctx, a, 1)
 		mr.RecordOpenConnectionCount(ctx, a)
 	}()
+	if got := tel.RecoveredPanics.Load() - before; got != 6 {
+		t.Errorf("RecoveredPanics delta = %d, want 6", got)
+	}
+	if lines := logger.snapshot(); len(lines) != 1 || !strings.Contains(lines[0], "recovered panic") {
+		t.Errorf("want exactly one debug line per recorder, got %q", lines)
+	}
+	if w := warn.String(); strings.Count(w, "recovered a panic") != 1 || !strings.Contains(w, "issues") {
+		t.Errorf("want exactly one standard-logger line with a report link, got %q", w)
+	}
+	// A second recorder in the same process logs to debug again but must not
+	// produce a second standard-logger line.
+	mr2 := tel.NewPanickingRecorderForTest(logger)
+	mr2.RecordOpenConnection(ctx, a)
+	if w := warn.String(); strings.Count(w, "recovered a panic") != 1 {
+		t.Errorf("standard-logger panic warning must be once per process, got %q", w)
+	}
 }
