@@ -14,9 +14,16 @@
 
 package tel
 
+// This file holds hooks used by tests in this package and in the root
+// cloudsqlconn package (whose e2e tests live in an external test package and
+// therefore cannot see _test.go files from here). They are not part of the
+// public API: internal/ packages are not importable outside this module.
+
 import (
 	"log"
 	"sync"
+
+	"cloud.google.com/go/cloudsqlconn/debug"
 )
 
 // SetWarnLoggerForTest redirects the once-per-process permanent-error warning
@@ -40,3 +47,12 @@ var (
 	NextBackoff = nextBackoff
 	Jitter      = jitter
 )
+
+// NewPanickingRecorderForTest returns a metricRecorder whose instruments are
+// nil, so every Record* call would panic without the recoverPanic guard.
+func NewPanickingRecorderForTest(l debug.ContextLogger) MetricRecorder {
+	return &metricRecorder{logger: l, name: "p:i"}
+}
+
+// ResetPanicWarnOnceForTest re-arms the process-wide panic warning.
+func ResetPanicWarnOnceForTest() { panicWarnOnce = sync.Once{} }
