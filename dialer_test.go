@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2609,5 +2610,77 @@ func TestMetricsDisableHint(t *testing.T) {
 	}
 	if got := metricsDisableHint(tel.ConnectorTypeAuthProxy); !strings.Contains(got, authProxyMetricsFlag+"=false") {
 		t.Errorf("proxy hint = %q", got)
+	}
+}
+
+func TestParseComputePlatform(t *testing.T) {
+	tcs := []struct {
+		in      string
+		want    ComputePlatform
+		wantErr bool
+	}{
+		{in: "gce", want: ComputePlatformGCE},
+		{in: "gke", want: ComputePlatformGKE},
+		{in: "cloud_run", want: ComputePlatformCloudRun},
+		{in: "app_engine", want: ComputePlatformAppEngine},
+		{in: "cloud_functions", want: ComputePlatformCloudFunctions},
+		{in: "ai_studio", want: ComputePlatformAIStudio},
+		{in: "AI_STUDIO", want: ComputePlatformAIStudio},
+		{in: "  Cloud_Run\n", want: ComputePlatformCloudRun},
+		{in: "", wantErr: true},
+		{in: "unknown", wantErr: true},
+		{in: "ai-studio", wantErr: true},
+		{in: "aws", wantErr: true},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := ParseComputePlatform(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("ParseComputePlatform(%q) = %q, want error", tc.in, got)
+				}
+				// The error must tell the user what is valid.
+				for _, p := range ComputePlatforms() {
+					if !strings.Contains(err.Error(), string(p)) {
+						t.Errorf("error %q does not list valid value %q", err, p)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseComputePlatform(%q): %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Fatalf("ParseComputePlatform(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			// A parsed value is always accepted by WithComputePlatform.
+			d, err := NewDialer(context.Background(), WithTokenSource(mock.EmptyTokenSource{}), WithComputePlatform(got))
+			if err != nil {
+				t.Fatalf("WithComputePlatform(ParseComputePlatform(%q)): %v", tc.in, err)
+			}
+			_ = d.Close()
+		})
+	}
+}
+
+// TestComputePlatformsMatchesInternalSet guards against drift between the
+// public ComputePlatform list and the set internal/tel accepts as label
+// values: adding a platform in one place but not the other fails here.
+func TestComputePlatformsMatchesInternalSet(t *testing.T) {
+	var public []string
+	for _, p := range ComputePlatforms() {
+		public = append(public, string(p))
+	}
+	internal := tel.ValidComputePlatformsForTest()
+	slices.Sort(public)
+	slices.Sort(internal)
+	if !slices.Equal(public, internal) {
+		t.Fatalf("public ComputePlatforms() %v != internal valid set %v", public, internal)
+	}
+	// The returned slice is a copy: mutating it must not affect the API.
+	got := ComputePlatforms()
+	got[0] = "tampered"
+	if ComputePlatforms()[0] == "tampered" {
+		t.Fatal("ComputePlatforms must return a copy")
 	}
 }

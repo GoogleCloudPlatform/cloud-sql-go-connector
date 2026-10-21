@@ -491,6 +491,11 @@ d, err := cloudsqlconn.NewDialer(ctx,
 )
 ```
 
+`WithComputePlatform` accepts only the `ComputePlatform*` constants. To take
+the platform from a string such as a flag value, use
+`cloudsqlconn.ParseComputePlatform(s)`; `cloudsqlconn.ComputePlatforms()` lists
+the valid values for help text.
+
 Metrics are exported every 60 seconds and flushed when `Dialer.Close()` is
 called, so short-lived processes should close the Dialer before exiting.
 

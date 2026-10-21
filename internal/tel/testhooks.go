@@ -56,3 +56,16 @@ func NewPanickingRecorderForTest(l debug.ContextLogger) MetricRecorder {
 
 // ResetPanicWarnOnceForTest re-arms the process-wide panic warning.
 func ResetPanicWarnOnceForTest() { panicWarnOnce = sync.Once{} }
+
+// ValidComputePlatformsForTest returns the allowed compute_platform values,
+// excluding UnknownValue (which only auto-detection produces), so the root
+// package can check that its public list stays in sync.
+func ValidComputePlatformsForTest() []string {
+	var out []string
+	for p := range validComputePlatforms {
+		if p != UnknownValue {
+			out = append(out, p)
+		}
+	}
+	return out
+}
