@@ -479,6 +479,14 @@ func (m *metricRecorder) DatabaseEngine() string {
 	return m.dbEngineType
 }
 
+// neverPanic is deferred by every Record* method so that a panic inside the
+// metrics SDK can never propagate into the dial path. Built-in metrics must
+// not be able to break connectivity under any circumstances; the measurement
+// is simply dropped.
+func neverPanic() {
+	_ = recover()
+}
+
 // Shutdown flushes buffered metrics and stops the periodic export. Shutting
 // down the provider is sufficient: the provider shuts down its reader, and
 // the reader performs a final export. The shared MetricClient is not closed
@@ -688,6 +696,7 @@ func isPermanentExportError(err error) bool {
 
 // RecordClosedConnectionCount records totals number of closed connections.
 func (m *metricRecorder) RecordClosedConnectionCount(ctx context.Context, a Attributes) {
+	defer neverPanic()
 	m.mClosedConnectionCount.Add(ctx, 1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
@@ -698,6 +707,7 @@ func (m *metricRecorder) RecordClosedConnectionCount(ctx context.Context, a Attr
 
 // RecordOpenConnection records current number of open connections.
 func (m *metricRecorder) RecordOpenConnection(ctx context.Context, a Attributes) {
+	defer neverPanic()
 	m.mOpenConns.Add(ctx, 1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
@@ -707,6 +717,7 @@ func (m *metricRecorder) RecordOpenConnection(ctx context.Context, a Attributes)
 
 // RecordClosedConnection decreases current number of open connections.
 func (m *metricRecorder) RecordClosedConnection(ctx context.Context, a Attributes) {
+	defer neverPanic()
 	m.mOpenConns.Add(ctx, -1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
@@ -716,6 +727,7 @@ func (m *metricRecorder) RecordClosedConnection(ctx context.Context, a Attribute
 
 // RecordConnectLatencies records dial latencies.
 func (m *metricRecorder) RecordConnectLatencies(ctx context.Context, a Attributes, latencyMS int64) {
+	defer neverPanic()
 	m.mConnectLatency.Record(ctx, float64(latencyMS),
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
@@ -726,6 +738,7 @@ func (m *metricRecorder) RecordConnectLatencies(ctx context.Context, a Attribute
 
 // RecordConnectionDuration records established connection duration in seconds.
 func (m *metricRecorder) RecordConnectionDuration(ctx context.Context, a Attributes, durationSec float64) {
+	defer neverPanic()
 	m.mConnectionDuration.Record(ctx, durationSec,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
@@ -736,6 +749,7 @@ func (m *metricRecorder) RecordConnectionDuration(ctx context.Context, a Attribu
 
 // RecordOpenConnectionCount records connection attempts and error classifications.
 func (m *metricRecorder) RecordOpenConnectionCount(ctx context.Context, a Attributes) {
+	defer neverPanic()
 	m.mOpenConnectionCount.Add(ctx, 1,
 		metric.WithAttributeSet(attribute.NewSet(
 			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),

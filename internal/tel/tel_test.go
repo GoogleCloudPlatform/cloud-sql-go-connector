@@ -922,3 +922,26 @@ func TestIsPermanentExportError(t *testing.T) {
 		t.Error("non-gRPC error: want transient")
 	}
 }
+
+// TestRecordNeverPanics verifies that a panic inside an instrument cannot
+// escape the Record* methods onto the dial path.
+func TestRecordNeverPanics(t *testing.T) {
+	// A recorder whose instruments are nil would panic on use without the
+	// guard; the guard must swallow it.
+	mr := tel.NewPanickingRecorderForTest()
+	ctx := context.Background()
+	a := tel.Attributes{IPType: "public"}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("panic escaped Record*: %v", r)
+			}
+		}()
+		mr.RecordOpenConnection(ctx, a)
+		mr.RecordClosedConnection(ctx, a)
+		mr.RecordClosedConnectionCount(ctx, a)
+		mr.RecordConnectLatencies(ctx, a, 1)
+		mr.RecordConnectionDuration(ctx, a, 1)
+		mr.RecordOpenConnectionCount(ctx, a)
+	}()
+}
