@@ -21,6 +21,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/auth"
@@ -193,6 +195,51 @@ const (
 	ComputePlatformAIStudio ComputePlatform = tel.PlatformAIStudio
 )
 
+// computePlatforms is the ordered list of valid ComputePlatform values. It is
+// the single source of truth for ComputePlatforms, ParseComputePlatform, and
+// the error messages of WithComputePlatform.
+var computePlatforms = []ComputePlatform{
+	ComputePlatformGCE,
+	ComputePlatformGKE,
+	ComputePlatformCloudRun,
+	ComputePlatformAppEngine,
+	ComputePlatformCloudFunctions,
+	ComputePlatformAIStudio,
+}
+
+// ComputePlatforms returns every valid ComputePlatform value, in a stable
+// order. It is intended for help text and validation in clients that accept
+// the platform as a string, such as a command-line flag.
+func ComputePlatforms() []ComputePlatform {
+	return slices.Clone(computePlatforms)
+}
+
+// ParseComputePlatform converts a string, for example a command-line flag
+// value, to a ComputePlatform. Leading and trailing whitespace is ignored and
+// matching is case-insensitive, so "ai_studio", "AI_STUDIO", and " ai_studio "
+// all return ComputePlatformAIStudio. Any other value returns an error that
+// lists the valid values.
+//
+// Use this rather than a type conversion such as ComputePlatform(s): a
+// conversion accepts any string and is only rejected later, when NewDialer
+// validates the option.
+func ParseComputePlatform(s string) (ComputePlatform, error) {
+	p := ComputePlatform(strings.ToLower(strings.TrimSpace(s)))
+	if slices.Contains(computePlatforms, p) {
+		return p, nil
+	}
+	return "", fmt.Errorf("invalid compute platform %q; must be one of: %s", s, validComputePlatformList())
+}
+
+// validComputePlatformList returns the valid values as a comma-separated list.
+func validComputePlatformList() string {
+	names := make([]string, len(computePlatforms))
+	for i, p := range computePlatforms {
+		names[i] = string(p)
+	}
+	return strings.Join(names, ", ")
+}
+
 // WithComputePlatform returns an Option that overrides the auto-detected
 // compute platform reported in built-in metrics. Use it when the Dialer is
 // embedded in a client that knows its deployment environment better than
@@ -200,13 +247,15 @@ const (
 // running as a sidecar for an AI Studio application).
 //
 // Only the ComputePlatform* constants are accepted; any other value causes
-// NewDialer to return a configuration error. When this option is not
-// provided, the platform is detected from the runtime environment.
+// NewDialer to return a configuration error. To accept the platform as a
+// string (for example from a command-line flag), convert it with
+// ParseComputePlatform first. When this option is not provided, the platform
+// is detected from the runtime environment.
 func WithComputePlatform(p ComputePlatform) Option {
 	return func(d *dialerConfig) {
-		if !tel.IsValidComputePlatform(string(p)) || p == ComputePlatform(tel.UnknownValue) {
+		if !slices.Contains(computePlatforms, p) {
 			d.err = errtype.NewConfigError(
-				fmt.Sprintf("invalid compute platform %q; must be one of the cloudsqlconn.ComputePlatform* constants", p),
+				fmt.Sprintf("invalid compute platform %q; must be one of: %s", p, validComputePlatformList()),
 				"n/a")
 			return
 		}
