@@ -19,7 +19,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1044,17 +1046,19 @@ func TestHistogramBucketsAreExplicit(t *testing.T) {
 		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "proj", ResourceID: "proj:inst", Region: "r",
 	})
 	attrs := tel.Attributes{IPType: "public", DialStatus: tel.ConnectSuccess}
-	mr.RecordConnectLatencies(ctx, attrs, 3)      // 3 ms -> bucket (2, 5]
-	mr.RecordConnectionDuration(ctx, attrs, 0.25) // 0.25 s -> bucket (0.1, 0.5]
-	_ = mr.Shutdown(ctx)                          // flushes
+	mr.RecordConnectLatencies(ctx, attrs, 3)
+	mr.RecordConnectionDuration(ctx, attrs, 0.25)
+	_ = mr.Shutdown(ctx) // flushes
 
 	want := map[string][]float64{
 		"cloudsql.googleapis.com/client/connector/connect_latencies":    tel.ConnectLatencyBucketsMs,
 		"cloudsql.googleapis.com/client/connector/connection_durations": tel.ConnectionDurationBucketsS,
 	}
+	// Bucket i holds values in (bounds[i-1], bounds[i]]; bucket 0 is
+	// (-inf, bounds[0]]. sort.SearchFloat64s returns exactly that index.
 	wantBucketIdx := map[string]int{
-		"cloudsql.googleapis.com/client/connector/connect_latencies":    2, // bucket 0 is (-inf, 1]; 3 ms is in (2, 5]
-		"cloudsql.googleapis.com/client/connector/connection_durations": 1, // bucket 0 is (-inf, 0.1]; 0.25 s is in (0.1, 0.5]
+		"cloudsql.googleapis.com/client/connector/connect_latencies":    sort.SearchFloat64s(tel.ConnectLatencyBucketsMs, 3),
+		"cloudsql.googleapis.com/client/connector/connection_durations": sort.SearchFloat64s(tel.ConnectionDurationBucketsS, 0.25),
 	}
 	seen := map[string]bool{}
 	for _, req := range mock.requests() {
@@ -1130,5 +1134,48 @@ func TestRecordWithCanceledContextStillCounts(t *testing.T) {
 		if !got[m] {
 			t.Errorf("%s recorded with a canceled/expired context was not exported", m)
 		}
+	}
+}
+
+// TestHistogramBucketShape pins the bucket layout agreed in review:
+// exponentially spaced, 20 latency buckets over 1 ms..5 min and 50 duration
+// buckets over 0.1 s..24 h.
+func TestHistogramBucketShape(t *testing.T) {
+	tcs := []struct {
+		name    string
+		got     []float64
+		lo, hi  float64
+		n       int
+		samples map[int]float64 // index -> expected value (2 d.p.)
+	}{
+		{
+			name: "connect_latencies", got: tel.ConnectLatencyBucketsMs, lo: 1, hi: 300_000, n: 20,
+			samples: map[int]float64{1: 1.94, 2: 3.77, 10: 763.30, 18: 154472.69},
+		},
+		{
+			name: "connection_durations", got: tel.ConnectionDurationBucketsS, lo: 0.1, hi: 86_400, n: 50,
+			samples: map[int]float64{1: 0.13, 19: 20.04, 20: 26.49, 37: 3038.60, 48: 65367.28},
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			if len(tc.got) != tc.n {
+				t.Fatalf("len = %d, want %d", len(tc.got), tc.n)
+			}
+			if tc.got[0] != tc.lo || tc.got[tc.n-1] != tc.hi {
+				t.Errorf("end points = %v..%v, want %v..%v", tc.got[0], tc.got[tc.n-1], tc.lo, tc.hi)
+			}
+			ratio := tc.got[1] / tc.got[0]
+			for i := 1; i < tc.n; i++ {
+				if r := tc.got[i] / tc.got[i-1]; math.Abs(r-ratio) > 1e-9 {
+					t.Errorf("ratio at %d = %v, want constant %v", i, r, ratio)
+				}
+			}
+			for i, want := range tc.samples {
+				if got := math.Round(tc.got[i]*100) / 100; got != want {
+					t.Errorf("bucket[%d] = %.2f, want %.2f", i, got, want)
+				}
+			}
+		})
 	}
 }

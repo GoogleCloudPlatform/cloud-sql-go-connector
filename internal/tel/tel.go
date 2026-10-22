@@ -17,7 +17,9 @@ package tel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"math"
 	"math/rand/v2"
 	"os"
 	"strings"
@@ -337,18 +339,39 @@ type MetricRecorder interface {
 // 10000) are tuned for request latencies in milliseconds; for connection
 // durations in seconds they put everything under 5 s in one bucket and
 // overflow at ~2.8 h, which pooled connections routinely exceed.
+//
+// Boundaries are exponentially spaced: each is a constant multiple of the
+// previous one, so percentile estimates have the same relative error across
+// the whole range.
 var (
-	// ConnectLatencyBucketsMs covers sub-millisecond local dials through
-	// the 30 s dial timeouts commonly configured by drivers.
-	ConnectLatencyBucketsMs = []float64{
-		1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000,
-	}
-	// ConnectionDurationBucketsS covers one-shot connections (sub-second)
-	// through pooled connections held for up to a day.
-	ConnectionDurationBucketsS = []float64{
-		0.1, 0.5, 1, 5, 10, 30, 60, 300, 600, 1800, 3600, 14400, 43200, 86400,
-	}
+	// ConnectLatencyBucketsMs: 20 buckets from 1 ms to 5 minutes (each ~1.94x
+	// the previous one), covering local dials through slow refreshes and
+	// long driver timeouts.
+	ConnectLatencyBucketsMs = exponentialBuckets(1, 300_000, 20)
+	// ConnectionDurationBucketsS: 50 buckets from 0.1 s to 24 h (each ~1.32x
+	// the previous one). Observed mean connection time is ~23 s, which this
+	// spacing resolves to within a ~6 s wide bucket, while still separating
+	// pooled connections held for hours.
+	ConnectionDurationBucketsS = exponentialBuckets(0.1, 86_400, 50)
 )
+
+// exponentialBuckets returns n bucket boundaries from lo to hi inclusive,
+// spaced so that each boundary is the previous one times (hi/lo)^(1/(n-1)).
+// It panics on arguments that cannot describe such a range; it is only
+// called with constants at package initialization.
+func exponentialBuckets(lo, hi float64, n int) []float64 {
+	if lo <= 0 || hi <= lo || n < 2 {
+		panic(fmt.Sprintf("exponentialBuckets: invalid range lo=%v hi=%v n=%d", lo, hi, n))
+	}
+	step := math.Log2(hi/lo) / float64(n-1)
+	b := make([]float64, n)
+	for i := range b {
+		b[i] = lo * math.Pow(2, step*float64(i))
+	}
+	// Pin the end points exactly so float rounding can't nudge them.
+	b[0], b[n-1] = lo, hi
+	return b
+}
 
 // DefaultExportInterval is the interval that the metric exporter runs. It
 // should always be 60s. This value is exposed as a var to faciliate testing.
