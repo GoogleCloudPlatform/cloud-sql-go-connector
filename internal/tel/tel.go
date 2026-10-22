@@ -358,7 +358,7 @@ var DefaultExportInterval = 60 * time.Second
 // enabled, a null recorder is returned instead.
 func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitoring.MetricClient, cfg Config) MetricRecorder {
 	if !cfg.Enabled {
-		l.Debugf(ctx, "disabling built-in metrics")
+		// Opting out is the caller's choice; there is nothing to report.
 		return NullMetricRecorder{}
 	}
 	if cl == nil {

@@ -15,11 +15,14 @@
 package cloudsqlconn
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -489,4 +492,100 @@ func TestBuiltInMetricsDefaultOffOutsideDefaultUniverse(t *testing.T) {
 			t.Fatal("built-in metrics should be on by default in googleapis.com")
 		}
 	})
+}
+
+// TestDisabledMetricsAreSilent verifies the opt-out contract end to end: with
+// WithBuiltInMetrics(false), a real dial, close and Dialer.Close produce no
+// export to the Monitoring API, no metrics-related debug log line, and
+// nothing on the standard logger (including the OTel exporter's
+// deprecation notice, which must only fire when an exporter is created).
+func TestDisabledMetricsAreSilent(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+
+	// Capture everything the process would log.
+	var std syncBuffer
+	oldOut, oldFlags := log.Writer(), log.Flags()
+	log.SetOutput(&std)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(oldOut); log.SetFlags(oldFlags) })
+	var warn syncBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warn, "", 0))
+	t.Cleanup(restore)
+	debug := &recordingDebugLogger{}
+
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			WithBuiltInMetrics(false),
+			WithContextDebugLogger(debug),
+			// Even with a metric client configured, nothing must be created.
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+		},
+	})
+	c, err := d.Dial(context.Background(), "my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(fake.requests()); got != 0 {
+		t.Errorf("metrics disabled, but %d export request(s) reached the Monitoring API", got)
+	}
+	if w := warn.String(); w != "" {
+		t.Errorf("metrics disabled, but the warning logger got: %q", w)
+	}
+	if s := std.String(); s != "" {
+		t.Errorf("metrics disabled, but the standard logger got: %q", s)
+	}
+	for _, line := range debug.snapshot() {
+		if strings.Contains(strings.ToLower(line), "metric") {
+			t.Errorf("metrics disabled, but a metrics debug line was logged: %q", line)
+		}
+	}
+}
+
+// recordingDebugLogger captures debug log lines.
+type recordingDebugLogger struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (r *recordingDebugLogger) Debugf(_ context.Context, format string, args ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, fmt.Sprintf(format, args...))
+}
+
+func (r *recordingDebugLogger) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.lines...)
+}
+
+// syncBuffer is a goroutine-safe bytes.Buffer.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

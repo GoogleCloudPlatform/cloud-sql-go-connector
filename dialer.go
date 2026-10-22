@@ -602,6 +602,18 @@ func detectPrincipal(ctx context.Context, cfg *dialerConfig) string {
 func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbEngineType string) tel.MetricRecorder {
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
+	old, ok := d.metricRecorders[inst]
+	if ok {
+		if dbEngineType == tel.UnknownValue || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
+			return old
+		}
+	}
+	// Metrics off (by option, by universe default, or because the metric
+	// client could not be created, which was logged once in NewDialer):
+	// nothing to build, store or log.
+	if !d.enableBuiltInMetrics || d.mClient == nil {
+		return tel.NullMetricRecorder{}
+	}
 	// A Dial that raced with Close must not create a recorder after Close
 	// has shut the others down and closed the metric client: it would leak
 	// an export goroutine writing to a closed client.
@@ -609,12 +621,6 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 	case <-d.closed:
 		return tel.NullMetricRecorder{}
 	default:
-	}
-	old, ok := d.metricRecorders[inst]
-	if ok {
-		if dbEngineType == tel.UnknownValue || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
-			return old
-		}
 	}
 	cfg := tel.Config{
 		Enabled:           d.enableBuiltInMetrics,
