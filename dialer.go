@@ -213,6 +213,9 @@ type Dialer struct {
 	dialerID        string
 	metricsMu       sync.Mutex
 	metricRecorders map[instance.ConnName]tel.MetricRecorder
+	// metricsWG tracks background shutdowns of replaced metric recorders so
+	// that Close can wait for them before closing the shared metric client.
+	metricsWG sync.WaitGroup
 
 	// dialFunc is the function used to connect to the address on the named
 	// network. By default, it is golang.org/x/net/proxy#Dial.
@@ -242,6 +245,10 @@ type Dialer struct {
 	// computePlatform is the compute_platform metric label. It is either
 	// detected from the environment or set explicitly via WithComputePlatform.
 	computePlatform string
+
+	// clientRegion is the client_region metric label, detected once at
+	// construction when metrics are enabled.
+	clientRegion string
 
 	// metricsPrincipal is the best-effort identity used for the metric
 	// export, for error messages only. May be empty.
@@ -417,17 +424,20 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqlDataDialer = sqldataclient.NewGrpcDialer(cfg.sqlDataEndpoint, tp, cfg.quotaProject, cfg.logger, false, cfg.sqlDataStreamTimeout, strings.Join(cfg.useragents, " "))
 	}
 
-	// Resolve the compute platform once. An explicit WithComputePlatform wins
-	// over runtime detection.
+	// Environment detection for the metric resource labels. All of it is
+	// skipped when metrics are off (or the metric client could not be
+	// created): DetectComputePlatform and DetectClientRegion may contact the
+	// metadata server, and detectPrincipal may too. Detecting once here,
+	// rather than per recorder, keeps metadata-server round trips off the
+	// dial path. An explicit WithComputePlatform always wins over detection.
 	computePlatform := cfg.computePlatform
-	if computePlatform == "" {
-		computePlatform = tel.DetectComputePlatform()
-	}
-
-	// Best-effort identity for metric error messages; only looked up when
-	// metrics are enabled since it may consult the metadata server.
+	clientRegion := tel.UnknownValue
 	var metricsPrincipal string
-	if cfg.enableBuiltInMetrics {
+	if mClient != nil {
+		if computePlatform == "" {
+			computePlatform = tel.DetectComputePlatform()
+		}
+		clientRegion = tel.DetectClientRegion()
 		metricsPrincipal = detectPrincipal(ctx, cfg)
 	}
 
@@ -458,6 +468,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		userAgent:                       strings.Join(cfg.useragents, " "),
 		applicationName:                 cfg.applicationName,
 		computePlatform:                 computePlatform,
+		clientRegion:                    clientRegion,
 		metricsPrincipal:                metricsPrincipal,
 	}
 
@@ -572,10 +583,25 @@ func detectPrincipal(ctx context.Context, cfg *dialerConfig) string {
 	return ""
 }
 
-// metricRecorder does a lazy initialization of the metric exporter.
+// metricRecorder returns the built-in metric recorder for inst, creating it
+// on first use. A recorder created before the database engine is known
+// (engine "unknown") is replaced once the engine is learned; the replaced
+// recorder is flushed and stopped in the background so the dial that
+// learned the engine is not held up by an export.
+//
+// The lock is held only for the map lookup/insert and the (in-memory)
+// recorder construction; nothing under it touches the network.
 func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbEngineType string) tel.MetricRecorder {
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
+	// A Dial that raced with Close must not create a recorder after Close
+	// has shut the others down and closed the metric client: it would leak
+	// an export goroutine writing to a closed client.
+	select {
+	case <-d.closed:
+		return tel.NullMetricRecorder{}
+	default:
+	}
 	old, ok := d.metricRecorders[inst]
 	if ok {
 		if dbEngineType == tel.UnknownValue || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
@@ -591,7 +617,7 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 		ClientUID:          d.dialerID,
 		ApplicationName:    d.applicationName,
 		Region:             inst.Region(),
-		ClientRegion:       tel.DetectClientRegion(),
+		ClientRegion:       d.clientRegion,
 		ComputePlatform:    d.computePlatform,
 		ConnectorType:      tel.ConnectorTypeValue(d.userAgent),
 		Principal:          d.metricsPrincipal,
@@ -602,14 +628,18 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 	mr := tel.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
 	d.metricRecorders[inst] = mr
 	if ok {
-		// The previous recorder (created before the database engine was
-		// known) is being replaced. Flush it and stop its periodic export so
-		// it does not leak a goroutine or double-report.
-		sctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
-		defer cancel()
-		if err := old.Shutdown(sctx); err != nil {
-			d.logger.Debugf(ctx, "[%v] failed to shut down replaced metric recorder: %v", inst.String(), err)
-		}
+		// Flush and stop the previous recorder so it does not leak a
+		// goroutine or double-report, off the dial path. Close waits on
+		// metricsWG before closing the shared metric client.
+		d.metricsWG.Add(1)
+		go func() {
+			defer d.metricsWG.Done()
+			sctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
+			defer cancel()
+			if err := old.Shutdown(sctx); err != nil {
+				d.logger.Debugf(sctx, "[%v] failed to shut down replaced metric recorder: %v", inst.String(), err)
+			}
+		}()
 	}
 	return mr
 }
@@ -1293,16 +1323,28 @@ func (d *Dialer) Close() error {
 	// Flush and stop the built-in metrics exporters. Without this, metrics
 	// recorded since the last periodic export (up to 60s worth) are lost
 	// when the process exits, which is the common case on Cloud Run.
+	// Recorders are shut down concurrently so that a process with many
+	// instances (e.g. the Auth Proxy) flushes all of them within the budget
+	// rather than running out of time partway through a serial loop.
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
 	defer cancel()
+	var wg sync.WaitGroup
 	for inst, mr := range d.metricRecorders {
-		// Best effort: an error here isn't actionable by the caller.
-		if err := mr.Shutdown(ctx); err != nil {
-			d.logger.Debugf(ctx, "[%v] failed to shut down metric recorder: %v", inst.String(), err)
-		}
+		wg.Add(1)
+		go func(inst instance.ConnName, mr tel.MetricRecorder) {
+			defer wg.Done()
+			// Best effort: an error here isn't actionable by the caller.
+			if err := mr.Shutdown(ctx); err != nil {
+				d.logger.Debugf(ctx, "[%v] failed to shut down metric recorder: %v", inst.String(), err)
+			}
+		}(inst, mr)
 	}
+	wg.Wait()
+	// Also wait for any replaced recorders still flushing in the background
+	// before closing the client they export through.
+	d.metricsWG.Wait()
 	if d.mClient != nil {
 		if err := d.mClient.Close(); err != nil {
 			d.logger.Debugf(ctx, "failed to close metric client: %v", err)
