@@ -1080,3 +1080,55 @@ func TestHistogramBucketsAreExplicit(t *testing.T) {
 		}
 	}
 }
+
+// TestRecordWithCanceledContextStillCounts pins an OpenTelemetry SDK property
+// the dial path relies on: synchronous instruments do not consult ctx.Err(),
+// they only use the context for exemplar trace linkage. A Dial whose context
+// is canceled or timed out (which is exactly when a failure is recorded) must
+// still be counted.
+func TestRecordWithCanceledContextStillCounts(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mr := tel.NewMetricRecorder(context.Background(), nullLogger{t}, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "proj", ResourceID: "proj:inst", Region: "r",
+	})
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, cancel2 := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel2()
+	attrs := tel.Attributes{IPType: "public", DialStatus: tel.ConnectError, AttemptStatus: "unknown_error"}
+	mr.RecordOpenConnectionCount(canceled, attrs)
+	mr.RecordConnectLatencies(expired, attrs, 42)
+	mr.RecordOpenConnection(canceled, attrs)
+	mr.RecordClosedConnection(expired, attrs)
+	mr.RecordClosedConnectionCount(canceled, attrs)
+	mr.RecordConnectionDuration(expired, attrs, 1.5)
+	_ = mr.Shutdown(context.Background()) // flush
+
+	got := map[string]bool{}
+	for _, req := range mock.requests() {
+		for _, ts := range req.GetTimeSeries() {
+			got[ts.GetMetric().GetType()] = true
+		}
+	}
+	for _, m := range []string{
+		"cloudsql.googleapis.com/client/connector/open_connection_count",
+		"cloudsql.googleapis.com/client/connector/connect_latencies",
+		"cloudsql.googleapis.com/client/connector/open_connections",
+		"cloudsql.googleapis.com/client/connector/closed_connection_count",
+		"cloudsql.googleapis.com/client/connector/connection_durations",
+	} {
+		if !got[m] {
+			t.Errorf("%s recorded with a canceled/expired context was not exported", m)
+		}
+	}
+}
