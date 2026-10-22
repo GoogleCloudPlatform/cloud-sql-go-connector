@@ -1008,6 +1008,33 @@ func TestDialerCloseReportsFriendlyError(t *testing.T) {
 	}
 }
 
+// TestDialerIDIsUniquePerDialer guards the client_uid contract: every Dialer
+// owns its own metric counters and export loop, so two Dialers in one
+// process (e.g. an IAM and a non-IAM driver registered side by side) must
+// report distinct client_uid values. A shared ID would make them write
+// conflicting cumulative points to the same Cloud Monitoring series.
+func TestDialerIDIsUniquePerDialer(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		d, err := NewDialer(
+			context.Background(),
+			WithTokenSource(mock.EmptyTokenSource{}),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = d.Close() })
+		id := d.dialerID
+		if id == "" {
+			t.Fatalf("dialer %d has an empty dialerID", i)
+		}
+		if seen[id] {
+			t.Fatalf("dialer %d reused dialerID %q", i, id)
+		}
+		seen[id] = true
+	}
+}
+
 func TestDialerInitializesLazyCache(t *testing.T) {
 	cn, _ := instance.ParseConnName("my-project:my-region:my-instance")
 	inst := mock.NewFakeCSQLInstance(
