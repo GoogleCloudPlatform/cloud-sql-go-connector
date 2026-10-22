@@ -88,8 +88,6 @@ var (
 	//go:embed version.txt
 	versionString string
 	userAgent     = "cloud-sql-go-connector/" + strings.TrimSpace(versionString)
-	// dialerID is a unique ID for the dialer process.
-	dialerID = uuid.New().String()
 
 	// builtInMetricsDefault is the default for WithBuiltInMetrics. Built-in
 	// metrics are on by default; this is a var so the unit tests can turn
@@ -205,8 +203,13 @@ type Dialer struct {
 	// can be copied and mutated by the Dial function.
 	defaultDialConfig dialConfig
 
-	// dialerID uniquely identifies a Dialer. Used for monitoring purposes,
-	// *only* when a client has configured OpenCensus exporters.
+	// dialerID uniquely identifies a Dialer. It is generated once per Dialer
+	// and used for monitoring purposes: as the dialer_id tag on the
+	// OpenCensus metrics (when a client has configured exporters) and as
+	// the client_uid label of the built-in metrics. Each Dialer owns its
+	// own metric counters and export loop, so the ID must be unique per
+	// Dialer: two Dialers in one process sharing an ID would write
+	// conflicting cumulative points to the same Cloud Monitoring series.
 	dialerID        string
 	metricsMu       sync.Mutex
 	metricRecorders map[instance.ConnName]tel.MetricRecorder
@@ -440,7 +443,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		mClient:                         mClient,
 		logger:                          cfg.logger,
 		defaultDialConfig:               dc,
-		dialerID:                        dialerID,
+		dialerID:                        uuid.New().String(),
 		iamTokenProvider:                cfg.iamLoginTokenProvider,
 		metricRecorders:                 map[instance.ConnName]tel.MetricRecorder{},
 		dialFunc:                        cfg.dialFunc,
