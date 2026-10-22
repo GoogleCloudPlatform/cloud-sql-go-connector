@@ -629,24 +629,12 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		opt(&cfg)
 	}
 
-	// Resolve the instance connection name to a ConnName struct.
-	// Note: icn may be a domain name that resolves to an instance connection name.
-	cn, err := d.resolver.Resolve(ctx, icn)
-	if err != nil {
-		return nil, err
-	}
-	mr := d.metricRecorder(ctx, cn, tel.UnknownValue)
-
+	// Start the dial span before resolving the instance name so that
+	// resolution failures (e.g. DNS) are attributed to the dial, both in the
+	// span and in the dial-error metric, as they were before built-in
+	// metrics were added.
 	startTime := time.Now()
 	var endDial trace.EndSpanFunc
-	attrs := tel.Attributes{
-		IAMAuthN:    cfg.useIAMAuthN,
-		RefreshType: tel.RefreshAheadType,
-		IPType:      cfg.connectionType,
-	}
-	if d.lazyRefresh {
-		attrs.RefreshType = tel.RefreshLazyType
-	}
 	ctx, endDial = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn.Dial",
 		trace.AddInstanceName(icn),
 		trace.AddDialerID(d.dialerID),
@@ -655,6 +643,25 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		trace.RecordDialError(context.Background(), icn, d.dialerID, err)
 		endDial(err)
 	}()
+
+	// Resolve the instance connection name to a ConnName struct.
+	// Note: icn may be a domain name that resolves to an instance connection name.
+	cn, err := d.resolver.Resolve(ctx, icn)
+	if err != nil {
+		return nil, err
+	}
+	// The built-in metric recorder is keyed by instance, so it can only be
+	// looked up once the name has resolved.
+	mr := d.metricRecorder(ctx, cn, tel.UnknownValue)
+
+	attrs := tel.Attributes{
+		IAMAuthN:    cfg.useIAMAuthN,
+		RefreshType: tel.RefreshAheadType,
+		IPType:      cfg.connectionType,
+	}
+	if d.lazyRefresh {
+		attrs.RefreshType = tel.RefreshLazyType
+	}
 
 	// Log if resolver changed the instance name input string.
 	if cn.DomainName() != "" {
@@ -691,7 +698,9 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 			state.mu.Unlock()
 
 			if time.Now().Before(cooldownUntil) {
-				return nil, errtype.NewResourceExhaustedError("cooldown active", cn.String(), lastErr)
+				err := errtype.NewResourceExhaustedError("cooldown active", cn.String(), lastErr)
+				recordDialFailure(ctx, mr, attrs, startTime, err)
+				return nil, err
 			}
 
 			// Attempt to connect SqlDataService
@@ -700,7 +709,10 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 				// Connection succeeded, return the connection.
 				return sdcConn, nil
 			}
-			// Connection failed.
+			// Connection failed. Record the SQL Data attempt as such
+			// regardless of whether a direct-IP fallback follows: the
+			// fallback is a separate attempt with its own IP type.
+			recordDialFailure(ctx, mr, attrs, startTime, sdcErr)
 
 			if !isPreconditionFailed(sdcErr) {
 				return nil, sdcErr
@@ -708,10 +720,21 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 			// sdcErr is a PreconditionFailed error. Fall back to direct IP connection.
 			// This is a streaming gRPC. The PreconditionFailed error usually occurs on the
 			// first read from the stream, not here.
+			startTime = time.Now()
 		}
 	}
 
 	return d.connectInstanceIP(ctx, cn, cfg, startTime, mr, attrs)
+}
+
+// recordDialFailure records a failed connection attempt in the built-in
+// metrics: one connect_latencies sample and one open_connection_count
+// increment, both labelled with the classified error status.
+func recordDialFailure(ctx context.Context, mr tel.MetricRecorder, attrs tel.Attributes, startTime time.Time, err error) {
+	attrs.DialStatus = tel.ConnectError
+	attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
+	mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
+	mr.RecordOpenConnectionCount(ctx, attrs)
 }
 
 // connectSQLDataService dials a connection through the SqlDataService.
@@ -756,6 +779,29 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 		return nil, err
 	}
 
+	// The stream is up: record the attempt as a successful sql_data
+	// connection. The database engine is not known on this path (no
+	// connection info is fetched), so the recorder's engine stays unknown.
+	latency := time.Since(startTime).Milliseconds()
+	openTime := time.Now()
+	attrs.DialStatus = tel.ConnectSuccess
+	attrs.ConnectionPart = ""
+	attrs.AttemptStatus = tel.ConnectSuccess
+	mr.RecordOpenConnection(ctx, attrs)
+	mr.RecordConnectLatencies(ctx, attrs, latency)
+	mr.RecordOpenConnectionCount(ctx, attrs)
+	// recordClosed is shared by the connection's Close and by the fallback
+	// path, and runs at most once: whichever ends the sql_data connection
+	// first accounts for it.
+	var closeOnce sync.Once
+	recordClosed := func() {
+		closeOnce.Do(func() {
+			mr.RecordClosedConnection(context.Background(), attrs)
+			mr.RecordClosedConnectionCount(context.Background(), attrs)
+			mr.RecordConnectionDuration(context.Background(), attrs, time.Since(openTime).Seconds())
+		})
+	}
+
 	// This creates a fallback connection, and marks the connection
 	// as permanently needing to fallback to direct IP.
 	fb := func() (net.Conn, error) {
@@ -767,18 +813,39 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 			state.allowed = false
 			state.mu.Unlock()
 		}
-		return d.connectInstanceIP(ctx, cn, cfg, startTime, mr, attrs)
+		// The sql_data connection is being replaced by a direct-IP one,
+		// which records its own metrics (connectInstanceIP returns an
+		// instrumentedConn). Close out the sql_data accounting and time the
+		// fallback as its own attempt.
+		recordClosed()
+		return d.connectInstanceIP(ctx, cn, cfg, time.Now(), mr, attrs)
 	}
 
 	// Assuming the connection is successful if Recv doesn't return an error
 	// immediately. The first message might not contain data, so we don't pass
 	// any initialData.
 	fc := newFallbackConn(conn, isSQLDataUnsupportedError, fb)
-	return &resourceExhaustedTrackingConn{
-		Conn:                fc,
-		onResourceExhausted: onResourceExhausted,
-		onSuccess:           onSuccess,
+	return &metricsConn{
+		Conn: &resourceExhaustedTrackingConn{
+			Conn:                fc,
+			onResourceExhausted: onResourceExhausted,
+			onSuccess:           onSuccess,
+		},
+		onClose: recordClosed,
 	}, nil
+}
+
+// metricsConn runs onClose when the connection is closed. onClose is
+// expected to be idempotent; Close may be called more than once.
+type metricsConn struct {
+	net.Conn
+	onClose func()
+}
+
+func (c *metricsConn) Close() error {
+	err := c.Conn.Close()
+	c.onClose()
+	return err
 }
 
 // connectInstanceIP dials the IP address of the instance using a normal net.Conn.
@@ -1167,10 +1234,16 @@ func (i *instrumentedConn) isClosed() bool {
 }
 
 // Close delegates to the underlying net.Conn interface and reports the close
-// to the provided closeFunc only when Close returns no error.
+// to the provided closeFunc. Close is idempotent: only the first call
+// reports, so a connection that is closed twice (which database/sql drivers
+// and connection pools may do) is counted once in open_connections,
+// closed_connection_count and connection_durations.
 func (i *instrumentedConn) Close() error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	if i.closed {
+		return i.Conn.Close()
+	}
 	i.closed = true
 	i.stopReporter()
 	i.reportCounters()
