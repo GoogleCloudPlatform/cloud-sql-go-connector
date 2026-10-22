@@ -17,6 +17,7 @@ package cloudsqlconn
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -313,4 +314,119 @@ func TestResolveFailureIsRecordedAsDialFailure(t *testing.T) {
 	}
 	time.Sleep(10 * time.Millisecond) // allow exporter a chance to run
 	wantCountMetric(t, "cloudsqlconn/dial_failure_count", spy.data())
+}
+
+// slowRecorder is a countingRecorder whose Shutdown takes a fixed time and
+// records when it finished, to observe where shutdowns run relative to the
+// dial path and to Close.
+type slowRecorder struct {
+	countingRecorder
+	delay    time.Duration
+	shutDown chan struct{}
+}
+
+func newSlowRecorder(engine string, delay time.Duration) *slowRecorder {
+	return &slowRecorder{
+		countingRecorder: countingRecorder{engine: engine},
+		delay:            delay,
+		shutDown:         make(chan struct{}),
+	}
+}
+
+func (s *slowRecorder) Shutdown(context.Context) error {
+	time.Sleep(s.delay)
+	close(s.shutDown)
+	return nil
+}
+
+// TestReplacedRecorderShutsDownOffTheDialPath verifies that replacing the
+// engine-unknown recorder returns immediately rather than waiting for the old
+// recorder's flush, and that Close still waits for that flush before
+// returning.
+func TestReplacedRecorderShutsDownOffTheDialPath(t *testing.T) {
+	ctx := context.Background()
+	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const delay = 300 * time.Millisecond
+	old := newSlowRecorder(tel.UnknownValue, delay)
+	installRecorder(t, d, "proj:reg:inst", old)
+	cn, _ := instance.ParseConnName("proj:reg:inst")
+
+	start := time.Now()
+	mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
+	if took := time.Since(start); took > delay/2 {
+		t.Fatalf("metricRecorder blocked for %v on the replaced recorder's shutdown", took)
+	}
+	if mr == tel.MetricRecorder(old) {
+		t.Fatal("recorder was not replaced once the engine was known")
+	}
+	select {
+	case <-old.shutDown:
+		t.Fatal("old recorder shut down synchronously")
+	default:
+	}
+
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-old.shutDown:
+	default:
+		t.Fatal("Close returned before the replaced recorder finished shutting down")
+	}
+}
+
+// TestCloseShutsDownRecordersConcurrently verifies that Close flushes all
+// recorders in parallel, so the shutdown budget is shared rather than
+// consumed serially by the first few instances.
+func TestCloseShutsDownRecordersConcurrently(t *testing.T) {
+	ctx := context.Background()
+	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n, delay = 8, 200 * time.Millisecond
+	recs := make([]*slowRecorder, n)
+	for i := range recs {
+		recs[i] = newSlowRecorder(tel.EnginePostgreSQL, delay)
+		installRecorder(t, d, fmt.Sprintf("proj:reg:inst%d", i), recs[i])
+	}
+
+	start := time.Now()
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > time.Duration(n)*delay/2 {
+		t.Fatalf("Close took %v for %d recorders of %v each; shutdowns look serial", took, n, delay)
+	}
+	for i, r := range recs {
+		select {
+		case <-r.shutDown:
+		default:
+			t.Errorf("recorder %d was not shut down", i)
+		}
+	}
+}
+
+// TestMetricRecorderAfterCloseIsNull verifies that a Dial racing with Close
+// cannot create a live recorder (and its export goroutine) after Close has
+// torn the metrics pipeline down.
+func TestMetricRecorderAfterCloseIsNull(t *testing.T) {
+	ctx := context.Background()
+	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cn, _ := instance.ParseConnName("proj:reg:inst")
+	if _, isNull := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL).(tel.NullMetricRecorder); !isNull {
+		t.Fatal("metricRecorder after Close should return NullMetricRecorder")
+	}
+	if len(d.metricRecorders) != 0 {
+		t.Fatalf("metricRecorder after Close registered %d recorder(s)", len(d.metricRecorders))
+	}
 }

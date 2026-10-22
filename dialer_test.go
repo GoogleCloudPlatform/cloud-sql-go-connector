@@ -2364,6 +2364,9 @@ func TestMetricRecorderReplacementFlushesOldRecorder(t *testing.T) {
 	if first == second {
 		t.Fatal("expected a new recorder once the database engine is known")
 	}
+	// The replaced recorder is flushed in the background, off the dial
+	// path; wait for that flush rather than asserting it already happened.
+	d.metricsWG.Wait()
 	reqs := fake.requests()
 	if len(reqs) == 0 {
 		t.Fatal("replacing the recorder did not flush the old recorder's metrics")
@@ -2472,15 +2475,35 @@ func TestWithComputePlatform(t *testing.T) {
 		}
 	})
 
-	t.Run("default is auto-detected", func(t *testing.T) {
+	t.Run("default is auto-detected when metrics are enabled", func(t *testing.T) {
 		t.Setenv("K_SERVICE", "svc")
-		d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
+		_, conn := startFakeMetricServer(t)
+		d, err := NewDialer(ctx,
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithBuiltInMetrics(true),
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+		)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer func() { _ = d.Close() }()
 		if d.computePlatform != tel.PlatformCloudRun {
 			t.Errorf("default computePlatform = %q, want %q", d.computePlatform, tel.PlatformCloudRun)
+		}
+	})
+
+	t.Run("no environment detection when metrics are off", func(t *testing.T) {
+		t.Setenv("K_SERVICE", "svc")
+		d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}), WithBuiltInMetrics(false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = d.Close() }()
+		if d.computePlatform != "" {
+			t.Errorf("computePlatform = %q with metrics off, want no detection", d.computePlatform)
+		}
+		if d.clientRegion != tel.UnknownValue {
+			t.Errorf("clientRegion = %q with metrics off, want %q", d.clientRegion, tel.UnknownValue)
 		}
 	})
 
