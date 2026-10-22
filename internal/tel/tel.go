@@ -36,6 +36,7 @@ import (
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	cmexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 )
@@ -80,10 +81,6 @@ const (
 	ConnectSuccess = "success"
 	// ConnectError indicates the dial attempt errors out.
 	ConnectError = "error"
-	// RefreshAheadType indicates the dialer is using a refresh ahead cache.
-	RefreshAheadType = "refresh_ahead"
-	// RefreshLazyType indicates the dialer is using a lazy cache.
-	RefreshLazyType = "lazy"
 
 	// UnknownValue is used for any label whose value could not be determined.
 	// All enum-like label values are lowercase snake_case, matching the
@@ -282,21 +279,18 @@ func DetectDatabaseEngineType(dbVersion string) (engine string) {
 	}
 }
 
-// Attributes holds all the various pieces of metadata to attach to a metric.
+// Attributes holds the per-attempt metadata attached to a metric. Every
+// field here is emitted as a metric label by at least one Record method.
 type Attributes struct {
-	// IAMAuthN specifies whether IAM authentication is enabled.
+	// IAMAuthN specifies whether IAM authentication is enabled (auth_type).
 	IAMAuthN bool
-	// CacheHit specifies whether connection info was present in the cache.
-	CacheHit bool
-	// DialStatus specifies the result of the dial attempt.
+	// DialStatus specifies the result of the dial attempt (status on
+	// closed_connection_count), one of [success, error].
 	DialStatus string
-	// IpType specifies IP address type of the connection, one of [public, psa, psc].
+	// IPType is the connection type requested or, once known, the IP type
+	// actually used (instance_ip_type), one of [public, private, psc,
+	// sql_data, auto, unknown].
 	IPType string
-	// RefreshType specifies the type of cache in use (e.g., refresh ahead or
-	// lazy).
-	RefreshType string
-	// ipType specifies IP address type of the connection, one of [public, psa, psc].
-	IPAddressType string
 	// ConnectionPart specifies which part of the connection errors out, one of [client_to_proxy, proxy_to_server].
 	ConnectionPart string
 	// AttemptStatus specifies the detailed status of the dial attempt.
@@ -338,6 +332,23 @@ type MetricRecorder interface {
 	// metrics recorded since the last export are lost.
 	Shutdown(context.Context) error
 }
+
+// Histogram bucket boundaries. The OpenTelemetry defaults (0, 5, 10, 25, ...,
+// 10000) are tuned for request latencies in milliseconds; for connection
+// durations in seconds they put everything under 5 s in one bucket and
+// overflow at ~2.8 h, which pooled connections routinely exceed.
+var (
+	// ConnectLatencyBucketsMs covers sub-millisecond local dials through
+	// the 30 s dial timeouts commonly configured by drivers.
+	ConnectLatencyBucketsMs = []float64{
+		1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000,
+	}
+	// ConnectionDurationBucketsS covers one-shot connections (sub-second)
+	// through pooled connections held for up to a day.
+	ConnectionDurationBucketsS = []float64{
+		0.1, 0.5, 1, 5, 10, 30, 60, 300, 600, 1800, 3600, 14400, 43200, 86400,
+	}
+)
 
 // DefaultExportInterval is the interval that the metric exporter runs. It
 // should always be 60s. This value is exposed as a var to faciliate testing.
@@ -419,7 +430,9 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 	)
 	m := p.Meter(meterName, metric.WithInstrumentationVersion(cfg.Version))
 
-	mConnectLatency, err := m.Float64Histogram(connectLatency)
+	mConnectLatency, err := m.Float64Histogram(connectLatency,
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(ConnectLatencyBucketsMs...))
 	if err != nil {
 		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize dial latency metric: %v", err)
@@ -437,7 +450,9 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize refresh count metric: %v", err)
 		return NullMetricRecorder{}
 	}
-	mConnectionDuration, err := m.Float64Histogram(connectionDurations, metric.WithUnit("s"))
+	mConnectionDuration, err := m.Float64Histogram(connectionDurations,
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(ConnectionDurationBucketsS...))
 	if err != nil {
 		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize connection duration metric: %v", err)
@@ -654,14 +669,14 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 		permanentErrorOnce.Do(func() {
 			warnLogger.Printf("cloudsqlconn: built-in metrics export failed for %s: %v. %s "+
 				"Retries back off exponentially up to %v; further failures are reported via the debug logger only.",
-				e.name, err, e.remediationHint(), PermanentExportErrorMaxBackoff)
+				e.name, err, e.remediationHint(err), PermanentExportErrorMaxBackoff)
 		})
 	}
 	if msg := err.Error(); msg != e.lastErr {
 		e.lastErr = msg
 		if permanent {
 			e.logger.Debugf(ctx, "[%v] built-in metrics export failed, suspending export (backoff %v, max %v): %v. %s",
-				e.name, e.backoff, maxBackoff, err, e.remediationHint())
+				e.name, e.backoff, maxBackoff, err, e.remediationHint(err))
 		} else {
 			e.logger.Debugf(ctx, "[%v] built-in metrics export failed, retrying with backoff (%v, max %v); identical errors will not be logged again: %v",
 				e.name, e.backoff, maxBackoff, err)
@@ -685,18 +700,51 @@ func jitter(d time.Duration) time.Duration {
 	return time.Duration(float64(d) * f)
 }
 
-// remediationHint explains how to fix a permission error and how to turn
-// built-in metrics off, naming the principal and project when known.
-func (e *sharedClientExporter) remediationHint() string {
+// remediationHint explains how to fix a permanent export error and how to
+// turn built-in metrics off, naming the principal and project when known.
+//
+// Two distinct causes produce PermissionDenied and need different fixes:
+// a missing IAM role (grant roles/monitoring.metricWriter), and an access
+// token that lacks the Monitoring scope. The latter happens when the caller
+// supplies a token source or credentials scoped only to sqlservice.admin
+// (WithTokenSource, WithCredentials, impersonation); no IAM grant can fix
+// it, so the hint must point at the scope instead.
+func (e *sharedClientExporter) remediationHint(err error) string {
 	who := "the identity used by the connector"
 	if e.principal != "" {
 		who = "principal " + e.principal
 	}
-	hint := "To fix, grant roles/monitoring.metricWriter on project " + e.project + " to " + who + "."
+	var hint string
+	if isInsufficientScopeError(err) {
+		hint = "To fix, include the " + MonitoringWriteScope + " (or cloud-platform) scope in the " +
+			"token source or credentials passed to the connector, for " + who + "."
+	} else {
+		hint = "To fix, grant roles/monitoring.metricWriter on project " + e.project + " to " + who + "."
+	}
 	if e.disableHint != "" {
 		hint += " To turn built-in metrics off, " + e.disableHint + "."
 	}
 	return hint
+}
+
+// MonitoringWriteScope is the OAuth scope the metric export needs.
+const MonitoringWriteScope = "https://www.googleapis.com/auth/monitoring.write"
+
+// isInsufficientScopeError reports whether err is the Monitoring API's
+// rejection of an access token that lacks a suitable scope. The API returns
+// PermissionDenied with an ErrorInfo reason of ACCESS_TOKEN_SCOPE_INSUFFICIENT
+// and the message "Request had insufficient authentication scopes".
+func isInsufficientScopeError(err error) bool {
+	st, ok := grpcstatus.FromError(err)
+	if !ok || st.Code() != codes.PermissionDenied {
+		return false
+	}
+	for _, d := range st.Details() {
+		if info, ok := d.(*errdetails.ErrorInfo); ok && info.GetReason() == "ACCESS_TOKEN_SCOPE_INSUFFICIENT" {
+			return true
+		}
+	}
+	return strings.Contains(strings.ToLower(st.Message()), "insufficient authentication scopes")
 }
 
 // Shutdown is a no-op that leaves the shared MetricClient open.

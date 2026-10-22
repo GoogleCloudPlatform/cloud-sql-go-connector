@@ -30,6 +30,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	sqlpb "cloud.google.com/go/sql/apiv1beta4/sqlpb"
 	"go.opencensus.io/stats/view"
+	"google.golang.org/api/option"
 )
 
 // countingRecorder is a tel.MetricRecorder that remembers every call, so
@@ -429,4 +430,63 @@ func TestMetricRecorderAfterCloseIsNull(t *testing.T) {
 	if len(d.metricRecorders) != 0 {
 		t.Fatalf("metricRecorder after Close registered %d recorder(s)", len(d.metricRecorders))
 	}
+}
+
+// TestBuiltInMetricsDefaultOffOutsideDefaultUniverse verifies that in a
+// non-googleapis.com universe metrics are off unless explicitly enabled, and
+// that an explicit WithBuiltInMetrics(true) is honoured there.
+func TestBuiltInMetricsDefaultOffOutsideDefaultUniverse(t *testing.T) {
+	ctx := context.Background()
+	_, conn := startFakeMetricServer(t)
+
+	t.Run("default is off in a non-default universe", func(t *testing.T) {
+		old := builtInMetricsDefault
+		builtInMetricsDefault = true
+		t.Cleanup(func() { builtInMetricsDefault = old })
+		d, err := NewDialer(ctx,
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithUniverseDomain("example.universe"),
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = d.Close() }()
+		if d.enableBuiltInMetrics || d.mClient != nil {
+			t.Fatal("built-in metrics should be off by default outside googleapis.com")
+		}
+	})
+
+	t.Run("explicit opt-in is honoured in a non-default universe", func(t *testing.T) {
+		d, err := NewDialer(ctx,
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithUniverseDomain("example.universe"),
+			WithBuiltInMetrics(true),
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = d.Close() }()
+		if !d.enableBuiltInMetrics || d.mClient == nil {
+			t.Fatal("WithBuiltInMetrics(true) should enable metrics in any universe")
+		}
+	})
+
+	t.Run("default stays on in the default universe", func(t *testing.T) {
+		old := builtInMetricsDefault
+		builtInMetricsDefault = true
+		t.Cleanup(func() { builtInMetricsDefault = old })
+		d, err := NewDialer(ctx,
+			WithTokenSource(mock.EmptyTokenSource{}),
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = d.Close() }()
+		if !d.enableBuiltInMetrics || d.mClient == nil {
+			t.Fatal("built-in metrics should be on by default in googleapis.com")
+		}
+	})
 }

@@ -84,6 +84,10 @@ type dialerConfig struct {
 	resourceExhaustedCooldownPeriod time.Duration
 	useDNSNameResolver              bool
 	enableBuiltInMetrics            bool
+	// builtInMetricsSet records that WithBuiltInMetrics was called, so the
+	// default can be adjusted for non-default universes without overriding
+	// an explicit choice.
+	builtInMetricsSet bool
 	// err tracks any dialer options that may have failed.
 	err    error
 	client *sqladmin.Service
@@ -494,7 +498,8 @@ func WithDisableMetadataExchange() Option {
 // problems.
 //
 // Built-in metrics are enabled by default and are in BETA. Pass false to turn
-// them off.
+// them off. In a non-default Cloud universe (a universe domain other than
+// googleapis.com) they are off by default and must be enabled explicitly.
 //
 // Metrics never affect connectivity. If the exporter cannot be created, or an
 // export fails (for example, a missing IAM permission), connections continue
@@ -516,6 +521,7 @@ func WithDisableMetadataExchange() Option {
 func WithBuiltInMetrics(enabled bool) Option {
 	return func(cfg *dialerConfig) {
 		cfg.enableBuiltInMetrics = enabled
+		cfg.builtInMetricsSet = true
 	}
 }
 

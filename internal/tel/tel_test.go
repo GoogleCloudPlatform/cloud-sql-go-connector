@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -61,6 +62,9 @@ type mockServer struct {
 	// failWith, when not OK, makes CreateServiceTimeSeries return a gRPC
 	// error with that code (the request is still recorded).
 	failWith codes.Code
+	// failStatus, when set, takes precedence over failWith and is returned
+	// verbatim (lets tests attach error details).
+	failStatus *grpcstatus.Status
 	monitoringpb.MetricServiceServer
 }
 
@@ -68,10 +72,26 @@ func (m *mockServer) CreateServiceTimeSeries(_ context.Context, req *monitoringp
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.gotReqs = append(m.gotReqs, req)
+	if m.failStatus != nil {
+		return nil, m.failStatus.Err()
+	}
 	if m.failWith != codes.OK {
 		return nil, grpcstatus.Error(m.failWith, "simulated failure")
 	}
 	return &emptypb.Empty{}, nil
+}
+
+func (m *mockServer) setFailureStatus(st *grpcstatus.Status) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failStatus = st
+}
+
+// requests returns a copy of the recorded requests.
+func (m *mockServer) requests() []*monitoringpb.CreateTimeSeriesRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]*monitoringpb.CreateTimeSeriesRequest(nil), m.gotReqs...)
 }
 
 func (m *mockServer) setFailure(c codes.Code) {
@@ -487,8 +507,6 @@ func TestLabelValuesAreLowercaseSnakeCase(t *testing.T) {
 		"IPTypeSQLData":          "sql_data",
 		"ConnectSuccess":         "success",
 		"ConnectError":           "error",
-		"RefreshAheadType":       "refresh_ahead",
-		"RefreshLazyType":        "lazy",
 	}
 	got := map[string]string{
 		"UnknownValue":           tel.UnknownValue,
@@ -510,8 +528,6 @@ func TestLabelValuesAreLowercaseSnakeCase(t *testing.T) {
 		"IPTypeSQLData":          tel.IPTypeSQLData,
 		"ConnectSuccess":         tel.ConnectSuccess,
 		"ConnectError":           tel.ConnectError,
-		"RefreshAheadType":       tel.RefreshAheadType,
-		"RefreshLazyType":        tel.RefreshLazyType,
 	}
 	for name, w := range want {
 		g, ok := got[name]
@@ -965,5 +981,102 @@ func TestRecordNeverPanics(t *testing.T) {
 	mr2.RecordOpenConnection(ctx, a)
 	if w := warn.String(); strings.Count(w, "recovered a panic") != 1 {
 		t.Errorf("standard-logger panic warning must be once per process, got %q", w)
+	}
+}
+
+// TestInsufficientScopeHintPointsAtScopes verifies that when the Monitoring
+// API rejects the access token for lacking a scope, the once-per-process
+// warning tells the user to fix the token source's scopes rather than to
+// grant an IAM role (which would not help).
+func TestInsufficientScopeHintPointsAtScopes(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = 10 * time.Millisecond
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	st, err := grpcstatus.New(codes.PermissionDenied, "Request had insufficient authentication scopes.").
+		WithDetails(&errdetails.ErrorInfo{Reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT", Domain: "googleapis.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.setFailureStatus(st)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, nullLogger{t}, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "proj", ResourceID: "proj:inst", Region: "r",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	time.Sleep(100 * time.Millisecond)
+	_ = mr.Shutdown(ctx)
+
+	w := warnBuf.String()
+	if !strings.Contains(w, tel.MonitoringWriteScope) {
+		t.Errorf("warning should name the required scope: %q", w)
+	}
+	if strings.Contains(w, "grant roles/monitoring.metricWriter") {
+		t.Errorf("warning must not suggest an IAM grant for a scope error: %q", w)
+	}
+}
+
+// TestHistogramBucketsAreExplicit verifies that the two histograms export
+// with the connector's bucket boundaries rather than the OpenTelemetry
+// defaults, and that a value lands in the expected bucket.
+func TestHistogramBucketsAreExplicit(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, nullLogger{t}, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "proj", ResourceID: "proj:inst", Region: "r",
+	})
+	attrs := tel.Attributes{IPType: "public", DialStatus: tel.ConnectSuccess}
+	mr.RecordConnectLatencies(ctx, attrs, 3)      // 3 ms -> bucket (2, 5]
+	mr.RecordConnectionDuration(ctx, attrs, 0.25) // 0.25 s -> bucket (0.1, 0.5]
+	_ = mr.Shutdown(ctx)                          // flushes
+
+	want := map[string][]float64{
+		"cloudsql.googleapis.com/client/connector/connect_latencies":    tel.ConnectLatencyBucketsMs,
+		"cloudsql.googleapis.com/client/connector/connection_durations": tel.ConnectionDurationBucketsS,
+	}
+	wantBucketIdx := map[string]int{
+		"cloudsql.googleapis.com/client/connector/connect_latencies":    2, // bucket 0 is (-inf, 1]; 3 ms is in (2, 5]
+		"cloudsql.googleapis.com/client/connector/connection_durations": 1, // bucket 0 is (-inf, 0.1]; 0.25 s is in (0.1, 0.5]
+	}
+	seen := map[string]bool{}
+	for _, req := range mock.requests() {
+		for _, ts := range req.GetTimeSeries() {
+			bounds, ok := want[ts.GetMetric().GetType()]
+			if !ok {
+				continue
+			}
+			seen[ts.GetMetric().GetType()] = true
+			dist := ts.GetPoints()[0].GetValue().GetDistributionValue()
+			got := dist.GetBucketOptions().GetExplicitBuckets().GetBounds()
+			if cmp.Diff(bounds, got) != "" {
+				t.Errorf("%s bounds = %v, want %v", ts.GetMetric().GetType(), got, bounds)
+			}
+			if idx := wantBucketIdx[ts.GetMetric().GetType()]; dist.GetBucketCounts()[idx] != 1 {
+				t.Errorf("%s bucket counts = %v, want 1 at index %d", ts.GetMetric().GetType(), dist.GetBucketCounts(), idx)
+			}
+		}
+	}
+	for m := range want {
+		if !seen[m] {
+			t.Errorf("%s was not exported", m)
+		}
 	}
 }

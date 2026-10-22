@@ -470,11 +470,19 @@ failed dial attempts or in dial latency. **They are enabled by default.**
 
 Metrics are written to the **Cloud SQL instance's project** using the same
 identity the connector uses for the Cloud SQL Admin API. That identity needs
-the `roles/monitoring.metricWriter` role on that project. Export is strictly
-fail-open: it never affects connectivity. If the identity lacks the role, the
-connector logs one line per process explaining what to grant and retries with
-exponential backoff (up to once per hour); all further diagnostics go to the
-[debug logger](#debug-logging) only.
+the `roles/monitoring.metricWriter` role on that project. If you pass your own
+token source or credentials (`WithTokenSource`, `WithCredentials`, or an
+impersonated credential), they must also carry the
+`https://www.googleapis.com/auth/monitoring.write` (or `cloud-platform`)
+scope; credentials the connector detects itself are scoped automatically.
+Export is strictly fail-open: it never affects connectivity. If the identity
+lacks the role or the scope, the connector logs one line per process
+explaining what to fix and retries with exponential backoff (up to once per
+hour); all further diagnostics go to the [debug logger](#debug-logging) only.
+
+In a non-default Cloud universe (a universe domain other than
+`googleapis.com`), built-in metrics are off unless you pass
+`WithBuiltInMetrics(true)`.
 
 To turn built-in metrics off:
 
