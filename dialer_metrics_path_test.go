@@ -521,6 +521,11 @@ func TestDisabledMetricsAreSilent(t *testing.T) {
 			mock.CreateEphemeralSuccess(inst, 1),
 		},
 		dialerOptions: []Option{
+			// setupDialer replaces (does not extend) its default options
+			// when dialerOptions is set, so restate the ones it needs; without
+			// the token source NewDialer falls back to ADC, which CI lacks.
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithRefreshTimeout(time.Minute),
 			WithBuiltInMetrics(false),
 			WithContextDebugLogger(debug),
 			// Even with a metric client configured, nothing must be created.
