@@ -1179,3 +1179,69 @@ func TestHistogramBucketShape(t *testing.T) {
 		})
 	}
 }
+
+// TestFinalFlushWithinMinWriteIntervalIsQuiet reproduces the Monitoring API
+// rejecting a flush that arrives within the metric's minimum write interval
+// of the previous export (FailedPrecondition, "written more frequently than
+// the maximum sampling period"). This is expected when a process exits
+// shortly after a periodic export; it must not produce the standard-logger
+// warning (it is not an IAM problem) and must not suspend export.
+func TestFinalFlushWithinMinWriteIntervalIsQuiet(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = 20 * time.Millisecond
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
+	logger := &recordingLogger{}
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mock.setFailureStatus(grpcstatus.New(codes.FailedPrecondition,
+		"One or more TimeSeries could not be written: timeSeries[0-4] (...): write for resource failed: "+
+			"One or more points were written more frequently than the maximum sampling period configured for the metric. "+
+			"{Metric: 353236655391.service.cloudsql.googleapis.com/client/connector/connect_latencies, "+
+			"Timestamps: {Youngest Existing: '2026/10/23-14:57:14.570', New: '2026/10/23-14:57:30.730'}}"))
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, logger, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "proj", ResourceID: "proj:inst", Region: "r",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	time.Sleep(70 * time.Millisecond) // a few rejected exports
+	before := mock.requestCount()
+	if before == 0 {
+		t.Fatal("no export attempted")
+	}
+
+	if w := warnBuf.String(); w != "" {
+		t.Fatalf("standard-logger warning for a min-write-interval rejection: %q", w)
+	}
+	var sawDebug, sawSuspend bool
+	for _, l := range logger.snapshot() {
+		if strings.Contains(l, "minimum write interval") {
+			sawDebug = true
+		}
+		if strings.Contains(l, "suspending export") || strings.Contains(l, "retrying with backoff") {
+			sawSuspend = true
+		}
+	}
+	if !sawDebug {
+		t.Errorf("want a debug line explaining the dropped flush, got %q", logger.snapshot())
+	}
+	if sawSuspend {
+		t.Errorf("rejection must not suspend or back off export, got %q", logger.snapshot())
+	}
+
+	// No suspension: once the server accepts again, the very next interval
+	// exports (a suspended exporter would skip for TransientExportErrorInitialBackoff).
+	mock.setFailureStatus(nil)
+	time.Sleep(60 * time.Millisecond)
+	if after := mock.requestCount(); after <= before {
+		t.Fatalf("export did not continue after the rejection: %d -> %d requests", before, after)
+	}
+	_ = mr.Shutdown(ctx)
+}
