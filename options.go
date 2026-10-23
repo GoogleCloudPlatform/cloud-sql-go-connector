@@ -17,9 +17,12 @@ package cloudsqlconn
 import (
 	"context"
 	"crypto/rsa"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/auth"
@@ -30,6 +33,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/cloudsql"
 	"cloud.google.com/go/cloudsqlconn/internal/sqldataclient"
+	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	"golang.org/x/oauth2"
 	apiopt "google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
@@ -39,21 +43,33 @@ import (
 type Option func(d *dialerConfig)
 
 type dialerConfig struct {
-	rsaKey                          *rsa.PrivateKey
-	sqladminOpts                    []apiopt.ClientOption
-	dialOpts                        []DialOption
-	dialFunc                        func(ctx context.Context, network, addr string) (net.Conn, error)
-	refreshTimeout                  time.Duration
-	useIAMAuthN                     bool
-	logger                          debug.ContextLogger
-	lazyRefresh                     bool
-	sqlDataEndpoint                 string
-	clientUniverseDomain            string
-	quotaProject                    string
-	authCredentials                 *auth.Credentials
-	iamLoginTokenProvider           auth.TokenProvider
-	apiTokenProvider                auth.TokenProvider
-	useragents                      []string
+	rsaKey       *rsa.PrivateKey
+	sqladminOpts []apiopt.ClientOption
+	// clientOpts are options to configure any Google Cloud API client. They
+	// should not include any CloudSQL-specific configuration.
+	clientOpts []apiopt.ClientOption
+	// credentialsJSON holds the raw credentials provided via
+	// WithCredentialsJSON or WithCredentialsFile, so that additional
+	// credentials with different scopes can be derived from them.
+	credentialsJSON       []byte
+	dialOpts              []DialOption
+	dialFunc              func(ctx context.Context, network, addr string) (net.Conn, error)
+	refreshTimeout        time.Duration
+	useIAMAuthN           bool
+	logger                debug.ContextLogger
+	lazyRefresh           bool
+	sqlDataEndpoint       string
+	clientUniverseDomain  string
+	quotaProject          string
+	authCredentials       *auth.Credentials
+	iamLoginTokenProvider auth.TokenProvider
+	apiTokenProvider      auth.TokenProvider
+	useragents            []string
+	// TODO: Update to applicationID, which uses GCE VM Name, GKE Pod Name.
+	applicationName string
+	// computePlatform, when set, overrides the auto-detected compute_platform
+	// metric label. It is validated by WithComputePlatform.
+	computePlatform                 string
 	setAdminAPIEndpoint             bool
 	setCredentials                  bool
 	setHTTPClient                   bool
@@ -67,6 +83,11 @@ type dialerConfig struct {
 	sqlDataStreamTimeout            time.Duration
 	resourceExhaustedCooldownPeriod time.Duration
 	useDNSNameResolver              bool
+	enableBuiltInMetrics            bool
+	// builtInMetricsSet records that WithBuiltInMetrics was called, so the
+	// default can be adjusted for non-default universes without overriding
+	// an explicit choice.
+	builtInMetricsSet bool
 	// err tracks any dialer options that may have failed.
 	err    error
 	client *sqladmin.Service
@@ -133,6 +154,7 @@ func WithCredentialsJSON(b []byte) Option {
 			return
 		}
 		d.iamLoginTokenProvider = scoped.TokenProvider
+		d.credentialsJSON = b
 		d.setCredentials = true
 	}
 }
@@ -141,6 +163,107 @@ func WithCredentialsJSON(b []byte) Option {
 func WithUserAgent(ua string) Option {
 	return func(d *dialerConfig) {
 		d.useragents = append(d.useragents, ua)
+	}
+}
+
+// WithApplicationName returns an Option that sets the Application Name.
+// This is used to identify the application in metrics.
+func WithApplicationName(name string) Option {
+	return func(d *dialerConfig) {
+		d.applicationName = name
+	}
+}
+
+// ComputePlatform identifies the platform an application runs on. It is
+// reported as the compute_platform label of built-in metrics.
+//
+// The set of valid values is closed: only the ComputePlatform* constants
+// defined in this package are accepted by WithComputePlatform. This keeps the
+// cardinality of the metric's monitored resource bounded.
+type ComputePlatform string
+
+const (
+	// ComputePlatformGCE identifies Compute Engine.
+	ComputePlatformGCE ComputePlatform = tel.PlatformGCE
+	// ComputePlatformGKE identifies Google Kubernetes Engine.
+	ComputePlatformGKE ComputePlatform = tel.PlatformGKE
+	// ComputePlatformCloudRun identifies Cloud Run.
+	ComputePlatformCloudRun ComputePlatform = tel.PlatformCloudRun
+	// ComputePlatformAppEngine identifies App Engine.
+	ComputePlatformAppEngine ComputePlatform = tel.PlatformAppEngine
+	// ComputePlatformCloudFunctions identifies Cloud Functions.
+	ComputePlatformCloudFunctions ComputePlatform = tel.PlatformCloudFunctions
+	// ComputePlatformAIStudio identifies applications deployed by Google AI
+	// Studio. This platform cannot be auto-detected and must be set
+	// explicitly with WithComputePlatform.
+	ComputePlatformAIStudio ComputePlatform = tel.PlatformAIStudio
+)
+
+// computePlatforms is the ordered list of valid ComputePlatform values. It is
+// the single source of truth for ComputePlatforms, ParseComputePlatform, and
+// the error messages of WithComputePlatform.
+var computePlatforms = []ComputePlatform{
+	ComputePlatformGCE,
+	ComputePlatformGKE,
+	ComputePlatformCloudRun,
+	ComputePlatformAppEngine,
+	ComputePlatformCloudFunctions,
+	ComputePlatformAIStudio,
+}
+
+// ComputePlatforms returns every valid ComputePlatform value, in a stable
+// order. It is intended for help text and validation in clients that accept
+// the platform as a string, such as a command-line flag.
+func ComputePlatforms() []ComputePlatform {
+	return slices.Clone(computePlatforms)
+}
+
+// ParseComputePlatform converts a string, for example a command-line flag
+// value, to a ComputePlatform. Leading and trailing whitespace is ignored and
+// matching is case-insensitive, so "ai_studio", "AI_STUDIO", and " ai_studio "
+// all return ComputePlatformAIStudio. Any other value returns an error that
+// lists the valid values.
+//
+// Use this rather than a type conversion such as ComputePlatform(s): a
+// conversion accepts any string and is only rejected later, when NewDialer
+// validates the option.
+func ParseComputePlatform(s string) (ComputePlatform, error) {
+	p := ComputePlatform(strings.ToLower(strings.TrimSpace(s)))
+	if slices.Contains(computePlatforms, p) {
+		return p, nil
+	}
+	return "", fmt.Errorf("invalid compute platform %q; must be one of: %s", s, validComputePlatformList())
+}
+
+// validComputePlatformList returns the valid values as a comma-separated list.
+func validComputePlatformList() string {
+	names := make([]string, len(computePlatforms))
+	for i, p := range computePlatforms {
+		names[i] = string(p)
+	}
+	return strings.Join(names, ", ")
+}
+
+// WithComputePlatform returns an Option that overrides the auto-detected
+// compute platform reported in built-in metrics. Use it when the Dialer is
+// embedded in a client that knows its deployment environment better than
+// runtime heuristics can determine (for example, the Cloud SQL Auth Proxy
+// running as a sidecar for an AI Studio application).
+//
+// Only the ComputePlatform* constants are accepted; any other value causes
+// NewDialer to return a configuration error. To accept the platform as a
+// string (for example from a command-line flag), convert it with
+// ParseComputePlatform first. When this option is not provided, the platform
+// is detected from the runtime environment.
+func WithComputePlatform(p ComputePlatform) Option {
+	return func(d *dialerConfig) {
+		if !slices.Contains(computePlatforms, p) {
+			d.err = errtype.NewConfigError(
+				fmt.Sprintf("invalid compute platform %q; must be one of: %s", p, validComputePlatformList()),
+				"n/a")
+			return
+		}
+		d.computePlatform = string(p)
 	}
 }
 
@@ -363,6 +486,51 @@ func WithFailoverPeriod(f time.Duration) Option {
 func WithDisableMetadataExchange() Option {
 	return func(cfg *dialerConfig) {
 		cfg.metadataExchangeDisabled = true
+	}
+}
+
+// WithBuiltInMetrics enables or disables the built-in metric export. When
+// enabled, the Dialer reports on its internal operations (connection
+// attempts, dial latency, open connections, connection durations) to Cloud
+// Monitoring under the cloudsql.googleapis.com/client/connector metric prefix,
+// using the cloudsql.googleapis.com/InstanceClient monitored resource. These
+// metrics help Cloud SQL improve performance and identify client connectivity
+// problems.
+//
+// Built-in metrics are enabled by default and are in BETA. Pass false to turn
+// them off. In a non-default Cloud universe (a universe domain other than
+// googleapis.com) they are off by default and must be enabled explicitly.
+//
+// Metrics never affect connectivity. If the exporter cannot be created, or an
+// export fails (for example, a missing IAM permission), connections continue
+// to work: the first permanent failure is reported once per process on the
+// standard logger with remediation steps, further failures are reported
+// through the debug logger only, and exports are retried with backoff.
+//
+// The identity used by the Dialer must have the roles/monitoring.metricWriter
+// role on the Cloud SQL instance's project for the export to succeed.
+//
+// The metric export uses the same identity as the Dialer's API calls. When
+// the Dialer detects credentials itself (Application Default Credentials,
+// WithCredentialsFile, or WithCredentialsJSON), it requests the
+// https://www.googleapis.com/auth/monitoring.write scope for the export.
+// When a token source or credentials are supplied directly (WithTokenSource,
+// WithCredentials, WithIAMAuthNTokenSources, WithIAMAuthNCredentials), the
+// supplied API token source is used as-is and must carry either the
+// monitoring.write or the cloud-platform scope.
+func WithBuiltInMetrics(enabled bool) Option {
+	return func(cfg *dialerConfig) {
+		cfg.enableBuiltInMetrics = enabled
+		cfg.builtInMetricsSet = true
+	}
+}
+
+// withMetricClientOptions appends options for the built-in metrics client.
+// It is unexported and intended for tests, e.g. to point the client at an
+// in-memory gRPC server.
+func withMetricClientOptions(opts ...apiopt.ClientOption) Option {
+	return func(cfg *dialerConfig) {
+		cfg.clientOpts = append(cfg.clientOpts, opts...)
 	}
 }
 

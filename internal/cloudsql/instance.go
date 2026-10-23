@@ -250,40 +250,52 @@ func (c ConnectionInfo) Addr(ipType string) (string, error) {
 
 // Addrs returns all IP addresses or DNS names for the given IP type.
 func (c ConnectionInfo) Addrs(ipType string) ([]string, error) {
+	addrs, _, err := c.ResolveAddrs(ipType)
+	return addrs, err
+}
+
+// ResolveAddrs returns the IP addresses (or DNS names) to dial for the given
+// IP type, along with the concrete IP type that was selected. For the
+// strategy values AutoIP and SQLData the returned type is the type actually
+// chosen (e.g. PublicIP or PrivateIP), which is what should be reported in
+// telemetry; for concrete types it is ipType itself.
+func (c ConnectionInfo) ResolveAddrs(ipType string) ([]string, string, error) {
 	var (
-		addrs []string
-		ok    bool
+		addrs    []string
+		ok       bool
+		resolved = ipType
 	)
+	// lookup returns the first candidate type that has at least one address.
+	lookup := func(candidates ...string) {
+		for _, t := range candidates {
+			addrs, ok = c.addrs[t]
+			if ok && len(addrs) > 0 {
+				resolved = t
+				return
+			}
+		}
+		ok = false
+	}
 	switch ipType {
 	case AutoIP:
-		// Try Public first
-		addrs, ok = c.addrs[PublicIP]
-		if !ok || len(addrs) == 0 {
-			// Try Private second
-			addrs, ok = c.addrs[PrivateIP]
-		}
+		// Try Public first, then Private.
+		lookup(PublicIP, PrivateIP)
 	case SQLData:
-		// Fall back to direct IP in preference order: PRIVATE, PSC, PUBLIC
-		addrs, ok = c.addrs[PrivateIP]
-		if !ok || len(addrs) == 0 {
-			addrs, ok = c.addrs[PSC]
-		}
-		if !ok || len(addrs) == 0 {
-			addrs, ok = c.addrs[PublicIP]
-		}
+		// Fall back to direct IP in preference order: PRIVATE, PSC, PUBLIC.
+		lookup(PrivateIP, PSC, PublicIP)
 	default:
-		addrs, ok = c.addrs[ipType]
+		lookup(ipType)
 	}
 	if !ok || len(addrs) == 0 {
 		err := errtype.NewConfigError(
 			fmt.Sprintf("instance does not have IP of type %q", ipType),
 			c.ConnectionName.String(),
 		)
-		return nil, err
+		return nil, "", err
 	}
 	cp := make([]string, len(addrs))
 	copy(cp, addrs)
-	return cp, nil
+	return cp, resolved, nil
 }
 
 // TLSConfig constructs a ClientProtocolTLS configuration for the given connection info.

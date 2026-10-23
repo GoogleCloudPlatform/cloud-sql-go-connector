@@ -452,6 +452,65 @@ dsn := "user=test-sa dbname=mydb sslmode=disable"
 [configure-iam-authn]: https://cloud.google.com/sql/docs/postgres/create-edit-iam-instances#configure-iam-db-instance
 [add-iam-user]: https://cloud.google.com/sql/docs/postgres/create-manage-iam-users#creating-a-database-user
 
+### Built-in Client Metrics (BETA)
+
+The connector reports client-side connection metrics to [Cloud Monitoring][]
+under the `cloudsql.googleapis.com/client/connector/` prefix, using the
+`cloudsql.googleapis.com/InstanceClient` monitored resource. These metrics
+help you (and Cloud SQL) spot connectivity regressions, for example a rise in
+failed dial attempts or in dial latency. **They are enabled by default.**
+
+| Metric | Description |
+| --- | --- |
+| `open_connection_count` | Dial attempts, labelled with `status` and `connection_part` |
+| `connect_latencies` | Dial latency distribution (ms) |
+| `open_connections` | Currently open connections |
+| `closed_connection_count` | Closed connections |
+| `connection_durations` | Connection lifetime distribution (s) |
+
+Metrics are written to the **Cloud SQL instance's project** using the same
+identity the connector uses for the Cloud SQL Admin API. That identity needs
+the `roles/monitoring.metricWriter` role on that project. If you pass your own
+token source or credentials (`WithTokenSource`, `WithCredentials`, or an
+impersonated credential), they must also carry the
+`https://www.googleapis.com/auth/monitoring.write` (or `cloud-platform`)
+scope; credentials the connector detects itself are scoped automatically.
+Export is strictly fail-open: it never affects connectivity. If the identity
+lacks the role or the scope, the connector logs one line per process
+explaining what to fix and retries with exponential backoff (up to once per
+hour); all further diagnostics go to the [debug logger](#debug-logging) only.
+
+In a non-default Cloud universe (a universe domain other than
+`googleapis.com`), built-in metrics are off unless you pass
+`WithBuiltInMetrics(true)`.
+
+To turn built-in metrics off:
+
+```go
+d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithBuiltInMetrics(false))
+```
+
+Two optional labels can be set by the application:
+
+```go
+d, err := cloudsqlconn.NewDialer(ctx,
+    cloudsqlconn.WithApplicationName("my-service"),                      // application_name
+    cloudsqlconn.WithComputePlatform(cloudsqlconn.ComputePlatformCloudRun), // overrides auto-detection
+)
+```
+
+`WithComputePlatform` accepts only the `ComputePlatform*` constants. To take
+the platform from a string such as a flag value, use
+`cloudsqlconn.ParseComputePlatform(s)`; `cloudsqlconn.ComputePlatforms()` lists
+the valid values for help text.
+
+Metrics are exported every 60 seconds and flushed when `Dialer.Close()` is
+called, so short-lived processes should close the Dialer before exiting.
+
+These metrics are in **BETA**: label values are documented in the metric
+descriptors and pinned by tests, but the feature is subject to the Cloud SQL
+pre-GA terms.
+
 ### Enabling Metrics and Tracing
 
 This library includes support for metrics and tracing using [OpenCensus][].

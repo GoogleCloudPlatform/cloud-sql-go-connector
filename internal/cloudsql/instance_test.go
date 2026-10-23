@@ -537,3 +537,59 @@ func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
 		t.Fatalf("unexpected root CAs, got %v, want %v", got.RootCAs, wantRootCAs)
 	}
 }
+
+func TestResolveAddrs(t *testing.T) {
+	mk := func(addrs map[string][]string) ConnectionInfo {
+		return ConnectionInfo{ConnectionName: testInstanceConnName(), addrs: addrs}
+	}
+	pub := map[string][]string{PublicIP: {"1.1.1.1"}}
+	priv := map[string][]string{PrivateIP: {"10.0.0.1"}}
+	psc := map[string][]string{PSC: {"abc.sql.goog"}}
+	all := map[string][]string{PublicIP: {"1.1.1.1"}, PrivateIP: {"10.0.0.1"}, PSC: {"abc.sql.goog"}}
+
+	tcs := []struct {
+		desc         string
+		ci           ConnectionInfo
+		req          string
+		wantAddr     string
+		wantResolved string
+		wantErr      bool
+	}{
+		{desc: "public requested", ci: mk(all), req: PublicIP, wantAddr: "1.1.1.1", wantResolved: PublicIP},
+		{desc: "private requested", ci: mk(all), req: PrivateIP, wantAddr: "10.0.0.1", wantResolved: PrivateIP},
+		{desc: "psc requested", ci: mk(all), req: PSC, wantAddr: "abc.sql.goog", wantResolved: PSC},
+		{desc: "auto prefers public", ci: mk(all), req: AutoIP, wantAddr: "1.1.1.1", wantResolved: PublicIP},
+		{desc: "auto falls back to private", ci: mk(priv), req: AutoIP, wantAddr: "10.0.0.1", wantResolved: PrivateIP},
+		{desc: "auto with only psc fails", ci: mk(psc), req: AutoIP, wantErr: true},
+		{desc: "sqldata prefers private", ci: mk(all), req: SQLData, wantAddr: "10.0.0.1", wantResolved: PrivateIP},
+		{desc: "sqldata falls back to psc", ci: mk(psc), req: SQLData, wantAddr: "abc.sql.goog", wantResolved: PSC},
+		{desc: "sqldata falls back to public", ci: mk(pub), req: SQLData, wantAddr: "1.1.1.1", wantResolved: PublicIP},
+		{desc: "missing type fails", ci: mk(pub), req: PrivateIP, wantErr: true},
+		{desc: "empty address list is treated as missing", ci: mk(map[string][]string{PublicIP: {}, PrivateIP: {"10.0.0.1"}}), req: AutoIP, wantAddr: "10.0.0.1", wantResolved: PrivateIP},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			addrs, resolved, err := tc.ci.ResolveAddrs(tc.req)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want error, got addrs=%v resolved=%q", addrs, resolved)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(addrs) == 0 || addrs[0] != tc.wantAddr {
+				t.Errorf("addrs = %v, want first %q", addrs, tc.wantAddr)
+			}
+			if resolved != tc.wantResolved {
+				t.Errorf("resolved = %q, want %q", resolved, tc.wantResolved)
+			}
+			// Addrs must agree with ResolveAddrs.
+			a2, err := tc.ci.Addrs(tc.req)
+			if err != nil || len(a2) == 0 || a2[0] != tc.wantAddr {
+				t.Errorf("Addrs = %v, %v; want first %q", a2, err, tc.wantAddr)
+			}
+		})
+	}
+}
