@@ -2734,3 +2734,63 @@ func TestComputePlatformsMatchesInternalSet(t *testing.T) {
 		t.Fatal("ComputePlatforms must return a copy")
 	}
 }
+
+// TestOpenConnectionsNeverNegative pins the ordering guarantee that the
+// open_connections increment is recorded synchronously on the dial path
+// before the connection is handed to the caller, so a prompt close can never
+// record its decrement first. The AlloyDB connector hit exactly this race
+// (GoogleCloudPlatform/alloydb-go-connector#820) after moving the increment
+// into a goroutine; this test fails if someone does the same here.
+func TestOpenConnectionsNeverNegative(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithBuiltInMetrics(true),
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+		},
+	})
+	ctx := context.Background()
+	const dials = 20
+	for i := 0; i < dials; i++ {
+		c, err := d.Dial(ctx, "my-project:my-region:my-instance")
+		if err != nil {
+			t.Fatalf("dial %d: %v", i, err)
+		}
+		// Close immediately: the decrement must never land before the increment.
+		if err := c.Close(); err != nil {
+			t.Fatalf("close %d: %v", i, err)
+		}
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var sawOpenConns bool
+	for _, r := range fake.requests() {
+		for _, ts := range r.GetTimeSeries() {
+			if !strings.HasSuffix(ts.GetMetric().GetType(), "/open_connections") {
+				continue
+			}
+			sawOpenConns = true
+			for _, p := range ts.GetPoints() {
+				if v := p.GetValue().GetInt64Value(); v != 0 {
+					t.Fatalf("open_connections exported %d after %d dial+close pairs; want 0 (negative means the decrement outran the increment)", v, dials)
+				}
+			}
+		}
+	}
+	if !sawOpenConns {
+		t.Fatal("no open_connections time series was exported")
+	}
+}
