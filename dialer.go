@@ -71,7 +71,7 @@ const (
 	iamLoginScope = "https://www.googleapis.com/auth/sqlservice.login"
 	// monitoringWriteScope is the OAuth2 scope required to write time series
 	// to Cloud Monitoring. It is used for the built-in metrics export.
-	monitoringWriteScope = "https://www.googleapis.com/auth/monitoring.write"
+	monitoringWriteScope = tel.MonitoringWriteScope
 	// universeDomainEnvVar is the environment variable for setting the default
 	// service domain for a given Cloud universe.
 	universeDomainEnvVar = "GOOGLE_CLOUD_UNIVERSE_DOMAIN"
@@ -407,6 +407,14 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	// client earlier would silently fall back to Application Default
 	// Credentials regardless of the options the caller passed.
 	var mClient *monitoring.MetricClient
+	if cfg.enableBuiltInMetrics && !cfg.builtInMetricsSet && cfg.getClientUniverseDomain() != defaultUniverseDomain {
+		// The on-by-default behaviour is for the default universe, where
+		// the cloudsql.googleapis.com metric descriptors exist. Elsewhere
+		// (Trusted Partner Cloud etc.) the export would most likely be
+		// rejected, so require an explicit opt-in there.
+		cfg.logger.Debugf(ctx, "built-in metrics are off by default in universe %q; pass WithBuiltInMetrics(true) to enable them", cfg.getClientUniverseDomain())
+		cfg.enableBuiltInMetrics = false
+	}
 	if cfg.enableBuiltInMetrics {
 		mClient, err = newMetricClient(ctx, cfg, tp)
 		if err != nil {
@@ -594,6 +602,18 @@ func detectPrincipal(ctx context.Context, cfg *dialerConfig) string {
 func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbEngineType string) tel.MetricRecorder {
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
+	old, ok := d.metricRecorders[inst]
+	if ok {
+		if dbEngineType == tel.UnknownValue || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
+			return old
+		}
+	}
+	// Metrics off (by option, by universe default, or because the metric
+	// client could not be created, which was logged once in NewDialer):
+	// nothing to build, store or log.
+	if !d.enableBuiltInMetrics || d.mClient == nil {
+		return tel.NullMetricRecorder{}
+	}
 	// A Dial that raced with Close must not create a recorder after Close
 	// has shut the others down and closed the metric client: it would leak
 	// an export goroutine writing to a closed client.
@@ -601,12 +621,6 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 	case <-d.closed:
 		return tel.NullMetricRecorder{}
 	default:
-	}
-	old, ok := d.metricRecorders[inst]
-	if ok {
-		if dbEngineType == tel.UnknownValue || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
-			return old
-		}
 	}
 	cfg := tel.Config{
 		Enabled:           d.enableBuiltInMetrics,
@@ -685,12 +699,8 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 	mr := d.metricRecorder(ctx, cn, tel.UnknownValue)
 
 	attrs := tel.Attributes{
-		IAMAuthN:    cfg.useIAMAuthN,
-		RefreshType: tel.RefreshAheadType,
-		IPType:      cfg.connectionType,
-	}
-	if d.lazyRefresh {
-		attrs.RefreshType = tel.RefreshLazyType
+		IAMAuthN: cfg.useIAMAuthN,
+		IPType:   cfg.connectionType,
 	}
 
 	// Log if resolver changed the instance name input string.
@@ -882,8 +892,7 @@ func (c *metricsConn) Close() error {
 func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time, mr tel.MetricRecorder, attrs tel.Attributes) (conn net.Conn, err error) {
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	c, cacheHit, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
-	attrs.CacheHit = cacheHit
+	c, _, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
 	if err != nil {
 		attrs.DialStatus = tel.ConnectError
 		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)

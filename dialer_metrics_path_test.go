@@ -15,11 +15,14 @@
 package cloudsqlconn
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -30,6 +33,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	sqlpb "cloud.google.com/go/sql/apiv1beta4/sqlpb"
 	"go.opencensus.io/stats/view"
+	"google.golang.org/api/option"
 )
 
 // countingRecorder is a tel.MetricRecorder that remembers every call, so
@@ -429,4 +433,164 @@ func TestMetricRecorderAfterCloseIsNull(t *testing.T) {
 	if len(d.metricRecorders) != 0 {
 		t.Fatalf("metricRecorder after Close registered %d recorder(s)", len(d.metricRecorders))
 	}
+}
+
+// TestBuiltInMetricsDefaultOffOutsideDefaultUniverse verifies that in a
+// non-googleapis.com universe metrics are off unless explicitly enabled, and
+// that an explicit WithBuiltInMetrics(true) is honoured there.
+func TestBuiltInMetricsDefaultOffOutsideDefaultUniverse(t *testing.T) {
+	ctx := context.Background()
+	_, conn := startFakeMetricServer(t)
+
+	t.Run("default is off in a non-default universe", func(t *testing.T) {
+		old := builtInMetricsDefault
+		builtInMetricsDefault = true
+		t.Cleanup(func() { builtInMetricsDefault = old })
+		d, err := NewDialer(ctx,
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithUniverseDomain("example.universe"),
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = d.Close() }()
+		if d.enableBuiltInMetrics || d.mClient != nil {
+			t.Fatal("built-in metrics should be off by default outside googleapis.com")
+		}
+	})
+
+	t.Run("explicit opt-in is honoured in a non-default universe", func(t *testing.T) {
+		d, err := NewDialer(ctx,
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithUniverseDomain("example.universe"),
+			WithBuiltInMetrics(true),
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = d.Close() }()
+		if !d.enableBuiltInMetrics || d.mClient == nil {
+			t.Fatal("WithBuiltInMetrics(true) should enable metrics in any universe")
+		}
+	})
+
+	t.Run("default stays on in the default universe", func(t *testing.T) {
+		old := builtInMetricsDefault
+		builtInMetricsDefault = true
+		t.Cleanup(func() { builtInMetricsDefault = old })
+		d, err := NewDialer(ctx,
+			WithTokenSource(mock.EmptyTokenSource{}),
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = d.Close() }()
+		if !d.enableBuiltInMetrics || d.mClient == nil {
+			t.Fatal("built-in metrics should be on by default in googleapis.com")
+		}
+	})
+}
+
+// TestDisabledMetricsAreSilent verifies the opt-out contract end to end: with
+// WithBuiltInMetrics(false), a real dial, close and Dialer.Close produce no
+// export to the Monitoring API, no metrics-related debug log line, and
+// nothing on the standard logger (including the OTel exporter's
+// deprecation notice, which must only fire when an exporter is created).
+func TestDisabledMetricsAreSilent(t *testing.T) {
+	fake, conn := startFakeMetricServer(t)
+
+	// Capture everything the process would log.
+	var std syncBuffer
+	oldOut, oldFlags := log.Writer(), log.Flags()
+	log.SetOutput(&std)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(oldOut); log.SetFlags(oldFlags) })
+	var warn syncBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warn, "", 0))
+	t.Cleanup(restore)
+	debug := &recordingDebugLogger{}
+
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+		dialerOptions: []Option{
+			// setupDialer replaces (does not extend) its default options
+			// when dialerOptions is set, so restate the ones it needs; without
+			// the token source NewDialer falls back to ADC, which CI lacks.
+			WithTokenSource(mock.EmptyTokenSource{}),
+			WithRefreshTimeout(time.Minute),
+			WithBuiltInMetrics(false),
+			WithContextDebugLogger(debug),
+			// Even with a metric client configured, nothing must be created.
+			withMetricClientOptions(option.WithGRPCConn(conn)),
+		},
+	})
+	c, err := d.Dial(context.Background(), "my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(fake.requests()); got != 0 {
+		t.Errorf("metrics disabled, but %d export request(s) reached the Monitoring API", got)
+	}
+	if w := warn.String(); w != "" {
+		t.Errorf("metrics disabled, but the warning logger got: %q", w)
+	}
+	if s := std.String(); s != "" {
+		t.Errorf("metrics disabled, but the standard logger got: %q", s)
+	}
+	for _, line := range debug.snapshot() {
+		if strings.Contains(strings.ToLower(line), "metric") {
+			t.Errorf("metrics disabled, but a metrics debug line was logged: %q", line)
+		}
+	}
+}
+
+// recordingDebugLogger captures debug log lines.
+type recordingDebugLogger struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (r *recordingDebugLogger) Debugf(_ context.Context, format string, args ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, fmt.Sprintf(format, args...))
+}
+
+func (r *recordingDebugLogger) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.lines...)
+}
+
+// syncBuffer is a goroutine-safe bytes.Buffer.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
