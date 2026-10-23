@@ -674,6 +674,18 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 		e.backoff = 0
 		return nil
 	}
+	if isWriteTooFrequentError(err) {
+		// Not a failure of the pipeline: the Monitoring API enforces a
+		// minimum interval between points on a series (half the metric's
+		// 60 s sample period, i.e. 30 s). Periodic exports are 60 s apart
+		// and never hit it; only the final flush on Shutdown can, when the
+		// process exits within 30 s of the previous export. The points of
+		// that last partial interval are dropped. Debug-log it, do not warn
+		// and do not back off: the schedule is not at fault.
+		e.logger.Debugf(ctx, "[%v] built-in metrics final flush dropped by the Monitoring API: it came within the "+
+			"metric's minimum write interval (30s) of the previous export; the last partial interval is not recorded: %v", e.name, err)
+		return nil
+	}
 	permanent := isPermanentExportError(err)
 	initial, maxBackoff := TransientExportErrorInitialBackoff, TransientExportErrorMaxBackoff
 	if permanent {
@@ -785,15 +797,30 @@ func (*sharedClientExporter) Shutdown(context.Context) error { return nil }
 //
 // Everything else is treated as transient and retried next interval. That
 // deliberately includes InvalidArgument: it is returned for points written
-// out of order or too frequently and for partial-batch failures, all of
-// which resolve on the next export of these cumulative metrics, and
-// ResourceExhausted, for which a once-per-minute retry is the right cadence.
+// out of order and for partial-batch failures, all of which resolve on the
+// next export of these cumulative metrics, and ResourceExhausted, for which
+// a once-per-minute retry is the right cadence.
+//
+// Points written sooner than the metric's minimum write interval come back
+// as FailedPrecondition; they are recognised by message and handled before
+// this classification (see isWriteTooFrequentError).
 func isPermanentExportError(err error) bool {
 	switch grpcstatus.Code(err) {
 	case codes.PermissionDenied, codes.Unauthenticated, codes.NotFound, codes.FailedPrecondition:
 		return true
 	}
 	return false
+}
+
+// isWriteTooFrequentError reports whether err is the Monitoring API rejecting
+// a write because a point for the same series was accepted less than the
+// metric's minimum write interval ago. The API returns FailedPrecondition
+// with the message "One or more points were written more frequently than the
+// maximum sampling period configured for the metric". Observed interval for
+// these metrics: 30 s (writes 25 s after the previous one are rejected, 35 s
+// are accepted).
+func isWriteTooFrequentError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "written more frequently than the maximum sampling period")
 }
 
 // RecordClosedConnectionCount records totals number of closed connections.
