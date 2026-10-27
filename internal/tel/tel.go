@@ -38,6 +38,7 @@ import (
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	cmexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/exemplar"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -497,6 +498,9 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 			sdkmetric.WithInterval(DefaultExportInterval),
 		)),
 		sdkmetric.WithResource(res),
+		// Exemplars (trace-linked sample points) are not used by these
+		// metrics; turning them off saves an allocation per record.
+		sdkmetric.WithExemplarFilter(exemplar.AlwaysOffFilter),
 	)
 	m := p.Meter(meterName, metric.WithInstrumentationVersion(cfg.Version))
 
@@ -508,13 +512,13 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize dial latency metric: %v", err)
 		return NullMetricRecorder{}
 	}
-	mOpenConns, err := m.Int64UpDownCounter(openConnections)
+	mOpenConns, err := m.Int64UpDownCounter(openConnections, metric.WithUnit("1"))
 	if err != nil {
 		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize open connections metric: %v", err)
 		return NullMetricRecorder{}
 	}
-	mClosedConnectionCount, err := m.Int64Counter(closedConnectionCount)
+	mClosedConnectionCount, err := m.Int64Counter(closedConnectionCount, metric.WithUnit("1"))
 	if err != nil {
 		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize refresh count metric: %v", err)
@@ -528,7 +532,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize connection duration metric: %v", err)
 		return NullMetricRecorder{}
 	}
-	mOpenConnectionCount, err := m.Int64Counter(openConnectionCount)
+	mOpenConnectionCount, err := m.Int64Counter(openConnectionCount, metric.WithUnit("1"))
 	if err != nil {
 		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize open connection count metric: %v", err)

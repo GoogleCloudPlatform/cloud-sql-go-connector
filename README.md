@@ -490,6 +490,16 @@ In a non-default Cloud universe (a universe domain other than
 `googleapis.com`), built-in metrics are off unless you pass
 `WithBuiltInMetrics(true)`.
 
+The export is billed to the caller's project (for a service account, the
+project it belongs to), which must have the Cloud Monitoring API enabled.
+`WithQuotaProject` changes the billed project, as it does for the Cloud SQL
+Admin API.
+
+Hermetic tests that construct a `Dialer` against a mock Admin API
+(`WithAdminAPIEndpoint`, `WithHTTPClient`) should pass
+`WithBuiltInMetrics(false)` so the test does not try to reach Cloud
+Monitoring.
+
 To turn built-in metrics off:
 
 ```go

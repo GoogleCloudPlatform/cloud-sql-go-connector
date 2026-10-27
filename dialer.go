@@ -909,7 +909,7 @@ func (c *metricsConn) Close() error {
 func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time, mr tel.MetricRecorder, attrs tel.Attributes) (conn net.Conn, err error) {
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	c, _, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	c, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
 	if err != nil {
 		attrs.DialStatus = tel.ConnectError
 		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
@@ -1188,7 +1188,7 @@ func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	c, _, err := d.connectionInfoCache(ctx, cn, &d.defaultDialConfig.useIAMAuthN)
+	c, err := d.connectionInfoCache(ctx, cn, &d.defaultDialConfig.useIAMAuthN)
 	if err != nil {
 		return "", err
 	}
@@ -1212,7 +1212,7 @@ func (d *Dialer) Warmup(ctx context.Context, icn string, opts ...DialOption) err
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	c, _, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	c, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
 	if err != nil {
 		return err
 	}
@@ -1427,7 +1427,7 @@ func createKey(cn instance.ConnName) cacheKey {
 // It returns a *monitoredCache, a bool indicating a cache hit, and an error.
 func (d *Dialer) connectionInfoCache(
 	ctx context.Context, cn instance.ConnName, useIAMAuthN *bool,
-) (*monitoredCache, bool, error) {
+) (*monitoredCache, error) {
 	k := createKey(cn)
 
 	d.lock.RLock()
@@ -1436,7 +1436,7 @@ func (d *Dialer) connectionInfoCache(
 
 	if ok && !c.isClosed() {
 		c.UpdateRefresh(useIAMAuthN)
-		return c, ok, nil
+		return c, nil
 	}
 
 	d.lock.Lock()
@@ -1448,7 +1448,7 @@ func (d *Dialer) connectionInfoCache(
 	// c exists and is not closed
 	if ok && !c.isClosed() {
 		c.UpdateRefresh(useIAMAuthN)
-		return c, ok, nil
+		return c, nil
 	}
 
 	// Create a new instance of monitoredCache
@@ -1459,7 +1459,7 @@ func (d *Dialer) connectionInfoCache(
 	d.logger.Debugf(ctx, "[%v] Connection info added to cache", cn.String())
 	rsaKey, err := d.keyGenerator.rsaKey()
 	if err != nil {
-		return nil, ok, err
+		return nil, err
 	}
 	var cache connectionInfoCache
 	if d.lazyRefresh {
@@ -1482,7 +1482,7 @@ func (d *Dialer) connectionInfoCache(
 	c = newMonitoredCache(cache, cn, d.failoverPeriod, d.resolver, d.logger)
 	d.cache[k] = c
 
-	return c, ok, nil
+	return c, nil
 }
 
 // newMDXRequest builds a metadata exchange request based on the connection
