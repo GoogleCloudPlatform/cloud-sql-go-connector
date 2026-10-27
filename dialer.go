@@ -186,6 +186,8 @@ type Dialer struct {
 	sqlDataConnState map[cacheKey]*sqlDataConnState
 	keyGenerator     *keyGenerator
 	refreshTimeout   time.Duration
+	// closing is set by the first call to Close, which then closes closed.
+	closing atomic.Bool
 	// closed reports if the dialer has been closed.
 	closed chan struct{}
 
@@ -212,7 +214,7 @@ type Dialer struct {
 	// conflicting cumulative points to the same Cloud Monitoring series.
 	dialerID        string
 	metricsMu       sync.Mutex
-	metricRecorders map[instance.ConnName]tel.MetricRecorder
+	metricRecorders map[metricRecorderKey]tel.MetricRecorder
 	// metricsWG tracks background shutdowns of replaced metric recorders so
 	// that Close can wait for them before closing the shared metric client.
 	metricsWG sync.WaitGroup
@@ -463,7 +465,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		defaultDialConfig:               dc,
 		dialerID:                        uuid.New().String(),
 		iamTokenProvider:                cfg.iamLoginTokenProvider,
-		metricRecorders:                 map[instance.ConnName]tel.MetricRecorder{},
+		metricRecorders:                 map[metricRecorderKey]tel.MetricRecorder{},
 		dialFunc:                        cfg.dialFunc,
 		dnsResolver:                     cfg.dnsResolver,
 		resolver:                        r,
@@ -581,9 +583,9 @@ func detectPrincipal(ctx context.Context, cfg *dialerConfig) string {
 		}
 		return ""
 	}
-	if metadata.OnGCE() {
-		mctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
+	mctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if metadata.OnGCEWithContext(mctx) {
 		if email, err := metadata.EmailWithContext(mctx, "default"); err == nil {
 			return email
 		}
@@ -600,9 +602,10 @@ func detectPrincipal(ctx context.Context, cfg *dialerConfig) string {
 // The lock is held only for the map lookup/insert and the (in-memory)
 // recorder construction; nothing under it touches the network.
 func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbEngineType string) tel.MetricRecorder {
+	key := newMetricRecorderKey(inst)
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
-	old, ok := d.metricRecorders[inst]
+	old, ok := d.metricRecorders[key]
 	if ok {
 		if dbEngineType == tel.UnknownValue || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
 			return old
@@ -640,7 +643,7 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 		DatabaseEngineType: dbEngineType,
 	}
 	mr := tel.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
-	d.metricRecorders[inst] = mr
+	d.metricRecorders[key] = mr
 	if ok {
 		// Flush and stop the previous recorder so it does not leak a
 		// goroutine or double-report, off the dial path. Close waits on
@@ -1312,15 +1315,13 @@ func (i *instrumentedConn) report(ctx context.Context) {
 // Close closes the Dialer; it prevents the Dialer from refreshing the information
 // needed to connect.
 func (d *Dialer) Close() error {
-	// Check if Close has already been called.
-	select {
-	case <-d.closed:
+	// Only the first caller proceeds; concurrent and repeated calls return
+	// immediately (the first call may still be flushing).
+	if !d.closing.CompareAndSwap(false, true) {
 		return nil
-	default:
 	}
 	close(d.closed)
 	d.lock.Lock()
-	defer d.lock.Unlock()
 	for _, i := range d.cache {
 		i.Close()
 	}
@@ -1328,27 +1329,36 @@ func (d *Dialer) Close() error {
 		d.logger.Debugf(context.Background(),
 			"failed to close SQL data connection: %v", err)
 	}
+	d.lock.Unlock()
 
 	// Flush and stop the built-in metrics exporters. Without this, metrics
 	// recorded since the last periodic export (up to 60s worth) are lost
 	// when the process exits, which is the common case on Cloud Run.
-	// Recorders are shut down concurrently so that a process with many
-	// instances (e.g. the Auth Proxy) flushes all of them within the budget
-	// rather than running out of time partway through a serial loop.
+	//
+	// The flush does network I/O (bounded by metricShutdownTimeout), so no
+	// Dialer lock is held while it runs: d.lock is needed by connections'
+	// error paths (removeCached) and metricsMu by any Dial that raced
+	// Close. d.closed is already closed, so metricRecorder cannot add to the
+	// map after this snapshot. Recorders are shut down concurrently so that a
+	// process with many instances (e.g. the Auth Proxy) flushes all of them
+	// within the budget rather than running out of time partway through.
 	d.metricsMu.Lock()
-	defer d.metricsMu.Unlock()
+	recorders := d.metricRecorders
+	d.metricRecorders = map[metricRecorderKey]tel.MetricRecorder{}
+	d.metricsMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
 	defer cancel()
 	var wg sync.WaitGroup
-	for inst, mr := range d.metricRecorders {
+	for key, mr := range recorders {
 		wg.Add(1)
-		go func(inst instance.ConnName, mr tel.MetricRecorder) {
+		go func(key metricRecorderKey, mr tel.MetricRecorder) {
 			defer wg.Done()
 			// Best effort: an error here isn't actionable by the caller.
 			if err := mr.Shutdown(ctx); err != nil {
-				d.logger.Debugf(ctx, "[%v] failed to shut down metric recorder: %v", inst.String(), err)
+				d.logger.Debugf(ctx, "[%v] failed to shut down metric recorder: %v", key, err)
 			}
-		}(inst, mr)
+		}(key, mr)
 	}
 	wg.Wait()
 	// Also wait for any replaced recorders still flushing in the background
@@ -1360,6 +1370,24 @@ func (d *Dialer) Close() error {
 		}
 	}
 	return nil
+}
+
+// metricRecorderKey identifies the Cloud SQL instance a metric recorder
+// belongs to. It deliberately excludes the domain name: an instance dialed
+// both by DNS name and by connection name is one monitored resource and must
+// have one recorder, otherwise two cumulative series with identical labels
+// would be written for it and the Monitoring API would reject them as
+// conflicting.
+type metricRecorderKey struct {
+	project, region, name string
+}
+
+func newMetricRecorderKey(cn instance.ConnName) metricRecorderKey {
+	return metricRecorderKey{project: cn.Project(), region: cn.Region(), name: cn.Name()}
+}
+
+func (k metricRecorderKey) String() string {
+	return k.project + ":" + k.region + ":" + k.name
 }
 
 // createKey creates a key for the cache from an instance.ConnName.

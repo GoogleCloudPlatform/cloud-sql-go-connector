@@ -8,7 +8,10 @@ require (
 	cloud.google.com/go/compute/metadata v0.10.0
 	cloud.google.com/go/monitoring v1.31.0
 	cloud.google.com/go/sql v0.3.0
-	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.62.0
+	// Pinned: v0.61.0+ prints a deprecation notice to the standard logger on
+	// first use, which every application would see once metrics are on by
+	// default. Replace with an OTLP or in-house exporter before bumping.
+	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.60.0
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0

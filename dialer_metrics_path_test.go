@@ -110,7 +110,7 @@ func installRecorder(t *testing.T, d *Dialer, icn string, rec tel.MetricRecorder
 		t.Fatal(err)
 	}
 	d.metricsMu.Lock()
-	d.metricRecorders[cn] = rec
+	d.metricRecorders[newMetricRecorderKey(cn)] = rec
 	d.metricsMu.Unlock()
 }
 
@@ -593,4 +593,195 @@ func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+// TestMetricLabelsIgnoreOTelEnvironment verifies that OTEL_SERVICE_NAME /
+// OTEL_RESOURCE_ATTRIBUTES, which the OpenTelemetry SDK merges into every
+// resource and which the exporter would by default copy onto each time
+// series as metric labels, never reach the exported metrics. The descriptors
+// have a fixed label schema and the Monitoring API rejects any other label,
+// which would silently disable metrics in every OTel-instrumented environment.
+func TestMetricLabelsIgnoreOTelEnvironment(t *testing.T) {
+	t.Setenv("OTEL_SERVICE_NAME", "my-app")
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "service.namespace=ns1,service.instance.id=pod-7,deployment.environment=prod")
+	fake, conn := startFakeMetricServer(t)
+	old := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = old })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(true),
+		withMetricClientOptions(option.WithGRPCConn(conn)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cn, _ := instance.ParseConnName("my-project:my-region:my-instance")
+	mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
+	attrs := tel.Attributes{IPType: "public", DialStatus: tel.ConnectSuccess, AttemptStatus: tel.ConnectSuccess}
+	mr.RecordOpenConnection(ctx, attrs)
+	mr.RecordOpenConnectionCount(ctx, attrs)
+	mr.RecordClosedConnectionCount(ctx, attrs)
+	mr.RecordConnectLatencies(ctx, attrs, 5)
+	mr.RecordConnectionDuration(ctx, attrs, 1)
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	allowedMetricLabels := map[string]bool{
+		"instance_auth_type": true, "instance_ip_type": true, "status": true, "connection_part": true,
+	}
+	var seen int
+	for _, req := range fake.requests() {
+		for _, ts := range req.GetTimeSeries() {
+			seen++
+			for k := range ts.GetMetric().GetLabels() {
+				if !allowedMetricLabels[k] {
+					t.Errorf("%s: unexpected metric label %q (from the OTel environment?)", ts.GetMetric().GetType(), k)
+				}
+			}
+			// The monitored resource must still be fully populated.
+			rl := ts.GetResource().GetLabels()
+			for _, k := range []string{"resource_container", "resource_id", "client_uid", "region", "connector_type", "connector_version", "database_engine_type"} {
+				if rl[k] == "" {
+					t.Errorf("%s: resource label %q is empty", ts.GetMetric().GetType(), k)
+				}
+			}
+			if ts.GetResource().GetType() != "cloudsql.googleapis.com/InstanceClient" {
+				t.Errorf("resource type = %q", ts.GetResource().GetType())
+			}
+		}
+	}
+	if seen < 5 {
+		t.Fatalf("expected the 5 metrics to be exported, saw %d time series", seen)
+	}
+}
+
+// TestEnabledMetricsWriteNothingToStandardLogger verifies the quiet contract
+// on the *enabled*, healthy path: creating a Dialer with metrics on,
+// recording, exporting and closing must not write anything to the process's
+// standard logger (which third-party exporters may use for notices).
+func TestEnabledMetricsWriteNothingToStandardLogger(t *testing.T) {
+	var std syncBuffer
+	oldOut, oldFlags := log.Writer(), log.Flags()
+	log.SetOutput(&std)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(oldOut); log.SetFlags(oldFlags) })
+	fake, conn := startFakeMetricServer(t)
+	old := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = old })
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithBuiltInMetrics(true),
+		withMetricClientOptions(option.WithGRPCConn(conn)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cn, _ := instance.ParseConnName("my-project:my-region:my-instance")
+	mr := d.metricRecorder(ctx, cn, tel.EnginePostgreSQL)
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.requests()) == 0 {
+		t.Fatal("expected an export")
+	}
+	if s := std.String(); s != "" {
+		t.Fatalf("enabled metrics wrote to the standard logger: %q", s)
+	}
+}
+
+// TestMetricRecorderKeyIgnoresDomainName verifies that an instance dialed by
+// DNS name and by connection name shares one recorder, i.e. one monitored
+// resource, rather than two conflicting cumulative series.
+func TestMetricRecorderKeyIgnoresDomainName(t *testing.T) {
+	plain, err := instance.ParseConnName("my-project:my-region:my-instance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dns, err := instance.ParseConnNameWithDomainName("my-project:my-region:my-instance", "db.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain == dns {
+		t.Fatal("test setup: ConnNames should differ by domain name")
+	}
+	if newMetricRecorderKey(plain) != newMetricRecorderKey(dns) {
+		t.Fatalf("recorder keys differ: %v vs %v", newMetricRecorderKey(plain), newMetricRecorderKey(dns))
+	}
+	d, err := NewDialer(context.Background(), WithTokenSource(mock.EmptyTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	rec := &countingRecorder{engine: tel.EnginePostgreSQL}
+	installRecorder(t, d, "my-project:my-region:my-instance", rec)
+	if got := d.metricRecorder(context.Background(), dns, tel.EnginePostgreSQL); got != tel.MetricRecorder(rec) {
+		t.Fatal("DNS-named dial did not reuse the connection-name recorder")
+	}
+}
+
+// TestCloseDoesNotHoldDialerLockDuringFlush verifies that the metrics flush
+// in Close (network I/O, up to metricShutdownTimeout) runs without d.lock,
+// which connections' error paths need (removeCached), and without metricsMu,
+// which a racing Dial needs.
+func TestCloseDoesNotHoldDialerLockDuringFlush(t *testing.T) {
+	d, err := NewDialer(context.Background(), WithTokenSource(mock.EmptyTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const delay = 400 * time.Millisecond
+	installRecorder(t, d, "proj:reg:inst", newSlowRecorder(tel.EnginePostgreSQL, delay))
+
+	closeDone := make(chan struct{})
+	go func() { _ = d.Close(); close(closeDone) }()
+	time.Sleep(50 * time.Millisecond) // let Close reach the flush
+
+	locked := make(chan time.Duration, 2)
+	go func() {
+		s := time.Now()
+		d.lock.Lock()
+		d.lock.Unlock()
+		locked <- time.Since(s)
+	}()
+	go func() {
+		s := time.Now()
+		d.metricsMu.Lock()
+		d.metricsMu.Unlock()
+		locked <- time.Since(s)
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case took := <-locked:
+			if took > delay/2 {
+				t.Errorf("a Dialer lock was held for %v during the metrics flush", took)
+			}
+		case <-time.After(2 * delay):
+			t.Fatal("a Dialer lock was not released during the metrics flush")
+		}
+	}
+	<-closeDone
+}
+
+// TestConcurrentCloseIsSafe verifies that Close can be called from several
+// goroutines at once without panicking (closing a closed channel).
+func TestConcurrentCloseIsSafe(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		d, err := NewDialer(context.Background(), WithTokenSource(mock.EmptyTokenSource{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		for j := 0; j < 8; j++ {
+			wg.Add(1)
+			go func() { defer wg.Done(); _ = d.Close() }()
+		}
+		wg.Wait()
+	}
 }

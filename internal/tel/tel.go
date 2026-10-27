@@ -210,6 +210,20 @@ func AuthTypeValue(iamAuthn bool) string {
 	return "built_in"
 }
 
+// metadataTimeout bounds each metadata-server lookup done at Dialer
+// construction. The metadata client has its own per-request timeout and
+// retries, which can add up to many seconds on a cold GKE node; these
+// lookups only feed labels, so they are not worth waiting long for.
+const metadataTimeout = 2 * time.Second
+
+// onGCE is metadata.OnGCE with a bounded wait (the result is cached by the
+// metadata package after the first call).
+func onGCE() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), metadataTimeout)
+	defer cancel()
+	return metadata.OnGCEWithContext(ctx)
+}
+
 // DetectClientRegion returns the client region from GCP metadata if running on GCE/GKE/Cloud Run.
 // Any panic or error fails silently and returns UnknownValue.
 func DetectClientRegion() (region string) {
@@ -219,10 +233,12 @@ func DetectClientRegion() (region string) {
 			region = UnknownValue
 		}
 	}()
-	if !metadata.OnGCE() {
+	ctx, cancel := context.WithTimeout(context.Background(), metadataTimeout)
+	defer cancel()
+	if !metadata.OnGCEWithContext(ctx) {
 		return UnknownValue
 	}
-	zone, err := metadata.Zone()
+	zone, err := metadata.ZoneWithContext(ctx)
 	if err != nil || zone == "" {
 		return UnknownValue
 	}
@@ -263,7 +279,7 @@ func DetectComputePlatform() (platform string) {
 		return PlatformAppEngine
 	case os.Getenv("FUNCTION_NAME") != "":
 		return PlatformCloudFunctions
-	case metadata.OnGCE():
+	case onGCE():
 		return PlatformGCE
 	default:
 		return UnknownValue
@@ -408,6 +424,15 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 			ResourceContainer, ResourceID, ClientUID, ApplicationName, Region, ClientRegion,
 			ComputePlatform, ConnectorType, ConnectorVersion, DatabaseEngineType,
 		}),
+		// The metric descriptors are Google-owned with a fixed label schema;
+		// the API rejects any other label. By default the exporter copies
+		// service.name / service.namespace / service.instance.id resource
+		// attributes onto every time series as metric labels, and the SDK
+		// merges OTEL_SERVICE_NAME / OTEL_RESOURCE_ATTRIBUTES into the
+		// resource, so in any OTel-instrumented environment (OTel operator,
+		// apps already using OTel) every export would fail. Resource
+		// attributes are only for the monitored resource, never labels.
+		cmexporter.WithFilteredResourceAttributes(cmexporter.NoAttributes),
 	}
 	exp, err := cmexporter.New(eopts...)
 	if err != nil {
@@ -434,7 +459,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		disableHint: cfg.DisableHint,
 	}
 
-	res := resource.NewWithAttributes(monitoredResource,
+	res := resource.NewSchemaless(
 		// The gcp.resource_type is a special attribute that the exporter
 		// transforms into the MonitoredResource field.
 		attribute.String("gcp.resource_type", monitoredResource),
