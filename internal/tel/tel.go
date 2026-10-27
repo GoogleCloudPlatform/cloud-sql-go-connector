@@ -43,6 +43,10 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 )
 
+// -------------------------------------------------------------------------
+// Metric and label definitions
+// -------------------------------------------------------------------------
+
 const (
 	meterName             = "cloudsql.googleapis.com/client/connector"
 	monitoredResource     = "cloudsql.googleapis.com/InstanceClient"
@@ -319,6 +323,10 @@ func ClassifyDialError(err error) (string, string) {
 	return UnknownValue, "unknown_error"
 }
 
+// -------------------------------------------------------------------------
+// MetricRecorder: the per-instance recorder
+// -------------------------------------------------------------------------
+
 // MetricRecorder defines the interface for recording metrics related to the
 // internal operations of cloudsqlconn.Dialer.
 type MetricRecorder interface {
@@ -525,6 +533,80 @@ func (m *metricRecorder) DatabaseEngine() string {
 	return m.dbEngineType
 }
 
+// RecordOpenConnection records current number of open connections.
+func (m *metricRecorder) RecordOpenConnection(ctx context.Context, a Attributes) {
+	defer m.recoverPanic(ctx, "RecordOpenConnection")
+	m.mOpenConns.Add(ctx, 1,
+		metric.WithAttributeSet(attribute.NewSet(
+			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
+		)))
+}
+
+// RecordClosedConnection decreases current number of open connections.
+func (m *metricRecorder) RecordClosedConnection(ctx context.Context, a Attributes) {
+	defer m.recoverPanic(ctx, "RecordClosedConnection")
+	m.mOpenConns.Add(ctx, -1,
+		metric.WithAttributeSet(attribute.NewSet(
+			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
+		)))
+}
+
+// RecordOpenConnectionCount records connection attempts and error classifications.
+func (m *metricRecorder) RecordOpenConnectionCount(ctx context.Context, a Attributes) {
+	defer m.recoverPanic(ctx, "RecordOpenConnectionCount")
+	m.mOpenConnectionCount.Add(ctx, 1,
+		metric.WithAttributeSet(attribute.NewSet(
+			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
+			attribute.String(connectionPart, a.ConnectionPart),
+			attribute.String(status, a.AttemptStatus),
+		)),
+	)
+}
+
+// RecordClosedConnectionCount records totals number of closed connections.
+func (m *metricRecorder) RecordClosedConnectionCount(ctx context.Context, a Attributes) {
+	defer m.recoverPanic(ctx, "RecordClosedConnectionCount")
+	m.mClosedConnectionCount.Add(ctx, 1,
+		metric.WithAttributeSet(attribute.NewSet(
+			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
+			attribute.String(status, a.DialStatus)),
+		))
+}
+
+// RecordConnectLatencies records dial latencies.
+func (m *metricRecorder) RecordConnectLatencies(ctx context.Context, a Attributes, latencyMS int64) {
+	defer m.recoverPanic(ctx, "RecordConnectLatencies")
+	m.mConnectLatency.Record(ctx, float64(latencyMS),
+		metric.WithAttributeSet(attribute.NewSet(
+			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
+		)),
+	)
+}
+
+// RecordConnectionDuration records established connection duration in seconds.
+func (m *metricRecorder) RecordConnectionDuration(ctx context.Context, a Attributes, durationSec float64) {
+	defer m.recoverPanic(ctx, "RecordConnectionDuration")
+	m.mConnectionDuration.Record(ctx, durationSec,
+		metric.WithAttributeSet(attribute.NewSet(
+			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
+			attribute.String(ipType, IPTypeValue(a.IPType)),
+		)),
+	)
+}
+
+// Shutdown flushes buffered metrics and stops the periodic export. Shutting
+// down the provider is sufficient: the provider shuts down its reader, and
+// the reader performs a final export. The shared MetricClient is not closed
+// here (see sharedClientExporter); the Dialer owns and closes it.
+func (m *metricRecorder) Shutdown(ctx context.Context) error {
+	return m.provider.Shutdown(ctx)
+}
+
 // RecoveredPanics counts panics recovered on the metrics record path across
 // the process. It is exported for tests and diagnostics; a non-zero value
 // indicates a bug in the metrics pipeline that should be reported.
@@ -556,13 +638,9 @@ func (m *metricRecorder) recoverPanic(ctx context.Context, op string) {
 	})
 }
 
-// Shutdown flushes buffered metrics and stops the periodic export. Shutting
-// down the provider is sufficient: the provider shuts down its reader, and
-// the reader performs a final export. The shared MetricClient is not closed
-// here (see sharedClientExporter); the Dialer owns and closes it.
-func (m *metricRecorder) Shutdown(ctx context.Context) error {
-	return m.provider.Shutdown(ctx)
-}
+// -------------------------------------------------------------------------
+// Export pipeline: fail-open, quiet, backed-off exporter
+// -------------------------------------------------------------------------
 
 // Backoff applied after a failed export. Export is suspended after a failure
 // and the suspension doubles on each consecutive failure up to a cap; a
@@ -674,6 +752,14 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 		e.backoff = 0
 		return nil
 	}
+	if isCanceledExport(err) {
+		// The export was interrupted, not refused: the periodic reader
+		// cancels an in-flight export when it is shut down, and a caller
+		// may pass an already-canceled context to Shutdown. Neither says
+		// anything about the Monitoring API, so do not log it as a failure
+		// and leave the backoff schedule and deduplication state alone.
+		return nil
+	}
 	if isWriteTooFrequentError(err) {
 		// Not a failure of the pipeline: the Monitoring API enforces a
 		// minimum interval between points on a series (half the metric's
@@ -720,20 +806,8 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 	return nil
 }
 
-// nextBackoff returns the suspension to apply after a failure given the
-// previous suspension: the initial backoff first, then doubling, capped.
-func nextBackoff(prev, initial, maxBackoff time.Duration) time.Duration {
-	if prev <= 0 {
-		return min(initial, maxBackoff)
-	}
-	return min(2*prev, maxBackoff)
-}
-
-// jitter returns d adjusted by a random factor in [1-backoffJitter, 1+backoffJitter].
-func jitter(d time.Duration) time.Duration {
-	f := 1 + backoffJitter*(2*rand.Float64()-1)
-	return time.Duration(float64(d) * f)
-}
+// Shutdown is a no-op that leaves the shared MetricClient open.
+func (*sharedClientExporter) Shutdown(context.Context) error { return nil }
 
 // remediationHint explains how to fix a permanent export error and how to
 // turn built-in metrics off, naming the principal and project when known.
@@ -782,8 +856,14 @@ func isInsufficientScopeError(err error) bool {
 	return strings.Contains(strings.ToLower(st.Message()), "insufficient authentication scopes")
 }
 
-// Shutdown is a no-op that leaves the shared MetricClient open.
-func (*sharedClientExporter) Shutdown(context.Context) error { return nil }
+// isCanceledExport reports whether err means the export was canceled by its
+// own context (context.Canceled, or gRPC Canceled), as happens to an
+// in-flight export when the reader shuts down. Deadline errors are not
+// included: a Monitoring API call that times out is a real transient failure
+// and must back off like any other.
+func isCanceledExport(err error) bool {
+	return errors.Is(err, context.Canceled) || grpcstatus.Code(err) == codes.Canceled
+}
 
 // isPermanentExportError reports whether err indicates a configuration
 // problem that retrying every export interval will not fix. Per the
@@ -823,71 +903,24 @@ func isWriteTooFrequentError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "written more frequently than the maximum sampling period")
 }
 
-// RecordClosedConnectionCount records totals number of closed connections.
-func (m *metricRecorder) RecordClosedConnectionCount(ctx context.Context, a Attributes) {
-	defer m.recoverPanic(ctx, "RecordClosedConnectionCount")
-	m.mClosedConnectionCount.Add(ctx, 1,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, IPTypeValue(a.IPType)),
-			attribute.String(status, a.DialStatus)),
-		))
+// nextBackoff returns the suspension to apply after a failure given the
+// previous suspension: the initial backoff first, then doubling, capped.
+func nextBackoff(prev, initial, maxBackoff time.Duration) time.Duration {
+	if prev <= 0 {
+		return min(initial, maxBackoff)
+	}
+	return min(2*prev, maxBackoff)
 }
 
-// RecordOpenConnection records current number of open connections.
-func (m *metricRecorder) RecordOpenConnection(ctx context.Context, a Attributes) {
-	defer m.recoverPanic(ctx, "RecordOpenConnection")
-	m.mOpenConns.Add(ctx, 1,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, IPTypeValue(a.IPType)),
-		)))
+// jitter returns d adjusted by a random factor in [1-backoffJitter, 1+backoffJitter].
+func jitter(d time.Duration) time.Duration {
+	f := 1 + backoffJitter*(2*rand.Float64()-1)
+	return time.Duration(float64(d) * f)
 }
 
-// RecordClosedConnection decreases current number of open connections.
-func (m *metricRecorder) RecordClosedConnection(ctx context.Context, a Attributes) {
-	defer m.recoverPanic(ctx, "RecordClosedConnection")
-	m.mOpenConns.Add(ctx, -1,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, IPTypeValue(a.IPType)),
-		)))
-}
-
-// RecordConnectLatencies records dial latencies.
-func (m *metricRecorder) RecordConnectLatencies(ctx context.Context, a Attributes, latencyMS int64) {
-	defer m.recoverPanic(ctx, "RecordConnectLatencies")
-	m.mConnectLatency.Record(ctx, float64(latencyMS),
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, IPTypeValue(a.IPType)),
-		)),
-	)
-}
-
-// RecordConnectionDuration records established connection duration in seconds.
-func (m *metricRecorder) RecordConnectionDuration(ctx context.Context, a Attributes, durationSec float64) {
-	defer m.recoverPanic(ctx, "RecordConnectionDuration")
-	m.mConnectionDuration.Record(ctx, durationSec,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, IPTypeValue(a.IPType)),
-		)),
-	)
-}
-
-// RecordOpenConnectionCount records connection attempts and error classifications.
-func (m *metricRecorder) RecordOpenConnectionCount(ctx context.Context, a Attributes) {
-	defer m.recoverPanic(ctx, "RecordOpenConnectionCount")
-	m.mOpenConnectionCount.Add(ctx, 1,
-		metric.WithAttributeSet(attribute.NewSet(
-			attribute.String(authType, AuthTypeValue(a.IAMAuthN)),
-			attribute.String(ipType, IPTypeValue(a.IPType)),
-			attribute.String(connectionPart, a.ConnectionPart),
-			attribute.String(status, a.AttemptStatus),
-		)),
-	)
-}
+// -------------------------------------------------------------------------
+// NullMetricRecorder: no-op recorder used when metrics are off
+// -------------------------------------------------------------------------
 
 // NullMetricRecorder implements the MetricRecorder interface with no-ops. It
 // is useful for disabling the built-in metrics.
