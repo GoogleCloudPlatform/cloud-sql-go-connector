@@ -27,12 +27,12 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/auth"
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
-	"golang.org/x/oauth2"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
@@ -50,6 +50,14 @@ import (
 //     credentials), the application is unaffected: dials succeed, dial
 //     latency is unchanged, Close returns promptly, and the only output is
 //     the single standard-logger warning.
+
+// staticTokenProvider is an auth.TokenProvider that always returns the same
+// (here: deliberately invalid) access token.
+type staticTokenProvider string
+
+func (s staticTokenProvider) Token(context.Context) (*auth.Token, error) {
+	return &auth.Token{Value: string(s), Type: "Bearer"}, nil
+}
 
 // e2eLogger captures debug log lines.
 type e2eLogger struct {
@@ -378,7 +386,13 @@ func TestMetricsE2EFailOpenBadCredentials(t *testing.T) {
 		cloudsqlconn.WithBuiltInMetrics(true),
 		cloudsqlconn.WithContextDebugLogger(logger),
 		cloudsqlconn.WithMetricClientOptionsForTest(
-			option.WithTokenSource(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "not-a-valid-token"})),
+			// The Dialer configures the metric client with
+			// option.WithAuthCredentials, which takes precedence over
+			// option.WithTokenSource, so the bad token must be injected the
+			// same way to actually replace the Dialer's credentials.
+			option.WithAuthCredentials(auth.NewCredentials(&auth.CredentialsOptions{
+				TokenProvider: staticTokenProvider("not-a-valid-token"),
+			})),
 			option.WithGRPCDialOption(grpc.WithUnaryInterceptor(count)),
 		),
 	)

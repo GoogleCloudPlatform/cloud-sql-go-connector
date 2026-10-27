@@ -190,6 +190,12 @@ func connect() {
         "cloudsql-postgres",
         "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable",
     )
+    if err != nil {
+        // ... handle error
+    }
+    // close the pool before cleanup() so that connection-close metrics are
+    // recorded by the Dialer before it shuts down
+    defer db.Close()
     // ... etc
 }
 ```

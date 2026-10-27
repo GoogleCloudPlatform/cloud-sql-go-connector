@@ -181,6 +181,20 @@ func ConnectorTypeValue(userAgent string) string {
 	return ConnectorTypeGo
 }
 
+// ConnectorVersionValue returns the connector_version label: the version of
+// the product the user runs. For the Auth Proxy that is the proxy's own
+// version, taken from its "cloud-sql-proxy/<version>" user-agent token, so
+// that a proxy fleet can be broken down by proxy release; otherwise it is the
+// Go connector's version.
+func ConnectorVersionValue(userAgent, connectorVersion string) string {
+	for _, tok := range strings.Fields(userAgent) {
+		if v, ok := strings.CutPrefix(tok, "cloud-sql-proxy/"); ok && v != "" {
+			return v
+		}
+	}
+	return connectorVersion
+}
+
 // IPTypeValue maps a dial connection type (e.g. cloudsql.PublicIP) to the
 // instance_ip_type label value.
 func IPTypeValue(connectionType string) string {
@@ -849,16 +863,46 @@ func (e *sharedClientExporter) remediationHint(err error) string {
 		who = "principal " + e.principal
 	}
 	var hint string
-	if isInsufficientScopeError(err) {
+	switch {
+	case isInsufficientScopeError(err):
 		hint = "To fix, include the " + MonitoringWriteScope + " (or cloud-platform) scope in the " +
 			"token source or credentials passed to the connector, for " + who + "."
-	} else {
+	case isServiceDisabledError(err):
+		hint = "To fix, enable the Cloud Monitoring API (monitoring.googleapis.com) on project " + e.project + "."
+	case isUniverseDomainError(err):
+		hint = "To fix, make sure the credentials passed to the connector belong to the same universe domain " +
+			"as the Dialer (see WithUniverseDomain)."
+	default:
 		hint = "To fix, grant roles/monitoring.metricWriter on project " + e.project + " to " + who + "."
 	}
 	if e.disableHint != "" {
 		hint += " To turn built-in metrics off, " + e.disableHint + "."
 	}
 	return hint
+}
+
+// isServiceDisabledError reports whether err is the Monitoring API being
+// disabled on the target project (PermissionDenied with ErrorInfo reason
+// SERVICE_DISABLED), for which an IAM grant is not the fix.
+func isServiceDisabledError(err error) bool {
+	st, ok := grpcstatus.FromError(err)
+	if !ok {
+		return false
+	}
+	for _, d := range st.Details() {
+		if info, ok := d.(*errdetails.ErrorInfo); ok && info.GetReason() == "SERVICE_DISABLED" {
+			return true
+		}
+	}
+	return strings.Contains(st.Message(), "SERVICE_DISABLED") ||
+		strings.Contains(st.Message(), "Cloud Monitoring API has not been used")
+}
+
+// isUniverseDomainError reports whether err is the client library refusing a
+// request because the credentials' universe domain does not match the
+// client's (reported as Unauthenticated before any RPC is made).
+func isUniverseDomainError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "universe domain")
 }
 
 // MonitoringWriteScope is the OAuth scope the metric export needs.

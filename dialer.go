@@ -50,7 +50,6 @@ import (
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
 
-	"cloud.google.com/go/auth/oauth2adapt"
 	tel "cloud.google.com/go/cloudsqlconn/internal/tel"
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
@@ -500,20 +499,19 @@ func newMetricClient(ctx context.Context, cfg *dialerConfig, apiTP auth.TokenPro
 	if cfg.quotaProject != "" {
 		opts = append(opts, option.WithQuotaProject(cfg.quotaProject))
 	}
-	tp, err := metricTokenProvider(cfg, apiTP)
+	creds, err := metricCredentials(cfg, apiTP)
 	if err != nil {
 		return nil, err
 	}
-	if tp != nil {
-		opts = append(opts, option.WithTokenSource(oauth2adapt.TokenSourceFromTokenProvider(tp)))
+	if creds != nil {
+		opts = append(opts, option.WithAuthCredentials(creds))
 	}
 	// Caller-provided client options go last so they take precedence.
 	opts = append(opts, cfg.clientOpts...)
 	return monitoring.NewMetricClient(ctx, opts...)
 }
 
-// metricTokenProvider returns the token provider for the built-in metrics
-// export.
+// metricCredentials returns the credentials for the built-in metrics export.
 //
 // When the Dialer detected credentials itself (Application Default
 // Credentials, WithCredentialsFile, or WithCredentialsJSON), the credentials
@@ -523,18 +521,34 @@ func newMetricClient(ctx context.Context, cfg *dialerConfig, apiTP auth.TokenPro
 //
 // When the caller supplied a token source or credentials directly, that
 // token provider is used as-is because its scopes cannot be changed.
-func metricTokenProvider(cfg *dialerConfig, apiTP auth.TokenProvider) (auth.TokenProvider, error) {
+//
+// In both cases the credentials carry the Dialer's configured universe
+// domain: the Monitoring client validates that the credentials' universe
+// matches the client's, and credentials without one default to
+// googleapis.com, which would fail that check for every export in a
+// non-default universe.
+func metricCredentials(cfg *dialerConfig, apiTP auth.TokenProvider) (*auth.Credentials, error) {
+	ud := cfg.getClientUniverseDomain()
 	if !cfg.setCredentials || cfg.credentialsJSON != nil {
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{monitoringWriteScope},
 			CredentialsJSON: cfg.credentialsJSON,
+			UniverseDomain:  ud,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create credentials for built-in metrics: %w", err)
 		}
-		return c.TokenProvider, nil
+		return c, nil
 	}
-	return apiTP, nil
+	if apiTP == nil {
+		return nil, nil
+	}
+	return auth.NewCredentials(&auth.CredentialsOptions{
+		TokenProvider: apiTP,
+		UniverseDomainProvider: auth.CredentialsPropertyFunc(func(context.Context) (string, error) {
+			return ud, nil
+		}),
+	}), nil
 }
 
 // authProxyMetricsFlag is the Cloud SQL Auth Proxy flag that controls
@@ -639,7 +653,7 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 		ConnectorType:      tel.ConnectorTypeValue(d.userAgent),
 		Principal:          d.metricsPrincipal,
 		DisableHint:        metricsDisableHint(tel.ConnectorTypeValue(d.userAgent)),
-		ConnectorVersion:   strings.TrimSpace(versionString),
+		ConnectorVersion:   tel.ConnectorVersionValue(d.userAgent, strings.TrimSpace(versionString)),
 		DatabaseEngineType: dbEngineType,
 	}
 	mr := tel.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
