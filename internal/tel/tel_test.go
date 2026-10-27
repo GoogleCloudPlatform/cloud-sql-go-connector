@@ -1245,3 +1245,43 @@ func TestFinalFlushWithinMinWriteIntervalIsQuiet(t *testing.T) {
 	}
 	_ = mr.Shutdown(ctx)
 }
+
+// TestCanceledExportIsNotAFailure pins that an export interrupted by context
+// cancellation (what an in-flight export sees when the reader shuts down) is
+// neither logged nor counted against the backoff schedule. Before this, a
+// shutdown racing a periodic export produced a second, differently-worded
+// debug line and made TestTransientExportFailuresBackOffAndAreDeduplicated
+// flaky.
+func TestCanceledExportIsNotAFailure(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
+	logger := &recordingLogger{}
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	mock.setFailure(codes.Canceled)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, logger, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "p", ResourceID: "p:i", Region: "r",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	_ = mr.Shutdown(ctx) // forces one export, which the server answers with Canceled
+
+	if got := mock.requestCount(); got != 1 {
+		t.Fatalf("want 1 export attempt, got %d", got)
+	}
+	if lines := logger.snapshot(); len(lines) != 0 {
+		t.Fatalf("a canceled export must not be logged, got %q", lines)
+	}
+	if w := warnBuf.String(); w != "" {
+		t.Fatalf("a canceled export must not reach the standard logger, got %q", w)
+	}
+}

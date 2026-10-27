@@ -752,6 +752,14 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 		e.backoff = 0
 		return nil
 	}
+	if isCanceledExport(err) {
+		// The export was interrupted, not refused: the periodic reader
+		// cancels an in-flight export when it is shut down, and a caller
+		// may pass an already-canceled context to Shutdown. Neither says
+		// anything about the Monitoring API, so do not log it as a failure
+		// and leave the backoff schedule and deduplication state alone.
+		return nil
+	}
 	if isWriteTooFrequentError(err) {
 		// Not a failure of the pipeline: the Monitoring API enforces a
 		// minimum interval between points on a series (half the metric's
@@ -846,6 +854,15 @@ func isInsufficientScopeError(err error) bool {
 		}
 	}
 	return strings.Contains(strings.ToLower(st.Message()), "insufficient authentication scopes")
+}
+
+// isCanceledExport reports whether err means the export was canceled by its
+// own context (context.Canceled, or gRPC Canceled), as happens to an
+// in-flight export when the reader shuts down. Deadline errors are not
+// included: a Monitoring API call that times out is a real transient failure
+// and must back off like any other.
+func isCanceledExport(err error) bool {
+	return errors.Is(err, context.Canceled) || grpcstatus.Code(err) == codes.Canceled
 }
 
 // isPermanentExportError reports whether err indicates a configuration
