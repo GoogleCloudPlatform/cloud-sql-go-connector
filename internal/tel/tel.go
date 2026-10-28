@@ -872,7 +872,10 @@ func (e *sharedClientExporter) remediationHint(err error) string {
 		hint = "To fix, include the " + MonitoringWriteScope + " (or cloud-platform) scope in the " +
 			"token source or credentials passed to the connector, for " + who + "."
 	case isServiceDisabledError(err):
-		hint = "To fix, enable the Cloud Monitoring API (monitoring.googleapis.com) on project " + e.project + "."
+		// The API must be enabled on the project the call is billed to (the
+		// caller's project or the quota project), which the error names; it
+		// is not necessarily the instance's project.
+		hint = "To fix, enable the Cloud Monitoring API (monitoring.googleapis.com) on project " + serviceDisabledProject(err, e.project) + "."
 	case isUniverseDomainError(err):
 		hint = "To fix, make sure the credentials passed to the connector belong to the same universe domain " +
 			"as the Dialer (see WithUniverseDomain)."
@@ -900,6 +903,29 @@ func isServiceDisabledError(err error) bool {
 	}
 	return strings.Contains(st.Message(), "SERVICE_DISABLED") ||
 		strings.Contains(st.Message(), "Cloud Monitoring API has not been used")
+}
+
+// serviceDisabledProject returns the project the Monitoring API reports as
+// having the service disabled (the consumer the call was billed to), or
+// fallback when the error does not carry it.
+func serviceDisabledProject(err error, fallback string) string {
+	st, ok := grpcstatus.FromError(err)
+	if !ok {
+		return fallback
+	}
+	for _, d := range st.Details() {
+		info, ok := d.(*errdetails.ErrorInfo)
+		if !ok || info.GetReason() != "SERVICE_DISABLED" {
+			continue
+		}
+		if p := info.GetMetadata()["containerInfo"]; p != "" {
+			return p
+		}
+		if c := strings.TrimPrefix(info.GetMetadata()["consumer"], "projects/"); c != "" {
+			return c
+		}
+	}
+	return fallback
 }
 
 // isUniverseDomainError reports whether err is the client library refusing a

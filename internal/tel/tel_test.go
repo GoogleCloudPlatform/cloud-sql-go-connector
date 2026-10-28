@@ -1297,14 +1297,16 @@ func TestRemediationHintMatchesCause(t *testing.T) {
 
 	serviceDisabled, _ := grpcstatus.New(codes.PermissionDenied,
 		"Cloud Monitoring API has not been used in project 64201112091 before or it is disabled.").
-		WithDetails(&errdetails.ErrorInfo{Reason: "SERVICE_DISABLED", Domain: "googleapis.com"})
+		WithDetails(&errdetails.ErrorInfo{Reason: "SERVICE_DISABLED", Domain: "googleapis.com",
+			Metadata: map[string]string{"consumer": "projects/64201112091", "containerInfo": "64201112091", "service": "monitoring.googleapis.com"}})
 	tcs := []struct {
 		desc        string
 		st          *grpcstatus.Status
 		wantSubstr  string
 		notContains string
 	}{
-		{"service disabled", serviceDisabled, "enable the Cloud Monitoring API (monitoring.googleapis.com)", "grant roles/monitoring.metricWriter"},
+		// The billed project (from ErrorInfo) is named, not the instance project ("proj").
+		{"service disabled", serviceDisabled, "enable the Cloud Monitoring API (monitoring.googleapis.com) on project 64201112091", "on project proj"},
 		{"universe mismatch", grpcstatus.New(codes.Unauthenticated, "credentials: universe domain mismatch: client example.universe, credentials googleapis.com"), "same universe domain", "grant roles/monitoring.metricWriter"},
 		{"missing role", grpcstatus.New(codes.PermissionDenied, "Permission monitoring.timeSeries.create denied"), "grant roles/monitoring.metricWriter", "enable the Cloud Monitoring API"},
 	}

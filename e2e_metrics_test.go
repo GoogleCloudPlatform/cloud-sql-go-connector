@@ -210,7 +210,13 @@ func TestMetricsE2EExport(t *testing.T) {
 		if billing == "" {
 			billing = "<the service account's home project>"
 		}
-		t.Skipf("metrics export failed from the e2e identity; grant Monitoring roles on project %s and re-run:\n"+
+		// In CI the identity is expected to be fully set up; a failure there
+		// is a regression, not a local-environment gap.
+		report := t.Skipf
+		if os.Getenv("CI") == "true" {
+			report = t.Fatalf
+		}
+		report("metrics export failed from the e2e identity; grant Monitoring roles on project %s and re-run:\n"+
 			"  gcloud projects add-iam-policy-binding %s --member=serviceAccount:%s --role=roles/monitoring.metricWriter\n"+
 			"  gcloud projects add-iam-policy-binding %s --member=serviceAccount:%s --role=roles/monitoring.viewer\n"+
 			"and make sure the Cloud Monitoring API is enabled on the project the call is billed to (%s), with\n"+

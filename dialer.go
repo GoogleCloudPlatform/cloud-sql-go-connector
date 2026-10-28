@@ -528,12 +528,17 @@ func newMetricClient(ctx context.Context, cfg *dialerConfig, apiTP auth.TokenPro
 // googleapis.com, which would fail that check for every export in a
 // non-default universe.
 func metricCredentials(cfg *dialerConfig, apiTP auth.TokenProvider) (*auth.Credentials, error) {
-	ud := cfg.getClientUniverseDomain()
 	if !cfg.setCredentials || cfg.credentialsJSON != nil {
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{monitoringWriteScope},
 			CredentialsJSON: cfg.credentialsJSON,
-			UniverseDomain:  ud,
+			// Only an explicit WithUniverseDomain is passed through. The
+			// option overrides the universe_domain found in the credential
+			// file, so passing the googleapis.com default here would strip a
+			// TPC credential of its universe and send its tokens to the
+			// default universe's endpoint. Left empty, the file's value (or
+			// googleapis.com) is used, as for the Admin API credentials.
+			UniverseDomain: cfg.clientUniverseDomain,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create credentials for built-in metrics: %w", err)
@@ -543,6 +548,7 @@ func metricCredentials(cfg *dialerConfig, apiTP auth.TokenProvider) (*auth.Crede
 	if apiTP == nil {
 		return nil, nil
 	}
+	ud := cfg.getClientUniverseDomain()
 	return auth.NewCredentials(&auth.CredentialsOptions{
 		TokenProvider: apiTP,
 		UniverseDomainProvider: auth.CredentialsPropertyFunc(func(context.Context) (string, error) {
