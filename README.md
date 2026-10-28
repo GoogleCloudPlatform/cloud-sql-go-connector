@@ -515,6 +515,11 @@ d, err := cloudsqlconn.NewDialer(ctx,
 )
 ```
 
+`application_name` identifies your application and groups its metrics across
+all of its instances. It is only ever the value you set here and is left empty
+otherwise; the connector does not infer it from the environment (instances are
+already told apart by `client_uid`, and `compute_platform` is auto-detected).
+
 `WithComputePlatform` accepts only the `ComputePlatform*` constants. To take
 the platform from a string such as a flag value, use
 `cloudsqlconn.ParseComputePlatform(s)`; `cloudsqlconn.ComputePlatforms()` lists

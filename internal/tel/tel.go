@@ -64,7 +64,7 @@ const (
 	ResourceID = "resource_id"
 	// ClientUID is a unique identifier generated for each Dialer instance.
 	ClientUID = "client_uid"
-	// ApplicationName is the application name provided by the user or defaulted by the connector.
+	// ApplicationName is the application name provided by the user; empty when not set.
 	ApplicationName = "application_name"
 	// Region is the Cloud SQL Instance's location e.g. us-central1.
 	Region = "region"

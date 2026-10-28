@@ -2103,7 +2103,7 @@ func TestDialerPropagatesMetricResourceFields(t *testing.T) {
 		{
 			desc:     "defaults",
 			opts:     nil,
-			wantApp:  "unknown",
+			wantApp:  "",
 			wantUA:   userAgent,
 			wantType: tel.ConnectorTypeGo,
 		},
