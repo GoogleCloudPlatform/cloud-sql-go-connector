@@ -65,7 +65,12 @@ type dialerConfig struct {
 	iamLoginTokenProvider auth.TokenProvider
 	apiTokenProvider      auth.TokenProvider
 	useragents            []string
-	// TODO: Update to applicationID, which uses GCE VM Name, GKE Pod Name.
+	// applicationName is the application_name metric label. It is
+	// user-declared via WithApplicationName and left empty otherwise; it is
+	// deliberately never inferred from the environment (VM name, pod name,
+	// service name): compute_platform and client_uid already describe where
+	// and on which instance the connector runs, and inferred values would be
+	// inconsistent across platforms.
 	applicationName string
 	// computePlatform, when set, overrides the auto-detected compute_platform
 	// metric label. It is validated by WithComputePlatform.
@@ -166,8 +171,15 @@ func WithUserAgent(ua string) Option {
 	}
 }
 
-// WithApplicationName returns an Option that sets the Application Name.
-// This is used to identify the application in metrics.
+// WithApplicationName returns an Option that sets the application_name label
+// of the built-in metrics, which identifies the application and groups its
+// metrics across all of its instances (for example "checkout-api").
+//
+// The label is only ever what the application declares here; when it is not
+// set it is left empty. The connector does not infer a value from the
+// environment: compute_platform already says where the connector runs and
+// client_uid already tells instances apart, and a per-instance name (VM or
+// pod) would split a service's metrics into one series per instance.
 func WithApplicationName(name string) Option {
 	return func(d *dialerConfig) {
 		d.applicationName = name

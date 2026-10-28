@@ -292,7 +292,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		sqlDataEndpoint:                 "sqladmin.googleapis.com:443",
 		sqlDataStreamTimeout:            2 * time.Hour,
 		resourceExhaustedCooldownPeriod: 5 * time.Second,
-		applicationName:                 "unknown",
+		applicationName:                 "", // user-declared only; see WithApplicationName
 		enableBuiltInMetrics:            builtInMetricsDefault,
 	}
 	for _, opt := range opts {

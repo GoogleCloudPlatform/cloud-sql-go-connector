@@ -785,3 +785,41 @@ func TestConcurrentCloseIsSafe(t *testing.T) {
 		wg.Wait()
 	}
 }
+
+// TestApplicationNameDefault pins that application_name is user-declared:
+// an explicit WithApplicationName is used verbatim and nothing is inferred
+// from the environment otherwise (the label is left empty). Platform- or
+// instance-derived values must not leak in: compute_platform and client_uid
+// already answer "where" and "which instance".
+func TestApplicationNameDefault(t *testing.T) {
+	tcs := []struct {
+		desc string
+		env  map[string]string
+		opts []Option
+		want string
+	}{
+		{desc: "nothing set", want: ""},
+		{desc: "explicit option", opts: []Option{WithApplicationName("my-app")}, want: "my-app"},
+		{desc: "explicit option wins over the environment", env: map[string]string{"K_SERVICE": "svc"}, opts: []Option{WithApplicationName("my-app")}, want: "my-app"},
+		{desc: "Cloud Run / App Engine service is not inferred", env: map[string]string{"K_SERVICE": "svc", "GAE_SERVICE": "gae"}, want: ""},
+		{desc: "HOSTNAME / pod name is not inferred", env: map[string]string{"HOSTNAME": "checkout-7d9f8-abcde"}, want: ""},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			for _, k := range []string{"K_SERVICE", "GAE_SERVICE", "HOSTNAME"} {
+				t.Setenv(k, "")
+			}
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			d, err := NewDialer(context.Background(), append([]Option{WithTokenSource(mock.EmptyTokenSource{})}, tc.opts...)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = d.Close() }()
+			if d.applicationName != tc.want {
+				t.Fatalf("applicationName = %q, want %q", d.applicationName, tc.want)
+			}
+		})
+	}
+}
