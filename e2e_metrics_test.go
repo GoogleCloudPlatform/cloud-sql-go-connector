@@ -199,8 +199,14 @@ func TestMetricsE2EExport(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// If the identity cannot write metrics, say exactly what to grant and
-	// skip rather than fail: the rest of the e2e suite is still valid.
+	// If the identity cannot write or read metrics, say exactly what to grant
+	// and skip rather than fail: the rest of the e2e suite is still valid.
+	// In CI the identity is expected to be fully set up; a failure there is a
+	// regression, not a local-environment gap.
+	report := t.Skipf
+	if os.Getenv("CI") == "true" {
+		report = t.Fatalf
+	}
 	if failed := logger.find("built-in metrics export failed"); len(failed) > 0 {
 		principal := "<the e2e service account>"
 		if p := cloudsqlconn.DetectPrincipalForTest(ctx); p != "" {
@@ -209,12 +215,6 @@ func TestMetricsE2EExport(t *testing.T) {
 		billing := quotaProject
 		if billing == "" {
 			billing = "<the service account's home project>"
-		}
-		// In CI the identity is expected to be fully set up; a failure there
-		// is a regression, not a local-environment gap.
-		report := t.Skipf
-		if os.Getenv("CI") == "true" {
-			report = t.Fatalf
 		}
 		report("metrics export failed from the e2e identity; grant Monitoring roles on project %s and re-run:\n"+
 			"  gcloud projects add-iam-policy-binding %s --member=serviceAccount:%s --role=roles/monitoring.metricWriter\n"+
@@ -227,12 +227,12 @@ func TestMetricsE2EExport(t *testing.T) {
 		t.Fatalf("unexpected standard-logger output during a healthy export: %q", w)
 	}
 
-	// Poll Cloud Monitoring for this process's client_uid.
-	var mcOpts []option.ClientOption
-	if quotaProject != "" {
-		mcOpts = append(mcOpts, option.WithQuotaProject(quotaProject))
-	}
-	mc, err := monitoring.NewMetricClient(ctx, mcOpts...)
+	// Poll Cloud Monitoring for this process's client_uid. Unlike the write,
+	// timeSeries.list requires billing on the project it is billed to, and
+	// the e2e quota project has none; bill the read-back to the instance's
+	// project instead (the identity needs roles/monitoring.viewer and
+	// roles/serviceusage.serviceUsageConsumer there).
+	mc, err := monitoring.NewMetricClient(ctx, option.WithQuotaProject(cn.Project()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,8 @@ func TestMetricsE2EExport(t *testing.T) {
 			ts, err := listOne(name)
 			if err != nil {
 				if status.Code(err) == codes.PermissionDenied {
-					t.Skipf("identity cannot read metrics (grant roles/monitoring.viewer on %s): %v", cn.Project(), err)
+					report("identity cannot read metrics (grant roles/monitoring.viewer and "+
+						"roles/serviceusage.serviceUsageConsumer on %s): %v", cn.Project(), err)
 				}
 				t.Fatalf("ListTimeSeries(%s): %v", name, err)
 			}
