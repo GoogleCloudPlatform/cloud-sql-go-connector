@@ -180,10 +180,25 @@ func TestMetricsE2EExport(t *testing.T) {
 	if quotaProject != "" {
 		opts = append(opts, cloudsqlconn.WithQuotaProject(quotaProject))
 	}
+	// Export on the periodic path, which the SDK gives a 30 s export
+	// timeout, and keep the Dialer open until the data is visible in Cloud
+	// Monitoring. Relying on the final flush in Close is not robust: that
+	// flush is bounded by cloudsqlconn.MetricShutdownTimeoutForTest, and the
+	// first export from a cold identity has to mint a token first (on a CI
+	// runner that is GitHub OIDC -> STS -> IAM), which has been seen to take
+	// longer than the bound. Exports after the first land inside the
+	// Monitoring API's minimum write interval and are dropped, which the
+	// connector treats as benign (debug-only).
+	prevInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = 5 * time.Second
+	t.Cleanup(func() { tel.DefaultExportInterval = prevInterval })
+
 	d, err := cloudsqlconn.NewDialer(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
+	closeDialer := sync.OnceValue(d.Close)
+	t.Cleanup(func() { _ = closeDialer() })
 	clientUID := cloudsqlconn.DialerIDForTest(d)
 
 	c, err := d.Dial(ctx, postgresConnName)
@@ -192,10 +207,6 @@ func TestMetricsE2EExport(t *testing.T) {
 	}
 	time.Sleep(time.Second) // give connection_durations a non-trivial value
 	if err := c.Close(); err != nil {
-		t.Fatal(err)
-	}
-	// Close flushes the exporters synchronously (bounded by cloudsqlconn.MetricShutdownTimeoutForTest).
-	if err := d.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -207,7 +218,7 @@ func TestMetricsE2EExport(t *testing.T) {
 	if os.Getenv("CI") == "true" {
 		report = t.Fatalf
 	}
-	if failed := logger.find("built-in metrics export failed"); len(failed) > 0 {
+	reportExportFailure := func(failed []string) {
 		principal := "<the e2e service account>"
 		if p := cloudsqlconn.DetectPrincipalForTest(ctx); p != "" {
 			principal = p
@@ -222,9 +233,6 @@ func TestMetricsE2EExport(t *testing.T) {
 			"and make sure the Cloud Monitoring API is enabled on the project the call is billed to (%s), with\n"+
 			"  gcloud projects add-iam-policy-binding %s --member=serviceAccount:%s --role=roles/serviceusage.serviceUsageConsumer\n"+
 			"debug: %s", cn.Project(), cn.Project(), principal, cn.Project(), principal, billing, billing, principal, failed[0])
-	}
-	if w := warn.String(); w != "" {
-		t.Fatalf("unexpected standard-logger output during a healthy export: %q", w)
 	}
 
 	// Poll Cloud Monitoring for this process's client_uid. Unlike the write,
@@ -298,7 +306,21 @@ func TestMetricsE2EExport(t *testing.T) {
 		if all {
 			break
 		}
+		if failed := logger.find("built-in metrics export failed"); len(failed) > 0 {
+			reportExportFailure(failed)
+		}
 		time.Sleep(10 * time.Second)
+	}
+	// Everything has been exported; Close's final flush is dropped as too
+	// frequent, which must stay silent on the standard logger.
+	if err := closeDialer(); err != nil {
+		t.Fatal(err)
+	}
+	if failed := logger.find("built-in metrics export failed"); len(failed) > 0 {
+		reportExportFailure(failed)
+	}
+	if w := warn.String(); w != "" {
+		t.Fatalf("unexpected standard-logger output during a healthy export: %q", w)
 	}
 	for name, ok := range want {
 		if !ok {

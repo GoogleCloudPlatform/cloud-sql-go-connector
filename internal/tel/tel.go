@@ -766,6 +766,9 @@ type sharedClientExporter struct {
 	mu             sync.Mutex
 	lastErr        string
 	suspendedUntil time.Time
+	// exportedOnce records that at least one export succeeded (first
+	// success is debug-logged once).
+	exportedOnce bool
 	// backoff is the current (un-jittered) suspension length; zero until the
 	// first failure, reset to zero on success.
 	backoff time.Duration
@@ -788,6 +791,13 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if err == nil {
+		if !e.exportedOnce {
+			// One debug line per instance when the pipeline is known to
+			// work, so a user with a debug logger can tell metrics are
+			// flowing without checking Cloud Monitoring.
+			e.logger.Debugf(ctx, "[%v] built-in metrics: first export succeeded", e.name)
+			e.exportedOnce = true
+		}
 		if e.lastErr != "" {
 			e.logger.Debugf(ctx, "[%v] built-in metrics export recovered", e.name)
 			e.lastErr = ""
@@ -815,7 +825,15 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 			"metric's minimum write interval (30s) of the previous export; the last partial interval is not recorded: %v", e.name, err)
 		return nil
 	}
-	permanent := isPermanentExportError(err)
+	// If the export ran out of its own time budget (the SDK's export timeout
+	// for periodic exports, the Shutdown bound for the final flush), the
+	// Monitoring API never gave a verdict, whatever code the error carries.
+	// A slow first token fetch, for example, surfaces as Unauthenticated
+	// ("per-RPC creds failed ... context deadline exceeded"). Never treat
+	// that as permanent: it would suspend export for the permanent-error
+	// backoff and print a misleading "grant roles/monitoring.metricWriter"
+	// warning to a user whose IAM is fine. Back off as transient instead.
+	permanent := ctx.Err() == nil && isPermanentExportError(err)
 	initial, maxBackoff := TransientExportErrorInitialBackoff, TransientExportErrorMaxBackoff
 	if permanent {
 		initial, maxBackoff = PermanentExportErrorInitialBackoff, PermanentExportErrorMaxBackoff
@@ -831,9 +849,12 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 	e.suspendedUntil = time.Now().Add(jitter(e.backoff))
 	if permanent {
 		permanentErrorOnce.Do(func() {
-			warnLogger.Printf("cloudsqlconn: built-in metrics export failed for %s: %v. %s "+
+			// gRPC status errors can span several lines ("error details: ...");
+			// keep the warning to one physical line so log collectors treat
+			// it as a single entry.
+			warnLogger.Printf("cloudsqlconn: built-in metrics export failed for %s: %s. %s "+
 				"Retries back off exponentially up to %v; further failures are reported via the debug logger only.",
-				e.name, err, e.remediationHint(err), PermanentExportErrorMaxBackoff)
+				e.name, singleLine(err), e.remediationHint(err), PermanentExportErrorMaxBackoff)
 		})
 	}
 	if msg := err.Error(); msg != e.lastErr {
@@ -905,6 +926,12 @@ func isServiceDisabledError(err error) bool {
 		strings.Contains(st.Message(), "Cloud Monitoring API has not been used")
 }
 
+// singleLine renders err on one line: embedded newlines (as in gRPC status
+// details) are collapsed to single spaces.
+func singleLine(err error) string {
+	return strings.Join(strings.Fields(err.Error()), " ")
+}
+
 // serviceDisabledProject returns the project the Monitoring API reports as
 // having the service disabled (the consumer the call was billed to), or
 // fallback when the error does not carry it.
@@ -957,9 +984,8 @@ func isInsufficientScopeError(err error) bool {
 
 // isCanceledExport reports whether err means the export was canceled by its
 // own context (context.Canceled, or gRPC Canceled), as happens to an
-// in-flight export when the reader shuts down. Deadline errors are not
-// included: a Monitoring API call that times out is a real transient failure
-// and must back off like any other.
+// in-flight export when the reader shuts down. An export that ran out of its
+// own deadline is not "canceled": Export backs it off as transient.
 func isCanceledExport(err error) bool {
 	return errors.Is(err, context.Canceled) || grpcstatus.Code(err) == codes.Canceled
 }
