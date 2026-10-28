@@ -38,6 +38,7 @@ import (
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	cmexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/exemplar"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -181,6 +182,20 @@ func ConnectorTypeValue(userAgent string) string {
 	return ConnectorTypeGo
 }
 
+// ConnectorVersionValue returns the connector_version label: the version of
+// the product the user runs. For the Auth Proxy that is the proxy's own
+// version, taken from its "cloud-sql-proxy/<version>" user-agent token, so
+// that a proxy fleet can be broken down by proxy release; otherwise it is the
+// Go connector's version.
+func ConnectorVersionValue(userAgent, connectorVersion string) string {
+	for _, tok := range strings.Fields(userAgent) {
+		if v, ok := strings.CutPrefix(tok, "cloud-sql-proxy/"); ok && v != "" {
+			return v
+		}
+	}
+	return connectorVersion
+}
+
 // IPTypeValue maps a dial connection type (e.g. cloudsql.PublicIP) to the
 // instance_ip_type label value.
 func IPTypeValue(connectionType string) string {
@@ -210,6 +225,20 @@ func AuthTypeValue(iamAuthn bool) string {
 	return "built_in"
 }
 
+// metadataTimeout bounds each metadata-server lookup done at Dialer
+// construction. The metadata client has its own per-request timeout and
+// retries, which can add up to many seconds on a cold GKE node; these
+// lookups only feed labels, so they are not worth waiting long for.
+const metadataTimeout = 2 * time.Second
+
+// onGCE is metadata.OnGCE with a bounded wait (the result is cached by the
+// metadata package after the first call).
+func onGCE() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), metadataTimeout)
+	defer cancel()
+	return metadata.OnGCEWithContext(ctx)
+}
+
 // DetectClientRegion returns the client region from GCP metadata if running on GCE/GKE/Cloud Run.
 // Any panic or error fails silently and returns UnknownValue.
 func DetectClientRegion() (region string) {
@@ -219,10 +248,12 @@ func DetectClientRegion() (region string) {
 			region = UnknownValue
 		}
 	}()
-	if !metadata.OnGCE() {
+	ctx, cancel := context.WithTimeout(context.Background(), metadataTimeout)
+	defer cancel()
+	if !metadata.OnGCEWithContext(ctx) {
 		return UnknownValue
 	}
-	zone, err := metadata.Zone()
+	zone, err := metadata.ZoneWithContext(ctx)
 	if err != nil || zone == "" {
 		return UnknownValue
 	}
@@ -263,7 +294,7 @@ func DetectComputePlatform() (platform string) {
 		return PlatformAppEngine
 	case os.Getenv("FUNCTION_NAME") != "":
 		return PlatformCloudFunctions
-	case metadata.OnGCE():
+	case onGCE():
 		return PlatformGCE
 	default:
 		return UnknownValue
@@ -408,6 +439,15 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 			ResourceContainer, ResourceID, ClientUID, ApplicationName, Region, ClientRegion,
 			ComputePlatform, ConnectorType, ConnectorVersion, DatabaseEngineType,
 		}),
+		// The metric descriptors are Google-owned with a fixed label schema;
+		// the API rejects any other label. By default the exporter copies
+		// service.name / service.namespace / service.instance.id resource
+		// attributes onto every time series as metric labels, and the SDK
+		// merges OTEL_SERVICE_NAME / OTEL_RESOURCE_ATTRIBUTES into the
+		// resource, so in any OTel-instrumented environment (OTel operator,
+		// apps already using OTel) every export would fail. Resource
+		// attributes are only for the monitored resource, never labels.
+		cmexporter.WithFilteredResourceAttributes(cmexporter.NoAttributes),
 	}
 	exp, err := cmexporter.New(eopts...)
 	if err != nil {
@@ -434,7 +474,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		disableHint: cfg.DisableHint,
 	}
 
-	res := resource.NewWithAttributes(monitoredResource,
+	res := resource.NewSchemaless(
 		// The gcp.resource_type is a special attribute that the exporter
 		// transforms into the MonitoredResource field.
 		attribute.String("gcp.resource_type", monitoredResource),
@@ -458,6 +498,9 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 			sdkmetric.WithInterval(DefaultExportInterval),
 		)),
 		sdkmetric.WithResource(res),
+		// Exemplars (trace-linked sample points) are not used by these
+		// metrics; turning them off saves an allocation per record.
+		sdkmetric.WithExemplarFilter(exemplar.AlwaysOffFilter),
 	)
 	m := p.Meter(meterName, metric.WithInstrumentationVersion(cfg.Version))
 
@@ -469,13 +512,13 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize dial latency metric: %v", err)
 		return NullMetricRecorder{}
 	}
-	mOpenConns, err := m.Int64UpDownCounter(openConnections)
+	mOpenConns, err := m.Int64UpDownCounter(openConnections, metric.WithUnit("1"))
 	if err != nil {
 		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize open connections metric: %v", err)
 		return NullMetricRecorder{}
 	}
-	mClosedConnectionCount, err := m.Int64Counter(closedConnectionCount)
+	mClosedConnectionCount, err := m.Int64Counter(closedConnectionCount, metric.WithUnit("1"))
 	if err != nil {
 		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize refresh count metric: %v", err)
@@ -489,7 +532,7 @@ func NewMetricRecorder(ctx context.Context, l debug.ContextLogger, cl *monitorin
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize connection duration metric: %v", err)
 		return NullMetricRecorder{}
 	}
-	mOpenConnectionCount, err := m.Int64Counter(openConnectionCount)
+	mOpenConnectionCount, err := m.Int64Counter(openConnectionCount, metric.WithUnit("1"))
 	if err != nil {
 		_ = p.Shutdown(ctx)
 		l.Debugf(ctx, "built-in metrics exporter failed to initialize open connection count metric: %v", err)
@@ -824,16 +867,72 @@ func (e *sharedClientExporter) remediationHint(err error) string {
 		who = "principal " + e.principal
 	}
 	var hint string
-	if isInsufficientScopeError(err) {
+	switch {
+	case isInsufficientScopeError(err):
 		hint = "To fix, include the " + MonitoringWriteScope + " (or cloud-platform) scope in the " +
 			"token source or credentials passed to the connector, for " + who + "."
-	} else {
+	case isServiceDisabledError(err):
+		// The API must be enabled on the project the call is billed to (the
+		// caller's project or the quota project), which the error names; it
+		// is not necessarily the instance's project.
+		hint = "To fix, enable the Cloud Monitoring API (monitoring.googleapis.com) on project " + serviceDisabledProject(err, e.project) + "."
+	case isUniverseDomainError(err):
+		hint = "To fix, make sure the credentials passed to the connector belong to the same universe domain " +
+			"as the Dialer (see WithUniverseDomain)."
+	default:
 		hint = "To fix, grant roles/monitoring.metricWriter on project " + e.project + " to " + who + "."
 	}
 	if e.disableHint != "" {
 		hint += " To turn built-in metrics off, " + e.disableHint + "."
 	}
 	return hint
+}
+
+// isServiceDisabledError reports whether err is the Monitoring API being
+// disabled on the target project (PermissionDenied with ErrorInfo reason
+// SERVICE_DISABLED), for which an IAM grant is not the fix.
+func isServiceDisabledError(err error) bool {
+	st, ok := grpcstatus.FromError(err)
+	if !ok {
+		return false
+	}
+	for _, d := range st.Details() {
+		if info, ok := d.(*errdetails.ErrorInfo); ok && info.GetReason() == "SERVICE_DISABLED" {
+			return true
+		}
+	}
+	return strings.Contains(st.Message(), "SERVICE_DISABLED") ||
+		strings.Contains(st.Message(), "Cloud Monitoring API has not been used")
+}
+
+// serviceDisabledProject returns the project the Monitoring API reports as
+// having the service disabled (the consumer the call was billed to), or
+// fallback when the error does not carry it.
+func serviceDisabledProject(err error, fallback string) string {
+	st, ok := grpcstatus.FromError(err)
+	if !ok {
+		return fallback
+	}
+	for _, d := range st.Details() {
+		info, ok := d.(*errdetails.ErrorInfo)
+		if !ok || info.GetReason() != "SERVICE_DISABLED" {
+			continue
+		}
+		if p := info.GetMetadata()["containerInfo"]; p != "" {
+			return p
+		}
+		if c := strings.TrimPrefix(info.GetMetadata()["consumer"], "projects/"); c != "" {
+			return c
+		}
+	}
+	return fallback
+}
+
+// isUniverseDomainError reports whether err is the client library refusing a
+// request because the credentials' universe domain does not match the
+// client's (reported as Unauthenticated before any RPC is made).
+func isUniverseDomainError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "universe domain")
 }
 
 // MonitoringWriteScope is the OAuth scope the metric export needs.

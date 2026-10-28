@@ -50,7 +50,6 @@ import (
 	"golang.org/x/net/proxy"
 	"google.golang.org/api/option"
 
-	"cloud.google.com/go/auth/oauth2adapt"
 	tel "cloud.google.com/go/cloudsqlconn/internal/tel"
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
@@ -186,6 +185,8 @@ type Dialer struct {
 	sqlDataConnState map[cacheKey]*sqlDataConnState
 	keyGenerator     *keyGenerator
 	refreshTimeout   time.Duration
+	// closing is set by the first call to Close, which then closes closed.
+	closing atomic.Bool
 	// closed reports if the dialer has been closed.
 	closed chan struct{}
 
@@ -212,7 +213,7 @@ type Dialer struct {
 	// conflicting cumulative points to the same Cloud Monitoring series.
 	dialerID        string
 	metricsMu       sync.Mutex
-	metricRecorders map[instance.ConnName]tel.MetricRecorder
+	metricRecorders map[metricRecorderKey]tel.MetricRecorder
 	// metricsWG tracks background shutdowns of replaced metric recorders so
 	// that Close can wait for them before closing the shared metric client.
 	metricsWG sync.WaitGroup
@@ -463,7 +464,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		defaultDialConfig:               dc,
 		dialerID:                        uuid.New().String(),
 		iamTokenProvider:                cfg.iamLoginTokenProvider,
-		metricRecorders:                 map[instance.ConnName]tel.MetricRecorder{},
+		metricRecorders:                 map[metricRecorderKey]tel.MetricRecorder{},
 		dialFunc:                        cfg.dialFunc,
 		dnsResolver:                     cfg.dnsResolver,
 		resolver:                        r,
@@ -498,20 +499,19 @@ func newMetricClient(ctx context.Context, cfg *dialerConfig, apiTP auth.TokenPro
 	if cfg.quotaProject != "" {
 		opts = append(opts, option.WithQuotaProject(cfg.quotaProject))
 	}
-	tp, err := metricTokenProvider(cfg, apiTP)
+	creds, err := metricCredentials(cfg, apiTP)
 	if err != nil {
 		return nil, err
 	}
-	if tp != nil {
-		opts = append(opts, option.WithTokenSource(oauth2adapt.TokenSourceFromTokenProvider(tp)))
+	if creds != nil {
+		opts = append(opts, option.WithAuthCredentials(creds))
 	}
 	// Caller-provided client options go last so they take precedence.
 	opts = append(opts, cfg.clientOpts...)
 	return monitoring.NewMetricClient(ctx, opts...)
 }
 
-// metricTokenProvider returns the token provider for the built-in metrics
-// export.
+// metricCredentials returns the credentials for the built-in metrics export.
 //
 // When the Dialer detected credentials itself (Application Default
 // Credentials, WithCredentialsFile, or WithCredentialsJSON), the credentials
@@ -521,18 +521,40 @@ func newMetricClient(ctx context.Context, cfg *dialerConfig, apiTP auth.TokenPro
 //
 // When the caller supplied a token source or credentials directly, that
 // token provider is used as-is because its scopes cannot be changed.
-func metricTokenProvider(cfg *dialerConfig, apiTP auth.TokenProvider) (auth.TokenProvider, error) {
+//
+// In both cases the credentials carry the Dialer's configured universe
+// domain: the Monitoring client validates that the credentials' universe
+// matches the client's, and credentials without one default to
+// googleapis.com, which would fail that check for every export in a
+// non-default universe.
+func metricCredentials(cfg *dialerConfig, apiTP auth.TokenProvider) (*auth.Credentials, error) {
 	if !cfg.setCredentials || cfg.credentialsJSON != nil {
 		c, err := credentials.DetectDefault(&credentials.DetectOptions{
 			Scopes:          []string{monitoringWriteScope},
 			CredentialsJSON: cfg.credentialsJSON,
+			// Only an explicit WithUniverseDomain is passed through. The
+			// option overrides the universe_domain found in the credential
+			// file, so passing the googleapis.com default here would strip a
+			// TPC credential of its universe and send its tokens to the
+			// default universe's endpoint. Left empty, the file's value (or
+			// googleapis.com) is used, as for the Admin API credentials.
+			UniverseDomain: cfg.clientUniverseDomain,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create credentials for built-in metrics: %w", err)
 		}
-		return c.TokenProvider, nil
+		return c, nil
 	}
-	return apiTP, nil
+	if apiTP == nil {
+		return nil, nil
+	}
+	ud := cfg.getClientUniverseDomain()
+	return auth.NewCredentials(&auth.CredentialsOptions{
+		TokenProvider: apiTP,
+		UniverseDomainProvider: auth.CredentialsPropertyFunc(func(context.Context) (string, error) {
+			return ud, nil
+		}),
+	}), nil
 }
 
 // authProxyMetricsFlag is the Cloud SQL Auth Proxy flag that controls
@@ -581,9 +603,9 @@ func detectPrincipal(ctx context.Context, cfg *dialerConfig) string {
 		}
 		return ""
 	}
-	if metadata.OnGCE() {
-		mctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
+	mctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if metadata.OnGCEWithContext(mctx) {
 		if email, err := metadata.EmailWithContext(mctx, "default"); err == nil {
 			return email
 		}
@@ -600,9 +622,10 @@ func detectPrincipal(ctx context.Context, cfg *dialerConfig) string {
 // The lock is held only for the map lookup/insert and the (in-memory)
 // recorder construction; nothing under it touches the network.
 func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbEngineType string) tel.MetricRecorder {
+	key := newMetricRecorderKey(inst)
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
-	old, ok := d.metricRecorders[inst]
+	old, ok := d.metricRecorders[key]
 	if ok {
 		if dbEngineType == tel.UnknownValue || dbEngineType == "" || old.DatabaseEngine() == dbEngineType {
 			return old
@@ -636,11 +659,11 @@ func (d *Dialer) metricRecorder(ctx context.Context, inst instance.ConnName, dbE
 		ConnectorType:      tel.ConnectorTypeValue(d.userAgent),
 		Principal:          d.metricsPrincipal,
 		DisableHint:        metricsDisableHint(tel.ConnectorTypeValue(d.userAgent)),
-		ConnectorVersion:   strings.TrimSpace(versionString),
+		ConnectorVersion:   tel.ConnectorVersionValue(d.userAgent, strings.TrimSpace(versionString)),
 		DatabaseEngineType: dbEngineType,
 	}
 	mr := tel.NewMetricRecorder(ctx, d.logger, d.mClient, cfg)
-	d.metricRecorders[inst] = mr
+	d.metricRecorders[key] = mr
 	if ok {
 		// Flush and stop the previous recorder so it does not leak a
 		// goroutine or double-report, off the dial path. Close waits on
@@ -892,7 +915,7 @@ func (c *metricsConn) Close() error {
 func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cfg dialConfig, startTime time.Time, mr tel.MetricRecorder, attrs tel.Attributes) (conn net.Conn, err error) {
 	var endInfo trace.EndSpanFunc
 	ctx, endInfo = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.InstanceInfo")
-	c, _, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	c, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
 	if err != nil {
 		attrs.DialStatus = tel.ConnectError
 		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
@@ -1171,7 +1194,7 @@ func (d *Dialer) EngineVersion(ctx context.Context, icn string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	c, _, err := d.connectionInfoCache(ctx, cn, &d.defaultDialConfig.useIAMAuthN)
+	c, err := d.connectionInfoCache(ctx, cn, &d.defaultDialConfig.useIAMAuthN)
 	if err != nil {
 		return "", err
 	}
@@ -1195,7 +1218,7 @@ func (d *Dialer) Warmup(ctx context.Context, icn string, opts ...DialOption) err
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	c, _, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
+	c, err := d.connectionInfoCache(ctx, cn, &cfg.useIAMAuthN)
 	if err != nil {
 		return err
 	}
@@ -1312,15 +1335,13 @@ func (i *instrumentedConn) report(ctx context.Context) {
 // Close closes the Dialer; it prevents the Dialer from refreshing the information
 // needed to connect.
 func (d *Dialer) Close() error {
-	// Check if Close has already been called.
-	select {
-	case <-d.closed:
+	// Only the first caller proceeds; concurrent and repeated calls return
+	// immediately (the first call may still be flushing).
+	if !d.closing.CompareAndSwap(false, true) {
 		return nil
-	default:
 	}
 	close(d.closed)
 	d.lock.Lock()
-	defer d.lock.Unlock()
 	for _, i := range d.cache {
 		i.Close()
 	}
@@ -1328,27 +1349,36 @@ func (d *Dialer) Close() error {
 		d.logger.Debugf(context.Background(),
 			"failed to close SQL data connection: %v", err)
 	}
+	d.lock.Unlock()
 
 	// Flush and stop the built-in metrics exporters. Without this, metrics
 	// recorded since the last periodic export (up to 60s worth) are lost
 	// when the process exits, which is the common case on Cloud Run.
-	// Recorders are shut down concurrently so that a process with many
-	// instances (e.g. the Auth Proxy) flushes all of them within the budget
-	// rather than running out of time partway through a serial loop.
+	//
+	// The flush does network I/O (bounded by metricShutdownTimeout), so no
+	// Dialer lock is held while it runs: d.lock is needed by connections'
+	// error paths (removeCached) and metricsMu by any Dial that raced
+	// Close. d.closed is already closed, so metricRecorder cannot add to the
+	// map after this snapshot. Recorders are shut down concurrently so that a
+	// process with many instances (e.g. the Auth Proxy) flushes all of them
+	// within the budget rather than running out of time partway through.
 	d.metricsMu.Lock()
-	defer d.metricsMu.Unlock()
+	recorders := d.metricRecorders
+	d.metricRecorders = map[metricRecorderKey]tel.MetricRecorder{}
+	d.metricsMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), metricShutdownTimeout)
 	defer cancel()
 	var wg sync.WaitGroup
-	for inst, mr := range d.metricRecorders {
+	for key, mr := range recorders {
 		wg.Add(1)
-		go func(inst instance.ConnName, mr tel.MetricRecorder) {
+		go func(key metricRecorderKey, mr tel.MetricRecorder) {
 			defer wg.Done()
 			// Best effort: an error here isn't actionable by the caller.
 			if err := mr.Shutdown(ctx); err != nil {
-				d.logger.Debugf(ctx, "[%v] failed to shut down metric recorder: %v", inst.String(), err)
+				d.logger.Debugf(ctx, "[%v] failed to shut down metric recorder: %v", key, err)
 			}
-		}(inst, mr)
+		}(key, mr)
 	}
 	wg.Wait()
 	// Also wait for any replaced recorders still flushing in the background
@@ -1360,6 +1390,24 @@ func (d *Dialer) Close() error {
 		}
 	}
 	return nil
+}
+
+// metricRecorderKey identifies the Cloud SQL instance a metric recorder
+// belongs to. It deliberately excludes the domain name: an instance dialed
+// both by DNS name and by connection name is one monitored resource and must
+// have one recorder, otherwise two cumulative series with identical labels
+// would be written for it and the Monitoring API would reject them as
+// conflicting.
+type metricRecorderKey struct {
+	project, region, name string
+}
+
+func newMetricRecorderKey(cn instance.ConnName) metricRecorderKey {
+	return metricRecorderKey{project: cn.Project(), region: cn.Region(), name: cn.Name()}
+}
+
+func (k metricRecorderKey) String() string {
+	return k.project + ":" + k.region + ":" + k.name
 }
 
 // createKey creates a key for the cache from an instance.ConnName.
@@ -1385,7 +1433,7 @@ func createKey(cn instance.ConnName) cacheKey {
 // It returns a *monitoredCache, a bool indicating a cache hit, and an error.
 func (d *Dialer) connectionInfoCache(
 	ctx context.Context, cn instance.ConnName, useIAMAuthN *bool,
-) (*monitoredCache, bool, error) {
+) (*monitoredCache, error) {
 	k := createKey(cn)
 
 	d.lock.RLock()
@@ -1394,7 +1442,7 @@ func (d *Dialer) connectionInfoCache(
 
 	if ok && !c.isClosed() {
 		c.UpdateRefresh(useIAMAuthN)
-		return c, ok, nil
+		return c, nil
 	}
 
 	d.lock.Lock()
@@ -1406,7 +1454,7 @@ func (d *Dialer) connectionInfoCache(
 	// c exists and is not closed
 	if ok && !c.isClosed() {
 		c.UpdateRefresh(useIAMAuthN)
-		return c, ok, nil
+		return c, nil
 	}
 
 	// Create a new instance of monitoredCache
@@ -1417,7 +1465,7 @@ func (d *Dialer) connectionInfoCache(
 	d.logger.Debugf(ctx, "[%v] Connection info added to cache", cn.String())
 	rsaKey, err := d.keyGenerator.rsaKey()
 	if err != nil {
-		return nil, ok, err
+		return nil, err
 	}
 	var cache connectionInfoCache
 	if d.lazyRefresh {
@@ -1440,7 +1488,7 @@ func (d *Dialer) connectionInfoCache(
 	c = newMonitoredCache(cache, cn, d.failoverPeriod, d.resolver, d.logger)
 	d.cache[k] = c
 
-	return c, ok, nil
+	return c, nil
 }
 
 // newMDXRequest builds a metadata exchange request based on the connection

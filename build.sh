@@ -172,7 +172,10 @@ function e2e_ci() {
   get_golang_tool 'go-junit-report' 'jstemmer/go-junit-report' 'github.com/jstemmer/go-junit-report/v2'
   mkdir -p test-results
 
-  go test -v -race -cover ./e2e_mysql_test.go ./e2e_postgres_test.go ./e2e_sqlserver_test.go -json \
+  # Package mode (not explicit files) so that every e2e_*_test.go runs,
+  # including the built-in metrics e2e tests; the -run filter keeps the unit
+  # tests out of this job.
+  go test -v -race -cover -run '^Test(MySQL|Postgres|SqlServer|MetricsE2E)' . -json \
     | .tools/go-junit-report -iocopy -parser gojson -out test-results/e2e.xml \
     | jq -j 'select(.Output) | .Output '
 }

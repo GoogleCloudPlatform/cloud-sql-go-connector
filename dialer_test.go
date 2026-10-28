@@ -16,8 +16,12 @@ package cloudsqlconn
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -55,7 +59,14 @@ import (
 // WithBuiltInMetrics(true) explicitly, and TestBuiltInMetricsEnabledByDefault
 // checks the production default.
 func TestMain(m *testing.M) {
-	builtInMetricsDefault = false
+	// Unit tests must not reach Cloud Monitoring, so they run with built-in
+	// metrics off unless a test opts in. The e2e tests are identified by
+	// their real-instance configuration and keep the production default
+	// (on), so the database e2e tests exercise metrics as users will see
+	// them.
+	if os.Getenv("POSTGRES_CONNECTION_NAME") == "" && os.Getenv("MYSQL_CONNECTION_NAME") == "" {
+		builtInMetricsDefault = false
+	}
 	os.Exit(m.Run())
 }
 
@@ -2137,23 +2148,68 @@ func (sentinelTokenProvider) Token(context.Context) (*auth.Token, error) {
 	return &auth.Token{Value: "sentinel"}, nil
 }
 
-func TestMetricTokenProvider(t *testing.T) {
+// serviceAccountJSONWithRealKey returns service account JSON whose private
+// key parses, for code paths that build self-signed JWTs at construction.
+func serviceAccountJSONWithRealKey(t *testing.T, universeDomain ...string) []byte {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemKey := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	sa := map[string]string{
+		"type":           "service_account",
+		"project_id":     "a-project-id",
+		"private_key_id": "a-private-key-id",
+		"private_key":    string(pemKey),
+		"client_email":   "email@example.com",
+		"client_id":      "12345",
+		"token_uri":      "https://oauth2.googleapis.com/token",
+	}
+	if len(universeDomain) > 0 && universeDomain[0] != "" {
+		sa["universe_domain"] = universeDomain[0]
+	}
+	b, err := json.Marshal(sa)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestMetricCredentials(t *testing.T) {
 	saFile := filepath.Join(t.TempDir(), "sa.json")
 	if err := os.WriteFile(saFile, fakeServiceAccount(""), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	realKeySAFile := filepath.Join(t.TempDir(), "sa-realkey.json")
+	if err := os.WriteFile(realKeySAFile, serviceAccountJSONWithRealKey(t), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tpcSAFile := filepath.Join(t.TempDir(), "sa-tpc.json")
+	if err := os.WriteFile(tpcSAFile, serviceAccountJSONWithRealKey(t, "my-tpc.goog"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	apiTP := sentinelTokenProvider{}
+	ctx := context.Background()
 
 	tcs := []struct {
 		desc        string
 		cfg         *dialerConfig
 		env         map[string]string
 		wantSameAPI bool
+		wantUD      string
 	}{
 		{
 			desc:        "caller-supplied token source is used as-is",
 			cfg:         &dialerConfig{setCredentials: true},
 			wantSameAPI: true,
+			wantUD:      "googleapis.com",
+		},
+		{
+			desc:        "caller-supplied token source carries the configured universe",
+			cfg:         &dialerConfig{setCredentials: true, clientUniverseDomain: "example.universe"},
+			wantSameAPI: true,
+			wantUD:      "example.universe",
 		},
 		{
 			desc: "credentials JSON is re-scoped for monitoring",
@@ -2162,12 +2218,39 @@ func TestMetricTokenProvider(t *testing.T) {
 				credentialsJSON: fakeServiceAccount(""),
 			},
 			wantSameAPI: false,
+			wantUD:      "googleapis.com",
 		},
 		{
 			desc:        "application default credentials are re-scoped for monitoring",
 			cfg:         &dialerConfig{setCredentials: false},
 			env:         map[string]string{"GOOGLE_APPLICATION_CREDENTIALS": saFile},
 			wantSameAPI: false,
+			wantUD:      "googleapis.com",
+		},
+		{
+			// A TPC credential file must keep its own universe when the
+			// caller did not set WithUniverseDomain: passing the default
+			// universe to DetectDefault would override the file's value.
+			desc:        "TPC credentials JSON keeps its universe without WithUniverseDomain",
+			cfg:         &dialerConfig{setCredentials: true, credentialsJSON: serviceAccountJSONWithRealKey(t, "my-tpc.goog")},
+			wantSameAPI: false,
+			wantUD:      "my-tpc.goog",
+		},
+		{
+			desc:        "TPC ADC file keeps its universe without WithUniverseDomain",
+			cfg:         &dialerConfig{setCredentials: false},
+			env:         map[string]string{"GOOGLE_APPLICATION_CREDENTIALS": tpcSAFile},
+			wantSameAPI: false,
+			wantUD:      "my-tpc.goog",
+		},
+		{
+			// Outside googleapis.com the auth library builds self-signed JWTs
+			// eagerly, so this case needs a parseable private key.
+			desc:        "application default credentials carry the configured universe",
+			cfg:         &dialerConfig{setCredentials: false, clientUniverseDomain: "example.universe"},
+			env:         map[string]string{"GOOGLE_APPLICATION_CREDENTIALS": realKeySAFile},
+			wantSameAPI: false,
+			wantUD:      "example.universe",
 		},
 	}
 	for _, tc := range tcs {
@@ -2175,16 +2258,27 @@ func TestMetricTokenProvider(t *testing.T) {
 			for k, v := range tc.env {
 				t.Setenv(k, v)
 			}
-			got, err := metricTokenProvider(tc.cfg, apiTP)
+			got, err := metricCredentials(tc.cfg, apiTP)
 			if err != nil {
-				t.Fatalf("metricTokenProvider: %v", err)
+				t.Fatalf("metricCredentials: %v", err)
 			}
 			if got == nil {
-				t.Fatal("metricTokenProvider returned nil token provider")
+				t.Fatal("metricCredentials returned nil credentials")
 			}
-			_, isSentinel := got.(sentinelTokenProvider)
+			tok, err := got.Token(ctx)
+			if err != nil && tc.wantSameAPI {
+				t.Fatalf("Token: %v", err)
+			}
+			isSentinel := tok != nil && tok.Value == "sentinel"
 			if isSentinel != tc.wantSameAPI {
-				t.Fatalf("want same-as-API token provider = %v, got %v (%T)", tc.wantSameAPI, isSentinel, got)
+				t.Fatalf("want same-as-API token provider = %v, got %v", tc.wantSameAPI, isSentinel)
+			}
+			ud, err := got.UniverseDomain(ctx)
+			if err != nil {
+				t.Fatalf("UniverseDomain: %v", err)
+			}
+			if ud != tc.wantUD {
+				t.Fatalf("universe domain = %q, want %q", ud, tc.wantUD)
 			}
 		})
 	}

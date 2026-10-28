@@ -1285,3 +1285,75 @@ func TestCanceledExportIsNotAFailure(t *testing.T) {
 		t.Fatalf("a canceled export must not reach the standard logger, got %q", w)
 	}
 }
+
+// TestRemediationHintMatchesCause verifies that the once-per-process warning
+// names the actual fix for each permanent-error cause, not always the IAM
+// role: a disabled Monitoring API, a universe-domain mismatch and an
+// under-scoped token each need something else.
+func TestRemediationHintMatchesCause(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = 10 * time.Millisecond
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+
+	serviceDisabled, _ := grpcstatus.New(codes.PermissionDenied,
+		"Cloud Monitoring API has not been used in project 64201112091 before or it is disabled.").
+		WithDetails(&errdetails.ErrorInfo{Reason: "SERVICE_DISABLED", Domain: "googleapis.com",
+			Metadata: map[string]string{"consumer": "projects/64201112091", "containerInfo": "64201112091", "service": "monitoring.googleapis.com"}})
+	tcs := []struct {
+		desc        string
+		st          *grpcstatus.Status
+		wantSubstr  string
+		notContains string
+	}{
+		// The billed project (from ErrorInfo) is named, not the instance project ("proj").
+		{"service disabled", serviceDisabled, "enable the Cloud Monitoring API (monitoring.googleapis.com) on project 64201112091", "on project proj"},
+		{"universe mismatch", grpcstatus.New(codes.Unauthenticated, "credentials: universe domain mismatch: client example.universe, credentials googleapis.com"), "same universe domain", "grant roles/monitoring.metricWriter"},
+		{"missing role", grpcstatus.New(codes.PermissionDenied, "Permission monitoring.timeSeries.create denied"), "grant roles/monitoring.metricWriter", "enable the Cloud Monitoring API"},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			var warnBuf lockedBuffer
+			restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+			t.Cleanup(restore)
+			mock, conn, cleanup := setupMockServer(t)
+			t.Cleanup(cleanup)
+			mock.setFailureStatus(tc.st)
+			mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			mr := tel.NewMetricRecorder(ctx, nullLogger{t}, mClient, tel.Config{
+				Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "proj", ResourceID: "proj:inst", Region: "r",
+			})
+			mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+			time.Sleep(100 * time.Millisecond)
+			_ = mr.Shutdown(ctx)
+			w := warnBuf.String()
+			if !strings.Contains(w, tc.wantSubstr) {
+				t.Errorf("warning should contain %q, got %q", tc.wantSubstr, w)
+			}
+			if strings.Contains(w, tc.notContains) {
+				t.Errorf("warning should not contain %q, got %q", tc.notContains, w)
+			}
+		})
+	}
+}
+
+// TestConnectorVersionValue verifies that the connector_version label is the
+// Auth Proxy's version when the connector is embedded in the proxy, and the
+// connector's own version otherwise.
+func TestConnectorVersionValue(t *testing.T) {
+	tcs := []struct{ ua, want string }{
+		{"cloud-sql-go-connector/1.26.0", "1.26.0"},
+		{"cloud-sql-go-connector/1.26.0 cloud-sql-proxy/2.27.0", "2.27.0"},
+		{"cloud-sql-proxy/2.27.0+dev cloud-sql-go-connector/1.26.0 my-app/3", "2.27.0+dev"},
+		{"cloud-sql-go-connector/1.26.0 cloud-sql-proxy/", "1.26.0"},
+		{"", "1.26.0"},
+	}
+	for _, tc := range tcs {
+		if got := tel.ConnectorVersionValue(tc.ua, "1.26.0"); got != tc.want {
+			t.Errorf("ConnectorVersionValue(%q) = %q, want %q", tc.ua, got, tc.want)
+		}
+	}
+}

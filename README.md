@@ -190,6 +190,12 @@ func connect() {
         "cloudsql-postgres",
         "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable",
     )
+    if err != nil {
+        // ... handle error
+    }
+    // close the pool before cleanup() so that connection-close metrics are
+    // recorded by the Dialer before it shuts down
+    defer db.Close()
     // ... etc
 }
 ```
@@ -483,6 +489,16 @@ hour); all further diagnostics go to the [debug logger](#debug-logging) only.
 In a non-default Cloud universe (a universe domain other than
 `googleapis.com`), built-in metrics are off unless you pass
 `WithBuiltInMetrics(true)`.
+
+The export is billed to the caller's project (for a service account, the
+project it belongs to), which must have the Cloud Monitoring API enabled.
+`WithQuotaProject` changes the billed project, as it does for the Cloud SQL
+Admin API.
+
+Hermetic tests that construct a `Dialer` against a mock Admin API
+(`WithAdminAPIEndpoint`, `WithHTTPClient`) should pass
+`WithBuiltInMetrics(false)` so the test does not try to reach Cloud
+Monitoring.
 
 To turn built-in metrics off:
 

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand/v2"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -27,12 +28,12 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/auth"
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
-	"golang.org/x/oauth2"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
@@ -50,6 +51,14 @@ import (
 //     credentials), the application is unaffected: dials succeed, dial
 //     latency is unchanged, Close returns promptly, and the only output is
 //     the single standard-logger warning.
+
+// staticTokenProvider is an auth.TokenProvider that always returns the same
+// (here: deliberately invalid) access token.
+type staticTokenProvider string
+
+func (s staticTokenProvider) Token(context.Context) (*auth.Token, error) {
+	return &auth.Token{Value: string(s), Type: "Bearer"}, nil
+}
 
 // e2eLogger captures debug log lines.
 type e2eLogger struct {
@@ -157,11 +166,21 @@ func TestMetricsE2EExport(t *testing.T) {
 	restore := tel.SetWarnLoggerForTest(log.New(&warn, "", 0))
 	t.Cleanup(restore)
 
-	d, err := cloudsqlconn.NewDialer(ctx,
+	opts := []cloudsqlconn.Option{
 		cloudsqlconn.WithBuiltInMetrics(true),
 		cloudsqlconn.WithApplicationName(appName),
 		cloudsqlconn.WithContextDebugLogger(logger),
-	)
+	}
+	// The Monitoring API must be enabled on the project the call is billed
+	// to, which for a service account is its home project. The CI service
+	// account lives in an auto-provisioned project without the API, so bill
+	// the export to the e2e project instead (the connector forwards the
+	// quota project to the metric client as X-Goog-User-Project).
+	quotaProject := os.Getenv("QUOTA_PROJECT")
+	if quotaProject != "" {
+		opts = append(opts, cloudsqlconn.WithQuotaProject(quotaProject))
+	}
+	d, err := cloudsqlconn.NewDialer(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,24 +199,40 @@ func TestMetricsE2EExport(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// If the identity cannot write metrics, say exactly what to grant and
-	// skip rather than fail: the rest of the e2e suite is still valid.
+	// If the identity cannot write or read metrics, say exactly what to grant
+	// and skip rather than fail: the rest of the e2e suite is still valid.
+	// In CI the identity is expected to be fully set up; a failure there is a
+	// regression, not a local-environment gap.
+	report := t.Skipf
+	if os.Getenv("CI") == "true" {
+		report = t.Fatalf
+	}
 	if failed := logger.find("built-in metrics export failed"); len(failed) > 0 {
 		principal := "<the e2e service account>"
 		if p := cloudsqlconn.DetectPrincipalForTest(ctx); p != "" {
 			principal = p
 		}
-		t.Skipf("metrics export failed from the e2e identity; grant Monitoring roles on project %s and re-run:\n"+
+		billing := quotaProject
+		if billing == "" {
+			billing = "<the service account's home project>"
+		}
+		report("metrics export failed from the e2e identity; grant Monitoring roles on project %s and re-run:\n"+
 			"  gcloud projects add-iam-policy-binding %s --member=serviceAccount:%s --role=roles/monitoring.metricWriter\n"+
 			"  gcloud projects add-iam-policy-binding %s --member=serviceAccount:%s --role=roles/monitoring.viewer\n"+
-			"debug: %s", cn.Project(), cn.Project(), principal, cn.Project(), principal, failed[0])
+			"and make sure the Cloud Monitoring API is enabled on the project the call is billed to (%s), with\n"+
+			"  gcloud projects add-iam-policy-binding %s --member=serviceAccount:%s --role=roles/serviceusage.serviceUsageConsumer\n"+
+			"debug: %s", cn.Project(), cn.Project(), principal, cn.Project(), principal, billing, billing, principal, failed[0])
 	}
 	if w := warn.String(); w != "" {
 		t.Fatalf("unexpected standard-logger output during a healthy export: %q", w)
 	}
 
-	// Poll Cloud Monitoring for this process's client_uid.
-	mc, err := monitoring.NewMetricClient(ctx)
+	// Poll Cloud Monitoring for this process's client_uid. Unlike the write,
+	// timeSeries.list requires billing on the project it is billed to, and
+	// the e2e quota project has none; bill the read-back to the instance's
+	// project instead (the identity needs roles/monitoring.viewer and
+	// roles/serviceusage.serviceUsageConsumer there).
+	mc, err := monitoring.NewMetricClient(ctx, option.WithQuotaProject(cn.Project()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,6 +246,7 @@ func TestMetricsE2EExport(t *testing.T) {
 		"connection_durations":    false,
 	}
 	var sawResource map[string]string
+	var openConnsLatest int64 = -1
 	var sawMetricLabels = map[string]map[string]string{}
 	// ListTimeSeries accepts exactly one metric.type per request, so query
 	// each metric separately.
@@ -240,7 +276,8 @@ func TestMetricsE2EExport(t *testing.T) {
 			ts, err := listOne(name)
 			if err != nil {
 				if status.Code(err) == codes.PermissionDenied {
-					t.Skipf("identity cannot read metrics (grant roles/monitoring.viewer on %s): %v", cn.Project(), err)
+					report("identity cannot read metrics (grant roles/monitoring.viewer and "+
+						"roles/serviceusage.serviceUsageConsumer on %s): %v", cn.Project(), err)
 				}
 				t.Fatalf("ListTimeSeries(%s): %v", name, err)
 			}
@@ -248,6 +285,10 @@ func TestMetricsE2EExport(t *testing.T) {
 				want[name] = true
 				sawResource = ts.GetResource().GetLabels()
 				sawMetricLabels[name] = ts.GetMetric().GetLabels()
+				if name == "open_connections" && len(ts.GetPoints()) > 0 {
+					// Points are newest first.
+					openConnsLatest = ts.GetPoints()[0].GetValue().GetInt64Value()
+				}
 			}
 		}
 		all := true
@@ -286,6 +327,12 @@ func TestMetricsE2EExport(t *testing.T) {
 	}
 	if !tel.IsValidComputePlatform(sawResource["compute_platform"]) {
 		t.Errorf("compute_platform = %q is not an allowed value", sawResource["compute_platform"])
+	}
+	// The one connection was closed before Dialer.Close flushed, so the gauge
+	// must have drained back to zero (a stuck or negative value would mean a
+	// lost or doubled decrement).
+	if openConnsLatest != 0 {
+		t.Errorf("open_connections after Close = %d, want 0", openConnsLatest)
 	}
 	if got := sawMetricLabels["open_connection_count"]["status"]; got != tel.ConnectSuccess {
 		t.Errorf("open_connection_count status = %q, want %q", got, tel.ConnectSuccess)
@@ -378,7 +425,13 @@ func TestMetricsE2EFailOpenBadCredentials(t *testing.T) {
 		cloudsqlconn.WithBuiltInMetrics(true),
 		cloudsqlconn.WithContextDebugLogger(logger),
 		cloudsqlconn.WithMetricClientOptionsForTest(
-			option.WithTokenSource(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "not-a-valid-token"})),
+			// The Dialer configures the metric client with
+			// option.WithAuthCredentials, which takes precedence over
+			// option.WithTokenSource, so the bad token must be injected the
+			// same way to actually replace the Dialer's credentials.
+			option.WithAuthCredentials(auth.NewCredentials(&auth.CredentialsOptions{
+				TokenProvider: staticTokenProvider("not-a-valid-token"),
+			})),
 			option.WithGRPCDialOption(grpc.WithUnaryInterceptor(count)),
 		),
 	)
