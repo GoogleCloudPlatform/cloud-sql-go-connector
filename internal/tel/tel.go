@@ -831,9 +831,12 @@ func (e *sharedClientExporter) Export(ctx context.Context, rm *metricdata.Resour
 	e.suspendedUntil = time.Now().Add(jitter(e.backoff))
 	if permanent {
 		permanentErrorOnce.Do(func() {
-			warnLogger.Printf("cloudsqlconn: built-in metrics export failed for %s: %v. %s "+
+			// gRPC status errors can span several lines ("error details: ...");
+			// keep the warning to one physical line so log collectors treat
+			// it as a single entry.
+			warnLogger.Printf("cloudsqlconn: built-in metrics export failed for %s: %s. %s "+
 				"Retries back off exponentially up to %v; further failures are reported via the debug logger only.",
-				e.name, err, e.remediationHint(err), PermanentExportErrorMaxBackoff)
+				e.name, singleLine(err), e.remediationHint(err), PermanentExportErrorMaxBackoff)
 		})
 	}
 	if msg := err.Error(); msg != e.lastErr {
@@ -903,6 +906,12 @@ func isServiceDisabledError(err error) bool {
 	}
 	return strings.Contains(st.Message(), "SERVICE_DISABLED") ||
 		strings.Contains(st.Message(), "Cloud Monitoring API has not been used")
+}
+
+// singleLine renders err on one line: embedded newlines (as in gRPC status
+// details) are collapsed to single spaces.
+func singleLine(err error) string {
+	return strings.Join(strings.Fields(err.Error()), " ")
 }
 
 // serviceDisabledProject returns the project the Monitoring API reports as

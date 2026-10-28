@@ -1357,3 +1357,46 @@ func TestConnectorVersionValue(t *testing.T) {
 		}
 	}
 }
+
+// TestPermanentErrorWarningIsOneLine verifies that the once-per-process
+// warning is a single physical line even when the gRPC error carries
+// multi-line details, so log collectors see one entry.
+func TestPermanentErrorWarningIsOneLine(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = 10 * time.Millisecond
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	st, err := grpcstatus.New(codes.PermissionDenied, "Permission monitoring.timeSeries.create denied (or the resource may not exist).").
+		WithDetails(&errdetails.DebugInfo{Detail: "Permission monitoring.timeSeries.create denied on projects/123: no extra explanation needed."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.setFailureStatus(st)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, nullLogger{t}, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "proj", ResourceID: "proj:inst", Region: "r",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	time.Sleep(100 * time.Millisecond)
+	_ = mr.Shutdown(ctx)
+
+	w := strings.TrimRight(warnBuf.String(), "\n")
+	if w == "" {
+		t.Fatal("expected a warning")
+	}
+	if n := strings.Count(w, "\n"); n != 0 {
+		t.Fatalf("warning spans %d extra line(s): %q", n, w)
+	}
+	if !strings.Contains(w, "DebugInfo") || !strings.Contains(w, "grant roles/monitoring.metricWriter") {
+		t.Fatalf("warning lost content: %q", w)
+	}
+}
