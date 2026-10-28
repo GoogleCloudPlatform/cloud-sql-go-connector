@@ -218,7 +218,7 @@ func (m *mockServer) Verify(t *testing.T, wantProjectName, wantResourceType, wan
 
 }
 
-func setupMockServer(t *testing.T) (*mockServer, *grpc.ClientConn, func()) {
+func setupMockServer(t *testing.T, dialOpts ...grpc.DialOption) (*mockServer, *grpc.ClientConn, func()) {
 	t.Helper()
 
 	s := grpc.NewServer()
@@ -230,9 +230,10 @@ func setupMockServer(t *testing.T) (*mockServer, *grpc.ClientConn, func()) {
 		_ = s.Serve(lis)
 	}()
 
-	conn, err := grpc.NewClient("passthrough://bufnet",
+	conn, err := grpc.NewClient("passthrough://bufnet", append([]grpc.DialOption{
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return lis.Dial() }),
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}, dialOpts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -722,14 +723,17 @@ func TestExportFailuresAreQuietAndBackedOff(t *testing.T) {
 		t.Fatalf("export did not resume after backoff; server saw %d requests", got)
 	}
 	deadline = time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && len(logger.snapshot()) < 1 {
+	for time.Now().Before(deadline) && len(logger.snapshot()) < 2 {
 		time.Sleep(10 * time.Millisecond)
 	}
 	// Give any erroneous extra lines a chance to appear before asserting.
 	time.Sleep(3 * tel.DefaultExportInterval)
 	lines = logger.snapshot()
-	if len(lines) != 1 || !strings.Contains(lines[0], "recovered") {
-		t.Fatalf("want exactly one debug line (recovery) after the failure line, got %q", lines)
+	// The first success is logged once ("first export succeeded"), then the
+	// recovery once; the further successful exports in the 3 intervals
+	// above must add nothing.
+	if len(lines) != 2 || !strings.Contains(lines[0], "first export succeeded") || !strings.Contains(lines[1], "recovered") {
+		t.Fatalf("want exactly two debug lines (first success, recovery) after the failure line, got %q", lines)
 	}
 	if w := warnBuf.String(); strings.Count(w, "cloudsqlconn: built-in metrics export failed") != 1 {
 		t.Fatalf("recovery must not add standard-logger output; got %q", w)
@@ -1286,6 +1290,55 @@ func TestCanceledExportIsNotAFailure(t *testing.T) {
 	}
 }
 
+// TestExportDeadlineIsTransient reproduces a slow first token fetch: the
+// export's own deadline expires while per-RPC credentials are still being
+// minted, and gRPC reports it as Unauthenticated. Because the Monitoring API
+// never gave a verdict, it must be backed off as transient: no permanent
+// suspension and no "grant roles/monitoring.metricWriter" warning on the
+// standard logger. (A real Unauthenticated, with time left on the context,
+// stays permanent; see TestIsPermanentExportError and
+// TestRemediationHintMatchesCause.)
+func TestExportDeadlineIsTransient(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = time.Hour
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
+	logger := &recordingLogger{}
+
+	slowCreds := func(ctx context.Context, _ string, _, _ any, _ *grpc.ClientConn, _ grpc.UnaryInvoker, _ ...grpc.CallOption) error {
+		<-ctx.Done()
+		return grpcstatus.Errorf(codes.Unauthenticated,
+			"transport: per-RPC creds failed due to error: credentials: invalid response when retrieving subject token: %v", ctx.Err())
+	}
+	_, conn, cleanup := setupMockServer(t, grpc.WithUnaryInterceptor(slowCreds))
+	t.Cleanup(cleanup)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, logger, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "p", ResourceID: "p:i", Region: "r",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	sctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	_ = mr.Shutdown(sctx) // the final flush runs out of its deadline while "minting a token"
+
+	lines := logger.snapshot()
+	if len(lines) != 1 || !strings.Contains(lines[0], "retrying with backoff") || !strings.Contains(lines[0], "Unauthenticated") {
+		t.Fatalf("want exactly one transient (retrying with backoff) debug line for the Unauthenticated error, got %q", lines)
+	}
+	if strings.Contains(lines[0], "suspending export") {
+		t.Fatalf("a timed-out export must not be treated as permanent, got %q", lines[0])
+	}
+	if w := warnBuf.String(); w != "" {
+		t.Fatalf("a timed-out export must not reach the standard logger, got %q", w)
+	}
+}
+
 // TestRemediationHintMatchesCause verifies that the once-per-process warning
 // names the actual fix for each permanent-error cause, not always the IAM
 // role: a disabled Monitoring API, a universe-domain mismatch and an
@@ -1355,5 +1408,48 @@ func TestConnectorVersionValue(t *testing.T) {
 		if got := tel.ConnectorVersionValue(tc.ua, "1.26.0"); got != tc.want {
 			t.Errorf("ConnectorVersionValue(%q) = %q, want %q", tc.ua, got, tc.want)
 		}
+	}
+}
+
+// TestPermanentErrorWarningIsOneLine verifies that the once-per-process
+// warning is a single physical line even when the gRPC error carries
+// multi-line details, so log collectors see one entry.
+func TestPermanentErrorWarningIsOneLine(t *testing.T) {
+	oldInterval := tel.DefaultExportInterval
+	tel.DefaultExportInterval = 10 * time.Millisecond
+	t.Cleanup(func() { tel.DefaultExportInterval = oldInterval })
+	var warnBuf lockedBuffer
+	restore := tel.SetWarnLoggerForTest(log.New(&warnBuf, "", 0))
+	t.Cleanup(restore)
+
+	mock, conn, cleanup := setupMockServer(t)
+	t.Cleanup(cleanup)
+	st, err := grpcstatus.New(codes.PermissionDenied, "Permission monitoring.timeSeries.create denied (or the resource may not exist).").
+		WithDetails(&errdetails.DebugInfo{Detail: "Permission monitoring.timeSeries.create denied on projects/123: no extra explanation needed."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.setFailureStatus(st)
+	mClient, err := monitoring.NewMetricClient(t.Context(), option.WithGRPCConn(conn), option.WithTokenSource(nullTokenSource{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mr := tel.NewMetricRecorder(ctx, nullLogger{t}, mClient, tel.Config{
+		Enabled: true, Version: "1.2.3", ClientUID: "uid", ResourceContainer: "proj", ResourceID: "proj:inst", Region: "r",
+	})
+	mr.RecordOpenConnectionCount(ctx, tel.Attributes{IPType: "public", AttemptStatus: tel.ConnectSuccess})
+	time.Sleep(100 * time.Millisecond)
+	_ = mr.Shutdown(ctx)
+
+	w := strings.TrimRight(warnBuf.String(), "\n")
+	if w == "" {
+		t.Fatal("expected a warning")
+	}
+	if n := strings.Count(w, "\n"); n != 0 {
+		t.Fatalf("warning spans %d extra line(s): %q", n, w)
+	}
+	if !strings.Contains(w, "DebugInfo") || !strings.Contains(w, "grant roles/monitoring.metricWriter") {
+		t.Fatalf("warning lost content: %q", w)
 	}
 }
