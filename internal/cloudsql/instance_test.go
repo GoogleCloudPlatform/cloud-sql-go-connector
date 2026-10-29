@@ -172,6 +172,13 @@ func TestConnectionInfoTLSConfig(t *testing.T) {
 		)
 	}
 
+	if len(got.CurvePreferences) != 0 {
+		t.Fatalf(
+			"want empty CurvePreferences so crypto/tls uses default post-quantum key exchange (X25519MLKEM768), got = %v",
+			got.CurvePreferences,
+		)
+	}
+
 	if got.Certificates[0].Leaf != ci.ClientCertificate.Leaf {
 		t.Fatal("leaf certificates do not match")
 	}
@@ -525,6 +532,13 @@ func TestConnectionInfoTLSConfigForCAS(t *testing.T) {
 	if got.MinVersion != tls.VersionTLS13 {
 		t.Fatalf(
 			"want CLIENT_PROTOCOL_TLS 1.3, got = %v", got.MinVersion,
+		)
+	}
+
+	if len(got.CurvePreferences) != 0 {
+		t.Fatalf(
+			"want empty CurvePreferences so crypto/tls uses default post-quantum key exchange (X25519MLKEM768), got = %v",
+			got.CurvePreferences,
 		)
 	}
 	if got.Certificates[0].Leaf != ci.ClientCertificate.Leaf {

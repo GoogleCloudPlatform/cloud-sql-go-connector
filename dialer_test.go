@@ -83,11 +83,12 @@ func withMockDNSResolver(r cloudsql.NetResolver) Option {
 
 // setupConfig holds all the configuration to use when setting up a dialer.
 type setupConfig struct {
-	testInstance  mock.FakeCSQLInstance
-	skipServer    bool
-	skipVerify    bool
-	reqs          []*mock.Request
-	dialerOptions []Option
+	testInstance       mock.FakeCSQLInstance
+	skipServer         bool
+	skipVerify         bool
+	reqs               []*mock.Request
+	dialerOptions      []Option
+	serverProxyOptions []mock.ServerProxyOption
 }
 
 // setupDialer configures a Dialer with an HTTP client configured to point at a
@@ -102,7 +103,7 @@ func setupDialer(t *testing.T, c setupConfig) *Dialer {
 	}
 	stop := func() {}
 	if !c.skipServer {
-		stop = mock.StartServerProxy(t, c.testInstance)
+		stop = mock.StartServerProxy(t, c.testInstance, c.serverProxyOptions...)
 	}
 	t.Cleanup(func() {
 		stop()
