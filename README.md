@@ -23,9 +23,10 @@ Go language. Using a Cloud SQL connector provides a native alternative to the
 
 * **IAM Authorization:** uses IAM permissions to control who/what can connect to
   your Cloud SQL instances
-* **Improved Security:** uses robust, updated TLS 1.3 encryption and
-  identity verification between the client connector and the server-side proxy,
-  independent of the database protocol.
+* **Improved Security:** uses robust, updated TLS 1.3 encryption (including
+  automatic [hybrid post-quantum key exchange](#post-quantum-cryptography-pqc))
+  and identity verification between the client connector and the server-side
+  proxy, independent of the database protocol.
 * **Convenience:** removes the requirement to use and distribute SSL
   certificates, as well as manage firewalls or source/destination IP addresses.
 * (optionally) **IAM DB Authentication:** provides support for
@@ -451,6 +452,55 @@ dsn := "user=test-sa dbname=mydb sslmode=disable"
 [Automatic IAM database authentication]: https://cloud.google.com/sql/docs/postgres/authentication#automatic
 [configure-iam-authn]: https://cloud.google.com/sql/docs/postgres/create-edit-iam-instances#configure-iam-db-instance
 [add-iam-user]: https://cloud.google.com/sql/docs/postgres/create-manage-iam-users#creating-a-database-user
+
+### Post-Quantum Cryptography (PQC)
+
+The Cloud SQL Go Connector establishes mTLS connections over TLS 1.3 using Go's
+standard `crypto/tls` package with default curve preferences. When built with
+**Go 1.24 or later** and when your application's main `go.mod` declares
+**`go 1.24` or higher**, the connector automatically offers and negotiates the
+hybrid post-quantum key exchange group **`X25519MLKEM768`** (ML-KEM-768 combined
+with X25519) whenever the Cloud SQL instance supports it. No code changes or
+dialer options are required.
+
+#### `go.mod` language version requirement (`tlsmlkem`)
+
+Go 1.24+ controls default `X25519MLKEM768` support through the `tlsmlkem`
+`GODEBUG` setting, whose default depends on the `go` directive in your
+**application's main `go.mod`**—not just the Go toolchain version used to
+compile the binary:
+
+- `cloud.google.com/go/cloudsqlconn` `v1.19.0` and later already require
+  `go >= 1.24` in `go.mod` (and `v1.25.3+` requires `go >= 1.26.0`), so
+  applications importing `v1.19.0+` automatically have `go 1.24` or higher in
+  their main `go.mod` and enable `X25519MLKEM768` by default.
+- If your application pins an older connector release (`< v1.19.0`) and keeps
+  `go 1.23` or earlier in its main `go.mod`, compiling with Go 1.24+ still
+  defaults to `tlsmlkem=0` (classical curves only). To enable `X25519MLKEM768`
+  in that configuration, update your main `go.mod` directive to `go 1.24` (or
+  higher), add `godebug tlsmlkem=1` to `go.mod`, or add
+  `//go:debug tlsmlkem=1` to your `main` package.
+
+#### Backwards compatibility
+
+Hybrid post-quantum key exchange is backwards-compatible. When `X25519MLKEM768`
+is enabled, Go's `crypto/tls` advertises both hybrid (`X25519MLKEM768`) and
+classical (`X25519`, `P-256`, etc.) groups in the TLS 1.3 `ClientHello`. If a
+Cloud SQL instance does not yet support `X25519MLKEM768`, the TLS handshake
+automatically falls back to classical `X25519` without error.
+
+#### Opting out
+
+To disable post-quantum key exchange and restrict TLS handshakes to classical
+curves, set the `GODEBUG` environment variable at runtime:
+
+```sh
+GODEBUG=tlsmlkem=0
+```
+
+Alternatively, configure the opt-out at build time by adding
+`godebug tlsmlkem=0` to your main `go.mod` or `//go:debug tlsmlkem=0` to a file
+in your `main` package.
 
 ### Enabling Metrics and Tracing
 
