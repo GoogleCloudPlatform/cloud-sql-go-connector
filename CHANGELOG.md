@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.25.4...v1.26.0) (2026-10-29)
+
+
+### Features
+
+* add built-in client metrics exported to Cloud Monitoring, on by default (BETA) ([#1123](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1123)) ([a814420](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/a814420e08ecc14a9daa665583bc60038a737b26))
+
 ## [1.25.4](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.25.3...v1.25.4) (2026-10-14)
 
 
