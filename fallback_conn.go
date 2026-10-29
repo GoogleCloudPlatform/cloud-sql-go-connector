@@ -152,6 +152,8 @@ func (c *fallbackConn) Read(b []byte) (int, error) {
 			return 0, net.ErrClosed
 		}
 
+		// The stream connection failed; release it before switching over.
+		_ = c.conn.Close()
 		c.conn = newConn
 		c.state = stateAfterFirstRead
 		c.cond.Broadcast()
