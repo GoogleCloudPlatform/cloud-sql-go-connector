@@ -295,14 +295,43 @@ func GenerateCertWithCommonName(i FakeCSQLInstance, cn string) []byte {
 	return i.certs.generateServerCertWithCn(cn).Raw
 }
 
+// ServerProxyOption configures StartServerProxy.
+type ServerProxyOption func(*serverProxyConfig)
+
+type serverProxyConfig struct {
+	curvePreferences []tls.CurveID
+	onHandshake      func(tls.ConnectionState)
+}
+
+// WithServerCurvePreferences configures the TLS CurvePreferences used by the
+// fake server proxy. When unset, crypto/tls defaults are used.
+func WithServerCurvePreferences(curves ...tls.CurveID) ServerProxyOption {
+	return func(c *serverProxyConfig) {
+		c.curvePreferences = curves
+	}
+}
+
+// WithServerConnectionStateHook registers a callback invoked with the server's
+// tls.ConnectionState after each accepted TLS handshake completes.
+func WithServerConnectionStateHook(fn func(tls.ConnectionState)) ServerProxyOption {
+	return func(c *serverProxyConfig) {
+		c.onHandshake = fn
+	}
+}
+
 // StartServerProxy starts a fake server proxy and listens on the provided port
 // on all interfaces, configured with TLS as specified by the FakeCSQLInstance.
 // Callers should invoke the returned function to clean up all resources.
-func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
+func StartServerProxy(t *testing.T, i FakeCSQLInstance, opts ...ServerProxyOption) func() {
+	var proxyCfg serverProxyConfig
+	for _, opt := range opts {
+		opt(&proxyCfg)
+	}
 	ln, err := startListenerWithRetries(&tls.Config{
-		Certificates: i.certs.serverChain(i.useStandardTLSValidation),
-		ClientCAs:    i.certs.clientCAPool(),
-		ClientAuth:   tls.RequireAndVerifyClientCert,
+		Certificates:     i.certs.serverChain(i.useStandardTLSValidation),
+		ClientCAs:        i.certs.clientCAPool(),
+		ClientAuth:       tls.RequireAndVerifyClientCert,
+		CurvePreferences: proxyCfg.curvePreferences,
 	})
 	if err != nil {
 		t.Fatalf("failed to start listener: %v", err)
@@ -330,6 +359,17 @@ func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 				}
 
 				go func(c net.Conn) {
+					if proxyCfg.onHandshake != nil {
+						if tlsConn, ok := c.(*tls.Conn); ok {
+							hErr := tlsConn.Handshake()
+							if hErr != nil {
+								t.Logf("Fake server TLS handshake error: %v", hErr)
+							}
+							if hErr == nil {
+								proxyCfg.onHandshake(tlsConn.ConnectionState())
+							}
+						}
+					}
 					csqlBytes := make([]byte, 8)
 					c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 					_, rErr := c.Read(csqlBytes)
