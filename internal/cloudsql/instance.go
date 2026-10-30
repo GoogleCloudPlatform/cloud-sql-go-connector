@@ -26,6 +26,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/auth"
@@ -658,6 +659,9 @@ func probeSinglePrincipal(
 			_, _ = frontend.Receive()
 			frontend.Send(&pgproto3.Terminate{})
 			_ = frontend.Flush()
+			// Wait for server EOF so PgBouncer terminates cleanly without server-side unexpected EOF warning
+			var discard [128]byte
+			_, _ = conn.Read(discard[:])
 		}
 	}
 
@@ -679,26 +683,37 @@ func NewPostgresConn(conn net.Conn, onStartup func(user, database string)) net.C
 
 type postgresConn struct {
 	net.Conn
-	startupMessageSent bool
+	mu                 sync.Mutex
+	startupMessageSent atomic.Bool
 	buf                []byte
 	onStartup          func(user, database string)
 }
 
 func (p *postgresConn) Write(b []byte) (int, error) {
-	if p.startupMessageSent {
+	if p.startupMessageSent.Load() {
+		return p.Conn.Write(b)
+	}
+
+	p.mu.Lock()
+	if p.startupMessageSent.Load() {
+		p.mu.Unlock()
 		return p.Conn.Write(b)
 	}
 
 	p.buf = append(p.buf, b...)
+	var notifyUser, notifyDB string
 	if user, db, complete := parsePostgresStartupPacket(p.buf); complete {
-		p.startupMessageSent = true
+		p.startupMessageSent.Store(true)
 		p.buf = nil
-		if user != "" {
-			p.onStartup(user, db)
-		}
+		notifyUser, notifyDB = user, db
 	} else if len(p.buf) > maxPgStartupPacketLen+8 {
-		p.startupMessageSent = true
+		p.startupMessageSent.Store(true)
 		p.buf = nil
+	}
+	p.mu.Unlock()
+
+	if notifyUser != "" {
+		p.onStartup(notifyUser, notifyDB)
 	}
 
 	return p.Conn.Write(b)
