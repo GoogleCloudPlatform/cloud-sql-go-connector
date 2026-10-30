@@ -964,7 +964,8 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 
 	tlsConn, resolvedIPType, err := d.connect(ctx, cn, ci, cfg)
 	if err != nil {
-		if strings.Contains(err.Error(), "failed to dial") {
+		var dialErr *errtype.DialError
+		if errors.As(err, &dialErr) && dialErr.Message == "failed to dial" {
 			// refresh the instance info in case it caused the connection failure
 			c.ForceRefresh()
 		} else {

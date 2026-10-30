@@ -677,11 +677,6 @@ func NewPostgresConn(conn net.Conn, onStartup func(user, database string)) net.C
 	}
 }
 
-// NewPostgresStartupSnifferConn is an alias for NewPostgresConn for backwards compatibility.
-func NewPostgresStartupSnifferConn(conn net.Conn, onStartup func(user, database string)) net.Conn {
-	return NewPostgresConn(conn, onStartup)
-}
-
 type postgresConn struct {
 	net.Conn
 	startupMessageSent bool
@@ -689,24 +684,24 @@ type postgresConn struct {
 	onStartup          func(user, database string)
 }
 
-func (s *postgresConn) Write(b []byte) (int, error) {
-	if s.startupMessageSent {
-		return s.Conn.Write(b)
+func (p *postgresConn) Write(b []byte) (int, error) {
+	if p.startupMessageSent {
+		return p.Conn.Write(b)
 	}
 
-	s.buf = append(s.buf, b...)
-	if user, db, complete := parsePostgresStartupPacket(s.buf); complete {
-		s.startupMessageSent = true
-		s.buf = nil
+	p.buf = append(p.buf, b...)
+	if user, db, complete := parsePostgresStartupPacket(p.buf); complete {
+		p.startupMessageSent = true
+		p.buf = nil
 		if user != "" {
-			s.onStartup(user, db)
+			p.onStartup(user, db)
 		}
-	} else if len(s.buf) > maxPgStartupPacketLen+8 {
-		s.startupMessageSent = true
-		s.buf = nil
+	} else if len(p.buf) > maxPgStartupPacketLen+8 {
+		p.startupMessageSent = true
+		p.buf = nil
 	}
 
-	return s.Conn.Write(b)
+	return p.Conn.Write(b)
 }
 
 func parsePostgresStartupPacket(buf []byte) (user, database string, complete bool) {
