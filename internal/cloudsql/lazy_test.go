@@ -46,7 +46,7 @@ func TestLazyRefreshCacheConnectionInfo(t *testing.T) {
 	}()
 	c := NewLazyRefreshCache(
 		testInstanceConnName(), nullLogger{}, client,
-		RSAKey, 30*time.Second, nil, "", false, nil, "",
+		RSAKey, 30*time.Second, nil, "", false, nil,
 	)
 
 	ci, err := c.ConnectionInfo(context.Background())
@@ -82,7 +82,7 @@ func TestLazyRefreshCacheForceRefresh(t *testing.T) {
 	}()
 	c := NewLazyRefreshCache(
 		testInstanceConnName(), nullLogger{}, client,
-		RSAKey, 30*time.Second, nil, "", false, nil, "",
+		RSAKey, 30*time.Second, nil, "", false, nil,
 	)
 
 	_, err = c.ConnectionInfo(context.Background())
@@ -137,7 +137,7 @@ func TestLazyRefreshCacheUpdateRefresh(t *testing.T) {
 	spy := &spyTokenProvider{}
 	c := NewLazyRefreshCache(
 		testInstanceConnName(), nullLogger{}, client,
-		RSAKey, 30*time.Second, spy, "", false, nil, "", // disable IAM AuthN at first
+		RSAKey, 30*time.Second, spy, "", false, nil, // disable IAM AuthN at first
 	)
 
 	_, err = c.ConnectionInfo(context.Background())
@@ -208,15 +208,24 @@ func TestLazyRefreshCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 		_ = backend.Flush()
 	}()
 
-	customDial := func(ctx context.Context, network, _ string) (net.Conn, error) {
+	customDial := func(ctx context.Context, ci ConnectionInfo) (net.Conn, error) {
 		var d net.Dialer
-		return d.DialContext(ctx, network, ln.Addr().String())
+		conn, err := d.DialContext(ctx, "tcp", ln.Addr().String())
+		if err != nil {
+			return nil, err
+		}
+		tlsConn := tls.Client(conn, ci.TLSConfig())
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		return tlsConn, nil
 	}
 
 	c := NewLazyRefreshCache(
 		testInstanceConnName(), nullLogger{}, client,
 		RSAKey, 30*time.Second, &spyTokenProvider{}, "", true,
-		customDial, PublicIP,
+		customDial,
 	)
 	c.RecordIAMPrincipal("iam-user@example.com", "mydb")
 

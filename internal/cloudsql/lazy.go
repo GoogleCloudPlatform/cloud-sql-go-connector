@@ -37,8 +37,7 @@ type LazyRefreshCache struct {
 	refreshTimeout  time.Duration
 	mu              sync.Mutex
 	useIAMAuthNDial bool
-	ipType          string
-	dialFunc        func(ctx context.Context, network, addr string) (net.Conn, error)
+	dialFunc        func(ctx context.Context, ci ConnectionInfo) (net.Conn, error)
 	iamPrincipals   []pgPrincipal
 	needsRefresh    bool
 	cached          ConnectionInfo
@@ -54,8 +53,7 @@ func NewLazyRefreshCache(
 	tp auth.TokenProvider,
 	dialerID string,
 	useIAMAuthNDial bool,
-	dialFunc func(ctx context.Context, network, addr string) (net.Conn, error),
-	ipType string,
+	dialFunc func(ctx context.Context, ci ConnectionInfo) (net.Conn, error),
 ) *LazyRefreshCache {
 	return &LazyRefreshCache{
 		connName: cn,
@@ -70,7 +68,6 @@ func NewLazyRefreshCache(
 		refreshTimeout:  refreshTimeout,
 		useIAMAuthNDial: useIAMAuthNDial,
 		dialFunc:        dialFunc,
-		ipType:          ipType,
 	}
 }
 
@@ -127,7 +124,7 @@ func (c *LazyRefreshCache) ConnectionInfo(
 			principals = append(principals, c.iamPrincipals...)
 		}
 		if probeErr := probeInstanceConnection(
-			ctx, ci, c.refreshTimeout, c.ipType, c.dialFunc, principals, c.logger,
+			ctx, ci, c.refreshTimeout, c.dialFunc, principals, c.logger,
 		); probeErr != nil {
 			c.logger.Debugf(
 				ctx,

@@ -114,8 +114,7 @@ type RefreshAheadCache struct {
 
 	mu              sync.RWMutex
 	useIAMAuthNDial bool
-	ipType          string
-	dialFunc        func(ctx context.Context, network, addr string) (net.Conn, error)
+	dialFunc        func(ctx context.Context, ci ConnectionInfo) (net.Conn, error)
 	iamPrincipals   []pgPrincipal
 	// cur represents the current refreshOperation that will be used to
 	// create connections. If a valid complete refreshOperation isn't
@@ -171,8 +170,7 @@ func NewRefreshAheadCache(
 	tp auth.TokenProvider,
 	dialerID string,
 	useIAMAuthNDial bool,
-	dialFunc func(ctx context.Context, network, addr string) (net.Conn, error),
-	ipType string,
+	dialFunc func(ctx context.Context, ci ConnectionInfo) (net.Conn, error),
 ) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &RefreshAheadCache{
@@ -189,7 +187,6 @@ func NewRefreshAheadCache(
 		refreshTimeout:  refreshTimeout,
 		useIAMAuthNDial: useIAMAuthNDial,
 		dialFunc:        dialFunc,
-		ipType:          ipType,
 		ctx:             ctx,
 		cancel:          cancel,
 	}
@@ -578,10 +575,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 	return r
 }
 
-const (
-	serverProxyPort       = "3307"
-	maxPgStartupPacketLen = 10000
-)
+const maxPgStartupPacketLen = 10000
 
 func (i *RefreshAheadCache) probeConnection(ctx context.Context, ci ConnectionInfo) error {
 	var principals []pgPrincipal
@@ -591,7 +585,7 @@ func (i *RefreshAheadCache) probeConnection(ctx context.Context, ci ConnectionIn
 		i.mu.RUnlock()
 	}
 	return probeInstanceConnection(
-		ctx, ci, i.refreshTimeout, i.ipType, i.dialFunc, principals, i.logger,
+		ctx, ci, i.refreshTimeout, i.dialFunc, principals, i.logger,
 	)
 }
 
@@ -599,36 +593,15 @@ func probeInstanceConnection(
 	ctx context.Context,
 	ci ConnectionInfo,
 	refreshTimeout time.Duration,
-	ipType string,
-	dialFunc func(ctx context.Context, network, addr string) (net.Conn, error),
+	dialFunc func(ctx context.Context, ci ConnectionInfo) (net.Conn, error),
 	principals []pgPrincipal,
 	logger debug.ContextLogger,
 ) error {
+	if dialFunc == nil {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, refreshTimeout)
 	defer cancel()
-
-	var targets []string
-	if ci.ConnectionName.HasDomainName() {
-		targets = []string{ci.ConnectionName.DomainName()}
-	} else {
-		if ipType == "" {
-			ipType = AutoIP
-		}
-		addrs, err := ci.Addrs(ipType)
-		if err != nil {
-			return fmt.Errorf("no valid connection targets found for instance %v (ipType %v): %w", ci.ConnectionName.String(), ipType, err)
-		}
-		targets = addrs
-	}
-	if len(targets) == 0 {
-		return fmt.Errorf("no valid connection targets found for instance %v", ci.ConnectionName.String())
-	}
-
-	dial := dialFunc
-	if dial == nil {
-		var netDialer net.Dialer
-		dial = netDialer.DialContext
-	}
 
 	if len(principals) == 0 {
 		principals = []pgPrincipal{{}}
@@ -636,7 +609,7 @@ func probeInstanceConnection(
 
 	var lastErr error
 	for _, principal := range principals {
-		if err := probeSinglePrincipal(ctx, ci, targets, dial, principal, logger); err != nil {
+		if err := probeSinglePrincipal(ctx, ci, dialFunc, principal, logger); err != nil {
 			lastErr = err
 		}
 	}
@@ -651,43 +624,26 @@ func probeInstanceConnection(
 func probeSinglePrincipal(
 	ctx context.Context,
 	ci ConnectionInfo,
-	targets []string,
-	dial func(ctx context.Context, network, addr string) (net.Conn, error),
+	dialFunc func(ctx context.Context, ci ConnectionInfo) (net.Conn, error),
 	principal pgPrincipal,
 	logger debug.ContextLogger,
 ) error {
-	var (
-		conn    net.Conn
-		dialErr error
-	)
-	for _, target := range targets {
-		dialAddr := net.JoinHostPort(target, serverProxyPort)
-		logger.Debugf(ctx, "[%v] Probing IAM token refresh on %v", ci.ConnectionName.String(), dialAddr)
-		conn, dialErr = dial(ctx, "tcp", dialAddr)
-		if dialErr == nil {
-			break
-		}
-		logger.Debugf(ctx, "[%v] Probing IAM token refresh on %v failed: %v", ci.ConnectionName.String(), dialAddr, dialErr)
-	}
-	if dialErr != nil {
-		return fmt.Errorf("failed to dial probe connection: %w", dialErr)
+	logger.Debugf(ctx, "[%v] Probing IAM token refresh", ci.ConnectionName.String())
+	conn, err := dialFunc(ctx, ci)
+	if err != nil {
+		return fmt.Errorf("failed to dial probe connection: %w", err)
 	}
 	defer conn.Close()
 
-	tlsConn := tls.Client(conn, ci.TLSConfig())
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		return fmt.Errorf("probe TLS handshake failed: %w", err)
-	}
-
 	if principal.user != "" {
 		if dl, ok := ctx.Deadline(); ok {
-			_ = tlsConn.SetDeadline(dl)
+			_ = conn.SetDeadline(dl)
 		}
 		database := principal.database
 		if database == "" {
 			database = principal.user
 		}
-		frontend := pgproto3.NewFrontend(tlsConn, tlsConn)
+		frontend := pgproto3.NewFrontend(conn, conn)
 		frontend.Send(&pgproto3.StartupMessage{
 			ProtocolVersion: pgproto3.ProtocolVersion30,
 			Parameters: map[string]string{
@@ -705,44 +661,48 @@ func probeSinglePrincipal(
 		}
 	}
 
-	_ = tlsConn.Close()
 	return nil
 }
 
-// NewPostgresStartupSnifferConn wraps conn so that the first PostgreSQL v3
+// NewPostgresConn wraps conn so that the first PostgreSQL v3
 // StartupMessage written by the client is inspected to extract (user, database)
 // and passed to onStartup. Subsequent writes pass through with zero overhead.
-func NewPostgresStartupSnifferConn(conn net.Conn, onStartup func(user, database string)) net.Conn {
+func NewPostgresConn(conn net.Conn, onStartup func(user, database string)) net.Conn {
 	if onStartup == nil {
 		return conn
 	}
-	return &pgStartupSnifferConn{
+	return &postgresConn{
 		Conn:      conn,
 		onStartup: onStartup,
 	}
 }
 
-type pgStartupSnifferConn struct {
-	net.Conn
-	done      bool
-	buf       []byte
-	onStartup func(user, database string)
+// NewPostgresStartupSnifferConn is an alias for NewPostgresConn for backwards compatibility.
+func NewPostgresStartupSnifferConn(conn net.Conn, onStartup func(user, database string)) net.Conn {
+	return NewPostgresConn(conn, onStartup)
 }
 
-func (s *pgStartupSnifferConn) Write(b []byte) (int, error) {
-	if s.done {
+type postgresConn struct {
+	net.Conn
+	startupMessageSent bool
+	buf                []byte
+	onStartup          func(user, database string)
+}
+
+func (s *postgresConn) Write(b []byte) (int, error) {
+	if s.startupMessageSent {
 		return s.Conn.Write(b)
 	}
 
 	s.buf = append(s.buf, b...)
 	if user, db, complete := parsePostgresStartupPacket(s.buf); complete {
-		s.done = true
+		s.startupMessageSent = true
 		s.buf = nil
 		if user != "" {
 			s.onStartup(user, db)
 		}
 	} else if len(s.buf) > maxPgStartupPacketLen+8 {
-		s.done = true
+		s.startupMessageSent = true
 		s.buf = nil
 	}
 

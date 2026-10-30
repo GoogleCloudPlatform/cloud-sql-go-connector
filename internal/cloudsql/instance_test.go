@@ -76,7 +76,7 @@ func TestConnectionInfoDBVersion(t *testing.T) {
 		}()
 		i := NewRefreshAheadCache(
 			testInstanceConnName(), nullLogger{}, client,
-			RSAKey, 30*time.Second, nil, "", false, nil, "",
+			RSAKey, 30*time.Second, nil, "", false, nil,
 		)
 		if err != nil {
 			t.Fatalf("failed to init instance: %v", err)
@@ -115,7 +115,7 @@ func TestConnectionInfo(t *testing.T) {
 
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
-		RSAKey, 30*time.Second, nil, "", false, nil, "",
+		RSAKey, 30*time.Second, nil, "", false, nil,
 	)
 
 	ci, err := i.ConnectionInfo(ctx)
@@ -267,7 +267,7 @@ func TestConnectInfoAutoIP(t *testing.T) {
 
 		i := NewRefreshAheadCache(
 			testInstanceConnName(), nullLogger{}, client,
-			RSAKey, 30*time.Second, nil, "", false, nil, "",
+			RSAKey, 30*time.Second, nil, "", false, nil,
 		)
 		if err != nil {
 			t.Fatalf("failed to create mock instance: %v", err)
@@ -362,7 +362,7 @@ func TestConnectInfoSQLDataFallbackIP(t *testing.T) {
 
 			i := NewRefreshAheadCache(
 				testInstanceConnName(), nullLogger{}, client,
-				RSAKey, 30*time.Second, nil, "", false, nil, "",
+				RSAKey, 30*time.Second, nil, "", false, nil,
 			)
 
 			ci, err := i.ConnectionInfo(context.Background())
@@ -407,7 +407,7 @@ func TestClose(t *testing.T) {
 	// Set up an instance and then close it immediately
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
-		RSAKey, 30*time.Second, nil, "", false, nil, "",
+		RSAKey, 30*time.Second, nil, "", false, nil,
 	)
 	i.Close()
 
@@ -634,15 +634,24 @@ func TestRefreshAheadCache_ProbeConnection_Success(t *testing.T) {
 		close(probed)
 	}()
 
-	dialFunc := func(ctx context.Context, network, _ string) (net.Conn, error) {
+	dialFunc := func(ctx context.Context, ci ConnectionInfo) (net.Conn, error) {
 		var d net.Dialer
-		return d.DialContext(ctx, network, ln.Addr().String())
+		conn, err := d.DialContext(ctx, "tcp", ln.Addr().String())
+		if err != nil {
+			return nil, err
+		}
+		tlsConn := tls.Client(conn, ci.TLSConfig())
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		return tlsConn, nil
 	}
 
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
 		RSAKey, 30*time.Second, nil, "", true,
-		dialFunc, "",
+		dialFunc,
 	)
 	defer i.Close()
 
@@ -672,14 +681,14 @@ func TestRefreshAheadCache_ProbeConnection_DialErrorDoesNotFailRefresh(t *testin
 	}
 	defer cleanup()
 
-	dialFunc := func(_ context.Context, _, _ string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, _ ConnectionInfo) (net.Conn, error) {
 		return nil, errors.New("network unreachable")
 	}
 
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
 		RSAKey, 30*time.Second, nil, "", true,
-		dialFunc, "",
+		dialFunc,
 	)
 	defer i.Close()
 
@@ -725,7 +734,7 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 		database     string
 		sawTerminate bool
 	}
-	startupProbeCh := make(chan probeRecord, 2)
+	startupProbeCh := make(chan probeRecord, 1)
 	go func() {
 		for {
 			conn, err := tlsLn.Accept()
@@ -754,19 +763,30 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 					database:     sm.Parameters["database"],
 					sawTerminate: sawTerm,
 				}
+				close(startupProbeCh)
+				return
 			}(conn)
 		}
 	}()
 
-	dialFunc := func(ctx context.Context, network, _ string) (net.Conn, error) {
+	dialFunc := func(ctx context.Context, ci ConnectionInfo) (net.Conn, error) {
 		var d net.Dialer
-		return d.DialContext(ctx, network, ln.Addr().String())
+		conn, err := d.DialContext(ctx, "tcp", ln.Addr().String())
+		if err != nil {
+			return nil, err
+		}
+		tlsConn := tls.Client(conn, ci.TLSConfig())
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		return tlsConn, nil
 	}
 
 	i := NewRefreshAheadCache(
 		testInstanceConnName(), nullLogger{}, client,
 		RSAKey, 30*time.Second, nil, "", true,
-		dialFunc, "",
+		dialFunc,
 	)
 	defer i.Close()
 
@@ -786,14 +806,14 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 			}
 		}
 	}()
-	sniffer := NewPostgresStartupSnifferConn(c1, i.RecordIAMPrincipal)
+	pgConn := NewPostgresConn(c1, i.RecordIAMPrincipal)
 	// Write SSLRequest followed by StartupMessage using pgproto3
 	sslReq, err := (&pgproto3.SSLRequest{}).Encode(nil)
 	if err != nil {
 		t.Fatalf("encode SSLRequest failed: %v", err)
 	}
-	if _, err := sniffer.Write(sslReq); err != nil {
-		t.Fatalf("sniffer write SSLRequest failed: %v", err)
+	if _, err := pgConn.Write(sslReq); err != nil {
+		t.Fatalf("pgConn write SSLRequest failed: %v", err)
 	}
 	startupPkt, err := (&pgproto3.StartupMessage{
 		ProtocolVersion: pgproto3.ProtocolVersion30,
@@ -805,8 +825,13 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode StartupMessage failed: %v", err)
 	}
-	if _, err := sniffer.Write(startupPkt); err != nil {
-		t.Fatalf("sniffer write StartupMessage failed: %v", err)
+	// Break the initial startup request into multiple Write() calls to prove
+	// connection state handles partial I/O.
+	if _, err := pgConn.Write(startupPkt[0:1]); err != nil {
+		t.Fatalf("pgConn write partial StartupMessage failed: %v", err)
+	}
+	if _, err := pgConn.Write(startupPkt[1:]); err != nil {
+		t.Fatalf("pgConn write remaining StartupMessage failed: %v", err)
 	}
 
 	// Trigger a background refresh and verify probeConnection sends StartupMessage + Terminate.
@@ -825,5 +850,89 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for PostgreSQL startup probe packet")
+	}
+}
+
+func TestPostgresConn_ChunkedWrites(t *testing.T) {
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	defer c2.Close()
+
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			if _, err := c2.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	var (
+		gotUser string
+		gotDB   string
+		calls   int
+	)
+	conn := NewPostgresConn(c1, func(u, db string) {
+		gotUser = u
+		gotDB = db
+		calls++
+	})
+
+	// Encode SSLRequest and StartupMessage
+	sslReq, err := (&pgproto3.SSLRequest{}).Encode(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startupPkt, err := (&pgproto3.StartupMessage{
+		ProtocolVersion: pgproto3.ProtocolVersion30,
+		Parameters: map[string]string{
+			"user":     "stream-user@example.com",
+			"database": "streamdb",
+		},
+	}).Encode(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write SSLRequest in 2 chunks
+	mid := len(sslReq) / 2
+	if _, err := conn.Write(sslReq[:mid]); err != nil {
+		t.Fatalf("Write sslReq chunk 1 failed: %v", err)
+	}
+	if _, err := conn.Write(sslReq[mid:]); err != nil {
+		t.Fatalf("Write sslReq chunk 2 failed: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("expected 0 onStartup calls after SSLRequest, got %d", calls)
+	}
+
+	// Write StartupMessage 1 byte at a time to test fine-grained streaming
+	for i := 0; i < len(startupPkt)-1; i++ {
+		if _, err := conn.Write(startupPkt[i : i+1]); err != nil {
+			t.Fatalf("Write byte %d failed: %v", i, err)
+		}
+		if calls != 0 {
+			t.Fatalf("expected 0 onStartup calls before final byte, got %d at index %d", calls, i)
+		}
+	}
+
+	// Write final byte
+	if _, err := conn.Write(startupPkt[len(startupPkt)-1:]); err != nil {
+		t.Fatalf("Write final byte failed: %v", err)
+	}
+
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 onStartup call, got %d", calls)
+	}
+	if gotUser != "stream-user@example.com" || gotDB != "streamdb" {
+		t.Fatalf("unexpected user/db: got (%q, %q), want (\"stream-user@example.com\", \"streamdb\")", gotUser, gotDB)
+	}
+
+	// Subsequent write passes through directly
+	if _, err := conn.Write([]byte("QSELECT 1;\x00")); err != nil {
+		t.Fatalf("Subsequent write failed: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected no additional onStartup calls on subsequent writes, got %d", calls)
 	}
 }
