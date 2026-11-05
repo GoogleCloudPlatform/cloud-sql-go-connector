@@ -953,7 +953,7 @@ func TestPostgresConn_ConcurrentWrites(t *testing.T) {
 		}
 	}()
 
-	conn := NewPostgresConn(c1, func(u, db string) {})
+	conn := NewPostgresConn(c1, func(_, _ string) {})
 
 	startupPkt, err := (&pgproto3.StartupMessage{
 		ProtocolVersion: pgproto3.ProtocolVersion30,

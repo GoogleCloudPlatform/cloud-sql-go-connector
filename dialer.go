@@ -986,7 +986,7 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	attrs.IPType = resolvedIPType
 
 	// Use tlsConn as the official connection
-	var netConn net.Conn = tlsConn
+	netConn := tlsConn
 	// Send MDX if the client protocol type was set.
 	mdxReq := newMDXRequest(ci, cfg, d.metadataExchangeDisabled)
 	if mdxReq != nil {
