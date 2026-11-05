@@ -15,14 +15,12 @@
 package cloudsql
 
 import (
-	"bytes"
 	"context"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
+	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
 	"strings"
 	"sync"
@@ -681,10 +679,20 @@ func NewPostgresConn(conn net.Conn, onStartup func(user, database string)) net.C
 	}
 }
 
+type parserState int
+
+const (
+	stateReadLength parserState = iota
+	stateReadBody
+	stateDone
+)
+
 type postgresConn struct {
 	net.Conn
 	mu                 sync.Mutex
 	startupMessageSent atomic.Bool
+	state              parserState
+	expectedLen        int
 	buf                []byte
 	onStartup          func(user, database string)
 }
@@ -702,14 +710,65 @@ func (p *postgresConn) Write(b []byte) (int, error) {
 
 	p.buf = append(p.buf, b...)
 	var notifyUser, notifyDB string
-	if user, db, complete := parsePostgresStartupPacket(p.buf); complete {
-		p.startupMessageSent.Store(true)
-		p.buf = nil
-		notifyUser, notifyDB = user, db
-	} else if len(p.buf) > maxPgStartupPacketLen+8 {
-		p.startupMessageSent.Store(true)
-		p.buf = nil
+
+	for {
+		switch p.state {
+		case stateReadLength:
+			if len(p.buf) < 4 {
+				goto done
+			}
+			p.expectedLen = int(binary.BigEndian.Uint32(p.buf[:4]))
+			if p.expectedLen < 8 || p.expectedLen > maxPgStartupPacketLen+8 {
+				p.state = stateDone
+				p.startupMessageSent.Store(true)
+				p.buf = nil
+				goto done
+			}
+			p.state = stateReadBody
+			fallthrough
+
+		case stateReadBody:
+			if len(p.buf) < p.expectedLen {
+				goto done
+			}
+			pkt := p.buf[:p.expectedLen]
+			code := binary.BigEndian.Uint32(pkt[4:8])
+
+			switch code {
+			case 80877103, 80877104: // SSLRequest or GSSEncRequest (always 8 bytes)
+				p.buf = p.buf[p.expectedLen:]
+				p.state = stateReadLength
+				continue
+
+			case pgproto3.ProtocolVersion30, pgproto3.ProtocolVersion32:
+				var sm pgproto3.StartupMessage
+				if err := sm.Decode(pkt[4:p.expectedLen]); err == nil {
+					user := sm.Parameters["user"]
+					database := sm.Parameters["database"]
+					if user != "" && database == "" {
+						database = user
+					}
+					notifyUser, notifyDB = user, database
+				}
+				p.state = stateDone
+				p.startupMessageSent.Store(true)
+				p.buf = nil
+				goto done
+
+			default:
+				p.state = stateDone
+				p.startupMessageSent.Store(true)
+				p.buf = nil
+				goto done
+			}
+
+		case stateDone:
+			p.buf = nil
+			goto done
+		}
 	}
+
+done:
 	p.mu.Unlock()
 
 	if notifyUser != "" {
@@ -717,30 +776,4 @@ func (p *postgresConn) Write(b []byte) (int, error) {
 	}
 
 	return p.Conn.Write(b)
-}
-
-func parsePostgresStartupPacket(buf []byte) (user, database string, complete bool) {
-	backend := pgproto3.NewBackend(bytes.NewReader(buf), io.Discard)
-	for {
-		msg, err := backend.ReceiveStartupMessage()
-		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				return "", "", false
-			}
-			return "", "", true
-		}
-		switch m := msg.(type) {
-		case *pgproto3.SSLRequest, *pgproto3.GSSEncRequest:
-			continue
-		case *pgproto3.StartupMessage:
-			user = m.Parameters["user"]
-			database = m.Parameters["database"]
-			if user != "" && database == "" {
-				database = user
-			}
-			return user, database, true
-		default:
-			return "", "", true
-		}
-	}
 }

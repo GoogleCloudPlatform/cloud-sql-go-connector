@@ -15,6 +15,7 @@
 package cloudsql
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -974,4 +975,143 @@ func TestPostgresConn_ConcurrentWrites(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestPostgresConn_GSSAndSSLRequest(t *testing.T) {
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	defer c2.Close()
+
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			if _, err := c2.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	var (
+		gotUser string
+		gotDB   string
+		calls   int
+	)
+	conn := NewPostgresConn(c1, func(u, db string) {
+		gotUser = u
+		gotDB = db
+		calls++
+	})
+
+	gssReq, err := (&pgproto3.GSSEncRequest{}).Encode(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sslReq, err := (&pgproto3.SSLRequest{}).Encode(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startupPkt, err := (&pgproto3.StartupMessage{
+		ProtocolVersion: pgproto3.ProtocolVersion30,
+		Parameters: map[string]string{
+			"user":     "gss-user@example.com",
+			"database": "gssdb",
+		},
+	}).Encode(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write GSSEncRequest, then SSLRequest, then StartupMessage
+	if _, err := conn.Write(gssReq); err != nil {
+		t.Fatalf("Write gssReq failed: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("expected 0 calls after GSSEncRequest, got %d", calls)
+	}
+
+	if _, err := conn.Write(sslReq); err != nil {
+		t.Fatalf("Write sslReq failed: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("expected 0 calls after SSLRequest, got %d", calls)
+	}
+
+	if _, err := conn.Write(startupPkt); err != nil {
+		t.Fatalf("Write startupPkt failed: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected 1 call after StartupMessage, got %d", calls)
+	}
+	if gotUser != "gss-user@example.com" || gotDB != "gssdb" {
+		t.Fatalf("unexpected user/db: got (%q, %q), want (\"gss-user@example.com\", \"gssdb\")", gotUser, gotDB)
+	}
+}
+
+func TestPostgresConn_PipelinedWrite(t *testing.T) {
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	defer c2.Close()
+
+	var received bytes.Buffer
+	doneReading := make(chan struct{})
+	go func() {
+		defer close(doneReading)
+		buf := make([]byte, 1024)
+		for {
+			n, err := c2.Read(buf)
+			if n > 0 {
+				received.Write(buf[:n])
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	var (
+		gotUser string
+		gotDB   string
+		calls   int
+	)
+	conn := NewPostgresConn(c1, func(u, db string) {
+		gotUser = u
+		gotDB = db
+		calls++
+	})
+
+	startupPkt, err := (&pgproto3.StartupMessage{
+		ProtocolVersion: pgproto3.ProtocolVersion30,
+		Parameters: map[string]string{
+			"user":     "pipelined-user@example.com",
+			"database": "pipelinedb",
+		},
+	}).Encode(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	queryPkt := []byte("QSELECT 1;\x00")
+	combined := append(startupPkt, queryPkt...)
+
+	// Write both in a single pipelined write
+	n, err := conn.Write(combined)
+	if err != nil {
+		t.Fatalf("Write combined failed: %v", err)
+	}
+	if n != len(combined) {
+		t.Fatalf("wrote %d bytes, want %d", n, len(combined))
+	}
+
+	if calls != 1 {
+		t.Fatalf("expected 1 call after pipelined write, got %d", calls)
+	}
+	if gotUser != "pipelined-user@example.com" || gotDB != "pipelinedb" {
+		t.Fatalf("unexpected user/db: got (%q, %q)", gotUser, gotDB)
+	}
+
+	c1.Close()
+	<-doneReading
+	if !bytes.Equal(received.Bytes(), combined) {
+		t.Fatalf("wire received bytes mismatch: got %d bytes, want %d", received.Len(), len(combined))
+	}
 }
