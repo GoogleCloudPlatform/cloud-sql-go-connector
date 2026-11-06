@@ -24,7 +24,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/auth"
@@ -689,91 +688,91 @@ const (
 
 type postgresConn struct {
 	net.Conn
-	mu                 sync.Mutex
-	startupMessageSent atomic.Bool
-	state              parserState
-	expectedLen        int
-	buf                []byte
-	onStartup          func(user, database string)
+	done        bool
+	state       parserState
+	expectedLen int
+	buf         []byte
+	onStartup   func(user, database string)
 }
 
 func (p *postgresConn) Write(b []byte) (int, error) {
-	if p.startupMessageSent.Load() {
+	if p.done {
 		return p.Conn.Write(b)
 	}
 
-	p.mu.Lock()
-	if p.startupMessageSent.Load() {
-		p.mu.Unlock()
-		return p.Conn.Write(b)
+	if user, db := p.parseStream(b); user != "" {
+		p.onStartup(user, db)
 	}
 
+	return p.Conn.Write(b)
+}
+
+// parseStream feeds incoming chunks into the state machine to identify
+// the PostgreSQL v3.0 StartupMessage and extract client parameters.
+func (p *postgresConn) parseStream(b []byte) (user, database string) {
 	p.buf = append(p.buf, b...)
-	var notifyUser, notifyDB string
 
 	for {
 		switch p.state {
 		case stateReadLength:
+			// Step 1: Wait for at least 4 bytes to determine total packet length.
 			if len(p.buf) < 4 {
-				goto done
+				return "", ""
 			}
 			p.expectedLen = int(binary.BigEndian.Uint32(p.buf[:4]))
+			// PostgreSQL packets are at least 8 bytes (4 bytes length + 4 bytes code).
+			// If length is malformed or exceeds maximum, stop inspection.
 			if p.expectedLen < 8 || p.expectedLen > maxPgStartupPacketLen+8 {
 				p.state = stateDone
-				p.startupMessageSent.Store(true)
+				p.done = true
 				p.buf = nil
-				goto done
+				return "", ""
 			}
 			p.state = stateReadBody
 			fallthrough
 
 		case stateReadBody:
+			// Step 2: Wait until the complete packet body has arrived.
 			if len(p.buf) < p.expectedLen {
-				goto done
+				return "", ""
 			}
 			pkt := p.buf[:p.expectedLen]
 			code := binary.BigEndian.Uint32(pkt[4:8])
 
 			switch code {
 			case 80877103, 80877104: // SSLRequest or GSSEncRequest (always 8 bytes)
+				// Step 3: SSL/GSS negotiation precedes the StartupMessage.
+				// Discard this 8-byte request and loop back to read the next packet length.
 				p.buf = p.buf[p.expectedLen:]
 				p.state = stateReadLength
 				continue
 
 			case pgproto3.ProtocolVersion30, pgproto3.ProtocolVersion32:
+				// Step 4: Decode v3.0 StartupMessage and extract connection parameters.
 				var sm pgproto3.StartupMessage
 				if err := sm.Decode(pkt[4:p.expectedLen]); err == nil {
-					user := sm.Parameters["user"]
-					database := sm.Parameters["database"]
+					user = sm.Parameters["user"]
+					database = sm.Parameters["database"]
 					if user != "" && database == "" {
 						database = user
 					}
-					notifyUser, notifyDB = user, database
 				}
 				p.state = stateDone
-				p.startupMessageSent.Store(true)
+				p.done = true
 				p.buf = nil
-				goto done
+				return user, database
 
 			default:
+				// Step 5: Unknown protocol code or unexpected packet; stop parsing.
 				p.state = stateDone
-				p.startupMessageSent.Store(true)
+				p.done = true
 				p.buf = nil
-				goto done
+				return "", ""
 			}
 
 		case stateDone:
 			p.buf = nil
-			goto done
+			return "", ""
 		}
 	}
-
-done:
-	p.mu.Unlock()
-
-	if notifyUser != "" {
-		p.onStartup(notifyUser, notifyDB)
-	}
-
-	return p.Conn.Write(b)
 }
