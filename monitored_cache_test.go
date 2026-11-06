@@ -40,8 +40,8 @@ func TestMonitoredCache_purgeClosedConns(t *testing.T) {
 	// Add connections
 	c.mu.Lock()
 	c.openConns = []*instrumentedConn{
-		&instrumentedConn{closed: false},
-		&instrumentedConn{closed: true},
+		{closed: false},
+		{closed: true},
 	}
 	c.mu.Unlock()
 

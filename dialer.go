@@ -139,6 +139,7 @@ type connectionInfoCache interface {
 	ConnectionInfo(context.Context) (cloudsql.ConnectionInfo, error)
 	UpdateRefresh(*bool)
 	ForceRefresh()
+	RecordIAMPrincipal(user, database string)
 	io.Closer
 }
 
@@ -961,9 +962,19 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	ctx, connectEnd = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.Connect")
 	defer func() { connectEnd(err) }()
 
-	addrs, resolvedIPType, err := ci.ResolveAddrs(cfg.connectionType)
+	tlsConn, resolvedIPType, err := d.connect(ctx, cn, ci, cfg)
 	if err != nil {
-		d.removeCached(ctx, cn, c, err)
+		var dialErr *errtype.DialError
+		if errors.As(err, &dialErr) && dialErr.Message == "failed to dial" {
+			// refresh the instance info in case it caused the connection failure
+			c.ForceRefresh()
+		} else {
+			// TLS handshake or address configuration errors are fatal and require a refresh.
+			// Remove the instance from the cache so that future calls to Dial() will block
+			// until the certificate is refreshed successfully.
+			d.logger.Debugf(ctx, "[%v] Connection failed: %v", cn.String(), err)
+			d.removeCached(ctx, cn, c, err)
+		}
 		attrs.DialStatus = tel.ConnectError
 		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
 		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
@@ -974,100 +985,15 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	// (e.g. "public" instead of "auto").
 	attrs.IPType = resolvedIPType
 
-	var targets []string
-
-	// If the connector is configured with a custom DNS name, attempt to use
-	// that DNS name to connect to the instance. Fall back to the metadata IP
-	// address if the DNS name does not resolve to an IP address.
-	if cn.HasDomainName() {
-		resolved, err := d.dnsResolver.LookupHost(ctx, cn.DomainName())
-		if err != nil {
-			d.logger.Debugf(ctx,
-				"[%v] custom DNS name %q did not resolve to an IP address: %v, using %s from instance metadata",
-				cn.String(), cn.DomainName(), err, addrs)
-			targets = addrs
-		} else if len(resolved) == 0 {
-			d.logger.Debugf(ctx,
-				"[%v] custom DNS name %q resolved but returned no entries, using %s from instance metadata",
-				cn.String(), cn.DomainName(), addrs)
-			targets = addrs
-		} else {
-			d.logger.Debugf(ctx,
-				"[%v] custom DNS name %q resolved to %q, using it to connect",
-				cn.String(), cn.DomainName(), resolved)
-			targets = resolved
-		}
-	} else {
-		targets = addrs
-	}
-
-	f := d.dialFunc
-	if cfg.dialFunc != nil {
-		f = cfg.dialFunc
-	}
-	// Attempt to dial each of the targets in turn. Use the first one that succeeds.
-	var dialErrs []error
-	for _, target := range targets {
-		dialAddr := net.JoinHostPort(target, serverProxyPort)
-		d.logger.Debugf(ctx, "[%v] Dialing %v", cn.String(), dialAddr)
-		var dialErr error
-		conn, dialErr = f(ctx, "tcp", dialAddr)
-		if dialErr == nil {
-			dialErrs = nil
-			break
-		}
-		dialErrs = append(dialErrs, dialErr)
-		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", cn.String(), dialAddr, dialErr)
-	}
-	if len(dialErrs) > 0 {
-		// refresh the instance info in case it caused the connection failure
-		c.ForceRefresh()
-		dialErr := errors.Join(dialErrs...)
-		attrs.DialStatus = tel.ConnectError
-		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(dialErr)
-		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
-		mr.RecordOpenConnectionCount(ctx, attrs)
-		return nil, errtype.NewDialError("failed to dial", cn.String(), dialErr)
-	}
-	if c, ok := conn.(*net.TCPConn); ok {
-		if err := c.SetKeepAlive(true); err != nil {
-			attrs.DialStatus = tel.ConnectError
-			attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
-			mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
-			mr.RecordOpenConnectionCount(ctx, attrs)
-			return nil, errtype.NewDialError("failed to set keep-alive", cn.String(), err)
-		}
-		if err := c.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
-			attrs.DialStatus = tel.ConnectError
-			attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
-			mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
-			mr.RecordOpenConnectionCount(ctx, attrs)
-			return nil, errtype.NewDialError("failed to set keep-alive period", cn.String(), err)
-		}
-	}
-
-	tlsConn := tls.Client(conn, ci.TLSConfig())
-	err = tlsConn.HandshakeContext(ctx)
-	if err != nil {
-		// TLS handshake errors are fatal and require a refresh. Remove the instance
-		// from the cache so that future calls to Dial() will block until the
-		// certificate is refreshed successfully.
-		d.logger.Debugf(ctx, "[%v] TLS handshake failed: %v", cn.String(), err)
-		d.removeCached(ctx, cn, c, err)
-		_ = tlsConn.Close() // best effort close attempt
-		attrs.DialStatus = tel.ConnectError
-		attrs.ConnectionPart, attrs.AttemptStatus = tel.ClassifyDialError(err)
-		mr.RecordConnectLatencies(ctx, attrs, time.Since(startTime).Milliseconds())
-		mr.RecordOpenConnectionCount(ctx, attrs)
-		return nil, errtype.NewDialError("handshake failed", cn.String(), err)
-	}
-
 	// Use tlsConn as the official connection
-	var netConn net.Conn = tlsConn
+	netConn := tlsConn
 	// Send MDX if the client protocol type was set.
 	mdxReq := newMDXRequest(ci, cfg, d.metadataExchangeDisabled)
 	if mdxReq != nil {
 		netConn = cloudsql.NewMDXConn(tlsConn, cn.String(), mdxReq, d.logger)
+	}
+	if cfg.useIAMAuthN && strings.HasPrefix(ci.DBVersion, "POSTGRES") {
+		netConn = cloudsql.NewPostgresConn(netConn, c.RecordIAMPrincipal)
 	}
 
 	latency := time.Since(startTime).Milliseconds()
@@ -1116,6 +1042,82 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	}
 	d.logger.Debugf(ctx, "dial successful")
 	return iConn, nil
+}
+
+// connect establishes a TLS connection to the instance specified by cn and ci,
+// using the provided dialConfig.
+func (d *Dialer) connect(ctx context.Context, cn instance.ConnName, ci cloudsql.ConnectionInfo, cfg dialConfig) (net.Conn, string, error) {
+	addrs, resolvedIPType, err := ci.ResolveAddrs(cfg.connectionType)
+	if err != nil {
+		return nil, "", err
+	}
+
+	var targets []string
+
+	// If the connector is configured with a custom DNS name, attempt to use
+	// that DNS name to connect to the instance. Fall back to the metadata IP
+	// address if the DNS name does not resolve to an IP address.
+	if cn.HasDomainName() {
+		resolved, err := d.dnsResolver.LookupHost(ctx, cn.DomainName())
+		if err != nil {
+			d.logger.Debugf(ctx,
+				"[%v] custom DNS name %q did not resolve to an IP address: %v, using %s from instance metadata",
+				cn.String(), cn.DomainName(), err, addrs)
+			targets = addrs
+		} else if len(resolved) == 0 {
+			d.logger.Debugf(ctx,
+				"[%v] custom DNS name %q resolved but returned no entries, using %s from instance metadata",
+				cn.String(), cn.DomainName(), addrs)
+			targets = addrs
+		} else {
+			d.logger.Debugf(ctx,
+				"[%v] custom DNS name %q resolved to %q, using it to connect",
+				cn.String(), cn.DomainName(), resolved)
+			targets = resolved
+		}
+	} else {
+		targets = addrs
+	}
+
+	f := d.dialFunc
+	if cfg.dialFunc != nil {
+		f = cfg.dialFunc
+	}
+	// Attempt to dial each of the targets in turn. Use the first one that succeeds.
+	var dialErrs []error
+	var conn net.Conn
+	for _, target := range targets {
+		dialAddr := net.JoinHostPort(target, serverProxyPort)
+		d.logger.Debugf(ctx, "[%v] Dialing %v", cn.String(), dialAddr)
+		var dialErr error
+		conn, dialErr = f(ctx, "tcp", dialAddr)
+		if dialErr == nil {
+			dialErrs = nil
+			break
+		}
+		dialErrs = append(dialErrs, dialErr)
+		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", cn.String(), dialAddr, dialErr)
+	}
+	if len(dialErrs) > 0 {
+		return nil, resolvedIPType, errtype.NewDialError("failed to dial", cn.String(), errors.Join(dialErrs...))
+	}
+	if tc, ok := conn.(*net.TCPConn); ok {
+		if err := tc.SetKeepAlive(true); err != nil {
+			return nil, resolvedIPType, errtype.NewDialError("failed to set keep-alive", cn.String(), err)
+		}
+		if err := tc.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
+			return nil, resolvedIPType, errtype.NewDialError("failed to set keep-alive period", cn.String(), err)
+		}
+	}
+
+	tlsConn := tls.Client(conn, ci.TLSConfig())
+	err = tlsConn.HandshakeContext(ctx)
+	if err != nil {
+		_ = tlsConn.Close() // best effort close attempt
+		return nil, resolvedIPType, errtype.NewDialError("handshake failed", cn.String(), err)
+	}
+
+	return tlsConn, resolvedIPType, nil
 }
 
 func isSQLDataUnsupportedError(err error) bool {
@@ -1467,6 +1469,10 @@ func (d *Dialer) connectionInfoCache(
 	if err != nil {
 		return nil, err
 	}
+	dialFunc := func(ctx context.Context, ci cloudsql.ConnectionInfo) (net.Conn, error) {
+		conn, _, err := d.connect(ctx, cn, ci, d.defaultDialConfig)
+		return conn, err
+	}
 	var cache connectionInfoCache
 	if d.lazyRefresh {
 		cache = cloudsql.NewLazyRefreshCache(
@@ -1475,6 +1481,7 @@ func (d *Dialer) connectionInfoCache(
 			d.sqladmin, rsaKey,
 			d.refreshTimeout, d.iamTokenProvider,
 			d.dialerID, useIAMAuthNDial,
+			dialFunc,
 		)
 	} else {
 		cache = cloudsql.NewRefreshAheadCache(
@@ -1483,6 +1490,7 @@ func (d *Dialer) connectionInfoCache(
 			d.sqladmin, rsaKey,
 			d.refreshTimeout, d.iamTokenProvider,
 			d.dialerID, useIAMAuthNDial,
+			dialFunc,
 		)
 	}
 	c = newMonitoredCache(cache, cn, d.failoverPeriod, d.resolver, d.logger)

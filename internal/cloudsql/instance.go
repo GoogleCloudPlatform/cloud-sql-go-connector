@@ -19,14 +19,19 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"fmt"
+	"net"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/auth"
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
+	"github.com/jackc/pgx/v5/pgproto3"
 	"golang.org/x/time/rate"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
@@ -108,6 +113,8 @@ type RefreshAheadCache struct {
 
 	mu              sync.RWMutex
 	useIAMAuthNDial bool
+	dialFunc        func(ctx context.Context, ci ConnectionInfo) (net.Conn, error)
+	iamPrincipals   []pgPrincipal
 	// cur represents the current refreshOperation that will be used to
 	// create connections. If a valid complete refreshOperation isn't
 	// available it's possible for cur to be equal to next.
@@ -122,6 +129,36 @@ type RefreshAheadCache struct {
 	cancel context.CancelFunc
 }
 
+type pgPrincipal struct {
+	user     string
+	database string
+}
+
+func appendIAMPrincipal(principals []pgPrincipal, user, database string) []pgPrincipal {
+	if user == "" {
+		return principals
+	}
+	if database == "" {
+		database = user
+	}
+	principal := pgPrincipal{user: user, database: database}
+	for _, existing := range principals {
+		if existing == principal {
+			return principals
+		}
+	}
+	return append(principals, principal)
+}
+
+// RecordIAMPrincipal records a PostgreSQL (user, database) pair observed on an
+// active Auto-IAM connection so that subsequent background refresh probes can
+// send a StartupMessage and update PgBouncer's cached pool credentials.
+func (i *RefreshAheadCache) RecordIAMPrincipal(user, database string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.iamPrincipals = appendIAMPrincipal(i.iamPrincipals, user, database)
+}
+
 // NewRefreshAheadCache initializes a new Instance given an instance connection name
 func NewRefreshAheadCache(
 	cn instance.ConnName,
@@ -132,6 +169,7 @@ func NewRefreshAheadCache(
 	tp auth.TokenProvider,
 	dialerID string,
 	useIAMAuthNDial bool,
+	dialFunc func(ctx context.Context, ci ConnectionInfo) (net.Conn, error),
 ) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &RefreshAheadCache{
@@ -147,6 +185,7 @@ func NewRefreshAheadCache(
 		),
 		refreshTimeout:  refreshTimeout,
 		useIAMAuthNDial: useIAMAuthNDial,
+		dialFunc:        dialFunc,
 		ctx:             ctx,
 		cancel:          cancel,
 	}
@@ -444,6 +483,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 
 		// avoid refreshing too often to try not to tax the SQL Admin
 		// API quotas
+		var useIAMAuthN bool
 		err := i.l.Wait(ctx)
 		if err != nil {
 			r.err = errtype.NewDialError(
@@ -452,16 +492,25 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 				nil,
 			)
 		} else {
-			var useIAMAuthN bool
-			i.mu.Lock()
+			i.mu.RLock()
 			useIAMAuthN = i.useIAMAuthNDial
-			i.mu.Unlock()
+			i.mu.RUnlock()
 			r.result, r.err = i.r.ConnectionInfo(
 				ctx, i.connName, useIAMAuthN,
 			)
 		}
 		switch r.err {
 		case nil:
+			if useIAMAuthN {
+				if probeErr := i.probeConnection(ctx, r.result); probeErr != nil {
+					i.logger.Debugf(
+						ctx,
+						"[%v] Proactive IAM token refresh probe encountered error: %v",
+						i.connName.String(),
+						probeErr,
+					)
+				}
+			}
 			i.logger.Debugf(
 				ctx,
 				"[%v] Connection info refresh operation complete",
@@ -482,12 +531,12 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			)
 		}
 
-		close(r.ready)
-
 		// Once the refresh is complete, update "current" with working
 		// refreshOperation and schedule a new refresh
 		i.mu.Lock()
 		defer i.mu.Unlock()
+
+		close(r.ready)
 
 		// if failed, scheduled the next refresh immediately
 		if r.err != nil {
@@ -523,4 +572,219 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		i.next = i.scheduleRefresh(t)
 	})
 	return r
+}
+
+const maxPgStartupPacketLen = 10000
+
+func (i *RefreshAheadCache) probeConnection(ctx context.Context, ci ConnectionInfo) error {
+	var principals []pgPrincipal
+	if strings.HasPrefix(ci.DBVersion, "POSTGRES") {
+		i.mu.RLock()
+		principals = append(principals, i.iamPrincipals...)
+		i.mu.RUnlock()
+	}
+	return probeInstanceConnection(
+		ctx, ci, i.refreshTimeout, i.dialFunc, principals, i.logger,
+	)
+}
+
+func probeInstanceConnection(
+	ctx context.Context,
+	ci ConnectionInfo,
+	refreshTimeout time.Duration,
+	dialFunc func(ctx context.Context, ci ConnectionInfo) (net.Conn, error),
+	principals []pgPrincipal,
+	logger debug.ContextLogger,
+) error {
+	if dialFunc == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, refreshTimeout)
+	defer cancel()
+
+	if len(principals) == 0 {
+		principals = []pgPrincipal{{}}
+	}
+
+	var lastErr error
+	for _, principal := range principals {
+		if err := probeSinglePrincipal(ctx, ci, dialFunc, principal, logger); err != nil {
+			lastErr = err
+		}
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+
+	logger.Debugf(ctx, "[%v] Proactive IAM token refresh probe successful", ci.ConnectionName.String())
+	return nil
+}
+
+func probeSinglePrincipal(
+	ctx context.Context,
+	ci ConnectionInfo,
+	dialFunc func(ctx context.Context, ci ConnectionInfo) (net.Conn, error),
+	principal pgPrincipal,
+	logger debug.ContextLogger,
+) error {
+	logger.Debugf(ctx, "[%v] Probing IAM token refresh", ci.ConnectionName.String())
+	conn, err := dialFunc(ctx, ci)
+	if err != nil {
+		return fmt.Errorf("failed to dial probe connection: %w", err)
+	}
+	defer conn.Close()
+
+	if principal.user != "" {
+		if dl, ok := ctx.Deadline(); ok {
+			_ = conn.SetDeadline(dl)
+		}
+		database := principal.database
+		if database == "" {
+			database = principal.user
+		}
+		frontend := pgproto3.NewFrontend(conn, conn)
+		frontend.Send(&pgproto3.StartupMessage{
+			ProtocolVersion: pgproto3.ProtocolVersion30,
+			Parameters: map[string]string{
+				"user":     principal.user,
+				"database": database,
+			},
+		})
+		if err := frontend.Flush(); err == nil {
+			// Read server response (AuthenticationOk / ErrorResponse) so that
+			// PgBouncer completes auth_query and finish_set_pool, updating
+			// pool->user_credentials->passwd in db->user_tree before disconnect.
+			_, _ = frontend.Receive()
+			frontend.Send(&pgproto3.Terminate{})
+			_ = frontend.Flush()
+			// Wait for server EOF so PgBouncer terminates cleanly without server-side unexpected EOF warning
+			var discard [128]byte
+			_, _ = conn.Read(discard[:])
+		}
+	}
+
+	return nil
+}
+
+// NewPostgresConn wraps conn so that the first PostgreSQL v3
+// StartupMessage written by the client is inspected to extract (user, database)
+// and passed to onStartup. Subsequent writes pass through with zero overhead.
+func NewPostgresConn(conn net.Conn, onStartup func(user, database string)) net.Conn {
+	if onStartup == nil {
+		return conn
+	}
+	return &postgresConn{
+		Conn:      conn,
+		onStartup: onStartup,
+	}
+}
+
+type parserState int
+
+const (
+	stateReadLength parserState = iota
+	stateReadBody
+	stateDone
+)
+
+type postgresConn struct {
+	net.Conn
+	mu                 sync.Mutex
+	startupMessageSent atomic.Bool
+	state              parserState
+	expectedLen        int
+	buf                []byte
+	onStartup          func(user, database string)
+}
+
+func (p *postgresConn) Write(b []byte) (int, error) {
+	if p.startupMessageSent.Load() {
+		return p.Conn.Write(b)
+	}
+
+	p.mu.Lock()
+	if p.startupMessageSent.Load() {
+		p.mu.Unlock()
+		return p.Conn.Write(b)
+	}
+
+	user, db := p.parseStream(b)
+	p.mu.Unlock()
+
+	if user != "" {
+		p.onStartup(user, db)
+	}
+
+	return p.Conn.Write(b)
+}
+
+// parseStream feeds incoming chunks into the state machine to identify
+// the PostgreSQL v3.0 StartupMessage and extract client parameters.
+// Must be called with p.mu held.
+func (p *postgresConn) parseStream(b []byte) (user, database string) {
+	p.buf = append(p.buf, b...)
+
+	for {
+		switch p.state {
+		case stateReadLength:
+			// Step 1: Wait for at least 4 bytes to determine total packet length.
+			if len(p.buf) < 4 {
+				return "", ""
+			}
+			p.expectedLen = int(binary.BigEndian.Uint32(p.buf[:4]))
+			// PostgreSQL packets are at least 8 bytes (4 bytes length + 4 bytes code).
+			// If length is malformed or exceeds maximum, stop inspection.
+			if p.expectedLen < 8 || p.expectedLen > maxPgStartupPacketLen+8 {
+				p.state = stateDone
+				p.startupMessageSent.Store(true)
+				p.buf = nil
+				return "", ""
+			}
+			p.state = stateReadBody
+			fallthrough
+
+		case stateReadBody:
+			// Step 2: Wait until the complete packet body has arrived.
+			if len(p.buf) < p.expectedLen {
+				return "", ""
+			}
+			pkt := p.buf[:p.expectedLen]
+			code := binary.BigEndian.Uint32(pkt[4:8])
+
+			switch code {
+			case 80877103, 80877104: // SSLRequest or GSSEncRequest (always 8 bytes)
+				// Step 3: SSL/GSS negotiation precedes the StartupMessage.
+				// Discard this 8-byte request and loop back to read the next packet length.
+				p.buf = p.buf[p.expectedLen:]
+				p.state = stateReadLength
+				continue
+
+			case pgproto3.ProtocolVersion30, pgproto3.ProtocolVersion32:
+				// Step 4: Decode v3.0 StartupMessage and extract connection parameters.
+				var sm pgproto3.StartupMessage
+				if err := sm.Decode(pkt[4:p.expectedLen]); err == nil {
+					user = sm.Parameters["user"]
+					database = sm.Parameters["database"]
+					if user != "" && database == "" {
+						database = user
+					}
+				}
+				p.state = stateDone
+				p.startupMessageSent.Store(true)
+				p.buf = nil
+				return user, database
+
+			default:
+				// Step 5: Unknown protocol code or unexpected packet; stop parsing.
+				p.state = stateDone
+				p.startupMessageSent.Store(true)
+				p.buf = nil
+				return "", ""
+			}
+
+		case stateDone:
+			p.buf = nil
+			return "", ""
+		}
+	}
 }
