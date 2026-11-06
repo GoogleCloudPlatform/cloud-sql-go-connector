@@ -24,6 +24,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/auth"
@@ -688,19 +689,29 @@ const (
 
 type postgresConn struct {
 	net.Conn
-	done        bool
-	state       parserState
-	expectedLen int
-	buf         []byte
-	onStartup   func(user, database string)
+	mu                 sync.Mutex
+	startupMessageSent atomic.Bool
+	state              parserState
+	expectedLen        int
+	buf                []byte
+	onStartup          func(user, database string)
 }
 
 func (p *postgresConn) Write(b []byte) (int, error) {
-	if p.done {
+	if p.startupMessageSent.Load() {
 		return p.Conn.Write(b)
 	}
 
-	if user, db := p.parseStream(b); user != "" {
+	p.mu.Lock()
+	if p.startupMessageSent.Load() {
+		p.mu.Unlock()
+		return p.Conn.Write(b)
+	}
+
+	user, db := p.parseStream(b)
+	p.mu.Unlock()
+
+	if user != "" {
 		p.onStartup(user, db)
 	}
 
@@ -709,6 +720,7 @@ func (p *postgresConn) Write(b []byte) (int, error) {
 
 // parseStream feeds incoming chunks into the state machine to identify
 // the PostgreSQL v3.0 StartupMessage and extract client parameters.
+// Must be called with p.mu held.
 func (p *postgresConn) parseStream(b []byte) (user, database string) {
 	p.buf = append(p.buf, b...)
 
@@ -724,7 +736,7 @@ func (p *postgresConn) parseStream(b []byte) (user, database string) {
 			// If length is malformed or exceeds maximum, stop inspection.
 			if p.expectedLen < 8 || p.expectedLen > maxPgStartupPacketLen+8 {
 				p.state = stateDone
-				p.done = true
+				p.startupMessageSent.Store(true)
 				p.buf = nil
 				return "", ""
 			}
@@ -758,14 +770,14 @@ func (p *postgresConn) parseStream(b []byte) (user, database string) {
 					}
 				}
 				p.state = stateDone
-				p.done = true
+				p.startupMessageSent.Store(true)
 				p.buf = nil
 				return user, database
 
 			default:
 				// Step 5: Unknown protocol code or unexpected packet; stop parsing.
 				p.state = stateDone
-				p.done = true
+				p.startupMessageSent.Store(true)
 				p.buf = nil
 				return "", ""
 			}

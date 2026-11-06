@@ -24,6 +24,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -936,6 +937,44 @@ func TestPostgresConn_ChunkedWrites(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("expected no additional onStartup calls on subsequent writes, got %d", calls)
 	}
+}
+
+func TestPostgresConn_ConcurrentWrites(t *testing.T) {
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	defer c2.Close()
+
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			if _, err := c2.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	conn := NewPostgresConn(c1, func(_, _ string) {})
+
+	startupPkt, err := (&pgproto3.StartupMessage{
+		ProtocolVersion: pgproto3.ProtocolVersion30,
+		Parameters: map[string]string{
+			"user":     "concurrent-user@example.com",
+			"database": "mydb",
+		},
+	}).Encode(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = conn.Write(startupPkt)
+		}()
+	}
+	wg.Wait()
 }
 
 func TestPostgresConn_GSSAndSSLRequest(t *testing.T) {
