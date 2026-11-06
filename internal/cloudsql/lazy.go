@@ -118,13 +118,9 @@ func (c *LazyRefreshCache) ConnectionInfo(
 		)
 		return ConnectionInfo{}, err
 	}
-	if c.useIAMAuthNDial {
-		var principals []pgPrincipal
-		if strings.HasPrefix(ci.DBVersion, "POSTGRES") {
-			principals = append(principals, c.iamPrincipals...)
-		}
+	if c.useIAMAuthNDial && len(c.iamPrincipals) > 0 && strings.HasPrefix(ci.DBVersion, "POSTGRES") {
 		if probeErr := probeInstanceConnection(
-			ctx, ci, c.refreshTimeout, c.dialFunc, principals, c.logger,
+			ctx, ci, c.refreshTimeout, c.dialFunc, c.iamPrincipals, c.logger,
 		); probeErr != nil {
 			c.logger.Debugf(
 				ctx,

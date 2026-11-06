@@ -23,6 +23,8 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -602,8 +604,8 @@ func TestRefreshAheadCache_ProbeConnection_Success(t *testing.T) {
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion("POSTGRES_14"))
 	client, cleanup, err := mock.NewSQLAdminService(
 		ctx,
-		mock.InstanceGetSuccess(inst, 1),
-		mock.CreateEphemeralSuccess(inst, 1),
+		mock.InstanceGetSuccess(inst, 2),
+		mock.CreateEphemeralSuccess(inst, 2),
 	)
 	if err != nil {
 		t.Fatalf("%s", err)
@@ -632,6 +634,13 @@ func TestRefreshAheadCache_ProbeConnection_Success(t *testing.T) {
 			return
 		}
 		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		backend := pgproto3.NewBackend(conn, conn)
+		if _, err := backend.ReceiveStartupMessage(); err == nil {
+			backend.Send(&pgproto3.AuthenticationOk{})
+			_ = backend.Flush()
+			_, _ = backend.Receive()
+		}
 		close(probed)
 	}()
 
@@ -661,6 +670,13 @@ func TestRefreshAheadCache_ProbeConnection_Success(t *testing.T) {
 		t.Fatalf("failed to retrieve connection info: %v", err)
 	}
 
+	i.RecordIAMPrincipal("iam-user@example.com", "mydb")
+	i.ForceRefresh()
+	_, err = i.ConnectionInfo(ctx)
+	if err != nil {
+		t.Fatalf("failed to refresh connection info: %v", err)
+	}
+
 	select {
 	case <-probed:
 		// Success: probe connection was accepted and TLS handshake completed
@@ -674,15 +690,20 @@ func TestRefreshAheadCache_ProbeConnection_DialErrorDoesNotFailRefresh(t *testin
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion("POSTGRES_14"))
 	client, cleanup, err := mock.NewSQLAdminService(
 		ctx,
-		mock.InstanceGetSuccess(inst, 1),
-		mock.CreateEphemeralSuccess(inst, 1),
+		mock.InstanceGetSuccess(inst, 2),
+		mock.CreateEphemeralSuccess(inst, 2),
 	)
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
 	defer cleanup()
 
+	dialed := make(chan struct{}, 1)
 	dialFunc := func(_ context.Context, _ ConnectionInfo) (net.Conn, error) {
+		select {
+		case dialed <- struct{}{}:
+		default:
+		}
 		return nil, errors.New("network unreachable")
 	}
 
@@ -693,6 +714,17 @@ func TestRefreshAheadCache_ProbeConnection_DialErrorDoesNotFailRefresh(t *testin
 	)
 	defer i.Close()
 
+	if _, err := i.ConnectionInfo(ctx); err != nil {
+		t.Fatalf("initial ConnectionInfo failed: %v", err)
+	}
+	select {
+	case <-dialed:
+		t.Fatal("expected no probe dial before any IAM principal is recorded")
+	default:
+	}
+
+	i.RecordIAMPrincipal("iam-user@example.com", "mydb")
+	i.ForceRefresh()
 	ci, err := i.ConnectionInfo(ctx)
 	if err != nil {
 		t.Fatalf("ConnectionInfo failed despite non-fatal probe error: %v", err)
@@ -700,6 +732,101 @@ func TestRefreshAheadCache_ProbeConnection_DialErrorDoesNotFailRefresh(t *testin
 	if ci.DBVersion != "POSTGRES_14" {
 		t.Fatalf("unexpected DBVersion: got %v, want POSTGRES_14", ci.DBVersion)
 	}
+	select {
+	case <-dialed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected probe dialFunc to be invoked for recorded Postgres IAM principal")
+	}
+}
+
+func TestRefreshAheadCache_ProbeConnection_SkipsZeroPrincipalsAndNonPostgres(t *testing.T) {
+	tcs := []struct {
+		desc            string
+		dbVersion       string
+		recordPrincipal bool
+	}{
+		{
+			desc:            "postgres with zero principals skips probe",
+			dbVersion:       "POSTGRES_14",
+			recordPrincipal: false,
+		},
+		{
+			desc:            "mysql skips probe even with iam auth enabled",
+			dbVersion:       "MYSQL_8_0",
+			recordPrincipal: true,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			ctx := context.Background()
+			inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion(tc.dbVersion))
+			count := 1
+			if tc.recordPrincipal {
+				count = 2
+			}
+			client, cleanup, err := mock.NewSQLAdminService(
+				ctx,
+				mock.InstanceGetSuccess(inst, count),
+				mock.CreateEphemeralSuccess(inst, count),
+			)
+			if err != nil {
+				t.Fatalf("%s", err)
+			}
+			defer cleanup()
+
+			dialed := make(chan struct{}, 1)
+			dialFunc := func(_ context.Context, _ ConnectionInfo) (net.Conn, error) {
+				select {
+				case dialed <- struct{}{}:
+				default:
+				}
+				return nil, errors.New("unexpected probe dial")
+			}
+
+			i := NewRefreshAheadCache(
+				testInstanceConnName(), nullLogger{}, client,
+				RSAKey, 30*time.Second, nil, "", true,
+				dialFunc,
+			)
+			defer i.Close()
+
+			if _, err := i.ConnectionInfo(ctx); err != nil {
+				t.Fatalf("ConnectionInfo failed: %v", err)
+			}
+			if tc.recordPrincipal {
+				i.RecordIAMPrincipal("iam-user@example.com", "mydb")
+				i.ForceRefresh()
+				if _, err := i.ConnectionInfo(ctx); err != nil {
+					t.Fatalf("refreshed ConnectionInfo failed: %v", err)
+				}
+			}
+
+			select {
+			case <-dialed:
+				t.Fatalf("expected 0 probe dials for %s", tc.desc)
+			default:
+			}
+		})
+	}
+
+	t.Run("probeInstanceConnection skips non-postgres directly", func(t *testing.T) {
+		dialFunc := func(_ context.Context, _ ConnectionInfo) (net.Conn, error) {
+			t.Fatal("expected 0 probe dials for SQLSERVER")
+			return nil, nil
+		}
+		err := probeInstanceConnection(
+			context.Background(),
+			ConnectionInfo{DBVersion: "SQLSERVER_2019_STANDARD"},
+			5*time.Second,
+			dialFunc,
+			[]pgPrincipal{{user: "user@example.com", database: "db"}},
+			nullLogger{},
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
 
 func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
@@ -734,39 +861,46 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 		user         string
 		database     string
 		sawTerminate bool
+		err          error
 	}
 	startupProbeCh := make(chan probeRecord, 1)
 	go func() {
+		defer close(startupProbeCh)
 		for {
 			conn, err := tlsLn.Accept()
 			if err != nil {
 				return
 			}
-			go func(c net.Conn) {
+			rec, done := func(c net.Conn) (probeRecord, bool) {
 				defer c.Close()
 				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 				backend := pgproto3.NewBackend(c, c)
 				msg, err := backend.ReceiveStartupMessage()
 				if err != nil {
-					return
+					if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+						return probeRecord{}, false
+					}
+					return probeRecord{err: fmt.Errorf("ReceiveStartupMessage failed: %w", err)}, true
 				}
 				sm, ok := msg.(*pgproto3.StartupMessage)
 				if !ok || sm.Parameters["user"] == "" {
-					return
+					return probeRecord{err: fmt.Errorf("unexpected startup message: %T", msg)}, true
 				}
 				backend.Send(&pgproto3.AuthenticationOk{})
 				backend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
 				_ = backend.Flush()
 				nextMsg, _ := backend.Receive()
 				_, sawTerm := nextMsg.(*pgproto3.Terminate)
-				startupProbeCh <- probeRecord{
+				return probeRecord{
 					user:         sm.Parameters["user"],
 					database:     sm.Parameters["database"],
 					sawTerminate: sawTerm,
-				}
-				close(startupProbeCh)
-				return
+				}, true
 			}(conn)
+			if done {
+				startupProbeCh <- rec
+				return
+			}
 		}
 	}()
 
@@ -842,7 +976,13 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 	}
 
 	select {
-	case rec := <-startupProbeCh:
+	case rec, ok := <-startupProbeCh:
+		if !ok {
+			t.Fatal("startupProbeCh closed without receiving a startup probe packet")
+		}
+		if rec.err != nil {
+			t.Fatalf("mock server error receiving startup probe packet: %v", rec.err)
+		}
 		if rec.user != "iam-user@example.com" || rec.database != "mydb" {
 			t.Fatalf("unexpected startup probe principal: got (%q, %q), want (\"iam-user@example.com\", \"mydb\")", rec.user, rec.database)
 		}

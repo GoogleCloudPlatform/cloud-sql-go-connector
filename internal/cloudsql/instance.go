@@ -576,12 +576,16 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 const maxPgStartupPacketLen = 10000
 
 func (i *RefreshAheadCache) probeConnection(ctx context.Context, ci ConnectionInfo) error {
-	var principals []pgPrincipal
-	if strings.HasPrefix(ci.DBVersion, "POSTGRES") {
-		i.mu.RLock()
-		principals = append(principals, i.iamPrincipals...)
-		i.mu.RUnlock()
+	if !strings.HasPrefix(ci.DBVersion, "POSTGRES") {
+		return nil
 	}
+	i.mu.RLock()
+	if len(i.iamPrincipals) == 0 {
+		i.mu.RUnlock()
+		return nil
+	}
+	principals := append([]pgPrincipal(nil), i.iamPrincipals...)
+	i.mu.RUnlock()
 	return probeInstanceConnection(
 		ctx, ci, i.refreshTimeout, i.dialFunc, principals, i.logger,
 	)
@@ -595,18 +599,21 @@ func probeInstanceConnection(
 	principals []pgPrincipal,
 	logger debug.ContextLogger,
 ) error {
-	if dialFunc == nil {
+	if dialFunc == nil || !strings.HasPrefix(ci.DBVersion, "POSTGRES") || len(principals) == 0 {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, refreshTimeout)
-	defer cancel()
-
-	if len(principals) == 0 {
-		principals = []pgPrincipal{{}}
+	if refreshTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, refreshTimeout)
+		defer cancel()
 	}
 
 	var lastErr error
 	for _, principal := range principals {
+		if ctx.Err() != nil {
+			lastErr = ctx.Err()
+			break
+		}
 		if err := probeSinglePrincipal(ctx, ci, dialFunc, principal, logger); err != nil {
 			lastErr = err
 		}
@@ -626,6 +633,9 @@ func probeSinglePrincipal(
 	principal pgPrincipal,
 	logger debug.ContextLogger,
 ) error {
+	if principal.user == "" {
+		return nil
+	}
 	logger.Debugf(ctx, "[%v] Probing IAM token refresh", ci.ConnectionName.String())
 	conn, err := dialFunc(ctx, ci)
 	if err != nil {
@@ -633,33 +643,31 @@ func probeSinglePrincipal(
 	}
 	defer conn.Close()
 
-	if principal.user != "" {
-		if dl, ok := ctx.Deadline(); ok {
-			_ = conn.SetDeadline(dl)
-		}
-		database := principal.database
-		if database == "" {
-			database = principal.user
-		}
-		frontend := pgproto3.NewFrontend(conn, conn)
-		frontend.Send(&pgproto3.StartupMessage{
-			ProtocolVersion: pgproto3.ProtocolVersion30,
-			Parameters: map[string]string{
-				"user":     principal.user,
-				"database": database,
-			},
-		})
-		if err := frontend.Flush(); err == nil {
-			// Read server response (AuthenticationOk / ErrorResponse) so that
-			// PgBouncer completes auth_query and finish_set_pool, updating
-			// pool->user_credentials->passwd in db->user_tree before disconnect.
-			_, _ = frontend.Receive()
-			frontend.Send(&pgproto3.Terminate{})
-			_ = frontend.Flush()
-			// Wait for server EOF so PgBouncer terminates cleanly without server-side unexpected EOF warning
-			var discard [128]byte
-			_, _ = conn.Read(discard[:])
-		}
+	if dl, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(dl)
+	}
+	database := principal.database
+	if database == "" {
+		database = principal.user
+	}
+	frontend := pgproto3.NewFrontend(conn, conn)
+	frontend.Send(&pgproto3.StartupMessage{
+		ProtocolVersion: pgproto3.ProtocolVersion30,
+		Parameters: map[string]string{
+			"user":     principal.user,
+			"database": database,
+		},
+	})
+	if err := frontend.Flush(); err == nil {
+		// Read server response (AuthenticationOk / ErrorResponse) so that
+		// PgBouncer completes auth_query and finish_set_pool, updating
+		// pool->user_credentials->passwd in db->user_tree before disconnect.
+		_, _ = frontend.Receive()
+		frontend.Send(&pgproto3.Terminate{})
+		_ = frontend.Flush()
+		// Wait for server EOF so PgBouncer terminates cleanly without server-side unexpected EOF warning
+		var discard [128]byte
+		_, _ = conn.Read(discard[:])
 	}
 
 	return nil
@@ -667,7 +675,11 @@ func probeSinglePrincipal(
 
 // NewPostgresConn wraps conn so that the first PostgreSQL v3
 // StartupMessage written by the client is inspected to extract (user, database)
-// and passed to onStartup. Subsequent writes pass through with zero overhead.
+// and passed to onStartup. Once the startup message has been processed,
+// subsequent writes pass straight through to conn without buffering overhead.
+//
+// Like io.Writer, Write is not safe for concurrent use by multiple goroutines;
+// callers are responsible for synchronizing concurrent writes.
 func NewPostgresConn(conn net.Conn, onStartup func(user, database string)) net.Conn {
 	if onStartup == nil {
 		return conn
@@ -686,17 +698,20 @@ const (
 	stateDone
 )
 
+// postgresConn intercepts initial writes on a PostgreSQL connection to extract
+// the user and database from the v3 StartupMessage. Consistent with io.Writer,
+// callers must serialize concurrent Write calls.
 type postgresConn struct {
 	net.Conn
-	done        bool
-	state       parserState
-	expectedLen int
-	buf         []byte
-	onStartup   func(user, database string)
+	startupMessageSent bool
+	state              parserState
+	expectedLen        int
+	buf                []byte
+	onStartup          func(user, database string)
 }
 
 func (p *postgresConn) Write(b []byte) (int, error) {
-	if p.done {
+	if p.startupMessageSent {
 		return p.Conn.Write(b)
 	}
 
@@ -708,7 +723,7 @@ func (p *postgresConn) Write(b []byte) (int, error) {
 }
 
 // parseStream feeds incoming chunks into the state machine to identify
-// the PostgreSQL v3.0 StartupMessage and extract client parameters.
+// the PostgreSQL v3.0/v3.2 StartupMessage and extract client parameters.
 func (p *postgresConn) parseStream(b []byte) (user, database string) {
 	p.buf = append(p.buf, b...)
 
@@ -724,7 +739,7 @@ func (p *postgresConn) parseStream(b []byte) (user, database string) {
 			// If length is malformed or exceeds maximum, stop inspection.
 			if p.expectedLen < 8 || p.expectedLen > maxPgStartupPacketLen+8 {
 				p.state = stateDone
-				p.done = true
+				p.startupMessageSent = true
 				p.buf = nil
 				return "", ""
 			}
@@ -748,7 +763,7 @@ func (p *postgresConn) parseStream(b []byte) (user, database string) {
 				continue
 
 			case pgproto3.ProtocolVersion30, pgproto3.ProtocolVersion32:
-				// Step 4: Decode v3.0 StartupMessage and extract connection parameters.
+				// Step 4: Decode v3.0/v3.2 StartupMessage (ProtocolVersion30 / ProtocolVersion32) and extract connection parameters.
 				var sm pgproto3.StartupMessage
 				if err := sm.Decode(pkt[4:p.expectedLen]); err == nil {
 					user = sm.Parameters["user"]
@@ -758,14 +773,14 @@ func (p *postgresConn) parseStream(b []byte) (user, database string) {
 					}
 				}
 				p.state = stateDone
-				p.done = true
+				p.startupMessageSent = true
 				p.buf = nil
 				return user, database
 
 			default:
 				// Step 5: Unknown protocol code or unexpected packet; stop parsing.
 				p.state = stateDone
-				p.done = true
+				p.startupMessageSent = true
 				p.buf = nil
 				return "", ""
 			}

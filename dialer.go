@@ -963,12 +963,17 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 	defer func() { connectEnd(err) }()
 
 	tlsConn, resolvedIPType, err := d.connect(ctx, cn, ci, cfg)
+	if resolvedIPType != "" {
+		// Report the IP type actually used rather than the requested strategy
+		// (e.g. "public" instead of "auto").
+		attrs.IPType = resolvedIPType
+	}
 	if err != nil {
 		var dialErr *errtype.DialError
 		if errors.As(err, &dialErr) && dialErr.Message == "failed to dial" {
 			// refresh the instance info in case it caused the connection failure
 			c.ForceRefresh()
-		} else {
+		} else if !errors.As(err, &dialErr) || dialErr.Message == "handshake failed" {
 			// TLS handshake or address configuration errors are fatal and require a refresh.
 			// Remove the instance from the cache so that future calls to Dial() will block
 			// until the certificate is refreshed successfully.
@@ -981,9 +986,6 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		mr.RecordOpenConnectionCount(ctx, attrs)
 		return nil, err
 	}
-	// Report the IP type actually used rather than the requested strategy
-	// (e.g. "public" instead of "auto").
-	attrs.IPType = resolvedIPType
 
 	// Use tlsConn as the official connection
 	netConn := tlsConn
@@ -1098,14 +1100,16 @@ func (d *Dialer) connect(ctx context.Context, cn instance.ConnName, ci cloudsql.
 		dialErrs = append(dialErrs, dialErr)
 		d.logger.Debugf(ctx, "[%v] Dialing %v failed: %v", cn.String(), dialAddr, dialErr)
 	}
-	if len(dialErrs) > 0 {
+	if len(dialErrs) > 0 || conn == nil {
 		return nil, resolvedIPType, errtype.NewDialError("failed to dial", cn.String(), errors.Join(dialErrs...))
 	}
 	if tc, ok := conn.(*net.TCPConn); ok {
 		if err := tc.SetKeepAlive(true); err != nil {
+			_ = conn.Close()
 			return nil, resolvedIPType, errtype.NewDialError("failed to set keep-alive", cn.String(), err)
 		}
 		if err := tc.SetKeepAlivePeriod(cfg.tcpKeepAlive); err != nil {
+			_ = conn.Close()
 			return nil, resolvedIPType, errtype.NewDialError("failed to set keep-alive period", cn.String(), err)
 		}
 	}

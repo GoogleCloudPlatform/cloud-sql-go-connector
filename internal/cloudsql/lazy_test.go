@@ -191,11 +191,13 @@ func TestLazyRefreshCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 
 	startupCh := make(chan *pgproto3.StartupMessage, 1)
 	go func() {
+		defer close(startupCh)
 		conn, acceptErr := ln.Accept()
 		if acceptErr != nil {
 			return
 		}
 		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 		backend := pgproto3.NewBackend(conn, conn)
 		msg, recvErr := backend.ReceiveStartupMessage()
 		if recvErr != nil {
@@ -206,6 +208,7 @@ func TestLazyRefreshCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 		}
 		backend.Send(&pgproto3.AuthenticationOk{})
 		_ = backend.Flush()
+		_, _ = backend.Receive()
 	}()
 
 	customDial := func(ctx context.Context, ci ConnectionInfo) (net.Conn, error) {
@@ -234,7 +237,10 @@ func TestLazyRefreshCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 	}
 
 	select {
-	case sm := <-startupCh:
+	case sm, ok := <-startupCh:
+		if !ok {
+			t.Fatal("startupCh closed without receiving PostgreSQL StartupMessage")
+		}
 		if got, want := sm.Parameters["user"], "iam-user@example.com"; got != want {
 			t.Errorf("startup user = %q, want %q", got, want)
 		}
@@ -243,6 +249,63 @@ func TestLazyRefreshCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for PostgreSQL StartupMessage from lazy refresh probe")
+	}
+}
+
+func TestLazyRefreshCache_ProbeConnection_SkipsZeroPrincipalsAndNonPostgres(t *testing.T) {
+	tcs := []struct {
+		desc            string
+		dbVersion       string
+		recordPrincipal bool
+	}{
+		{
+			desc:            "postgres with zero principals skips probe",
+			dbVersion:       "POSTGRES_15",
+			recordPrincipal: false,
+		},
+		{
+			desc:            "mysql skips probe even with iam auth enabled",
+			dbVersion:       "MYSQL_8_0",
+			recordPrincipal: true,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion(tc.dbVersion))
+			client, cleanup, err := mock.NewSQLAdminService(
+				context.Background(),
+				mock.InstanceGetSuccess(inst, 1),
+				mock.CreateEphemeralSuccess(inst, 1),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cleanup()
+
+			dialCalls := 0
+			customDial := func(context.Context, ConnectionInfo) (net.Conn, error) {
+				dialCalls++
+				t.Fatalf("unexpected probe dial for %s", tc.desc)
+				return nil, nil
+			}
+
+			c := NewLazyRefreshCache(
+				testInstanceConnName(), nullLogger{}, client,
+				RSAKey, 30*time.Second, &spyTokenProvider{}, "", true,
+				customDial,
+			)
+			if tc.recordPrincipal {
+				c.RecordIAMPrincipal("iam-user@example.com", "mydb")
+			}
+
+			if _, err := c.ConnectionInfo(context.Background()); err != nil {
+				t.Fatalf("ConnectionInfo failed: %v", err)
+			}
+			if dialCalls != 0 {
+				t.Fatalf("dialCalls = %d, want 0", dialCalls)
+			}
+		})
 	}
 }
 
