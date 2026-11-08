@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
+	"slices"
 	"testing"
 	"time"
 
@@ -46,13 +47,16 @@ func unwrapTLSConn(t *testing.T, conn net.Conn) *tls.Conn {
 }
 
 // assertTLSHandshakeAndExchange dials the mock instance, exchanges application
-// data end to end, and verifies that both the client and mock server negotiated
-// TLS 1.3 with wantCurve.
+// data end to end, and verifies both the raw ClientHello supported_groups wire
+// list (wantClientMLKEM) and that both client and mock server negotiated TLS
+// 1.3 with wantCurve.
 func assertTLSHandshakeAndExchange(
 	t *testing.T,
 	d *Dialer,
 	inst mock.FakeCSQLInstance,
+	clientCurves <-chan []tls.CurveID,
 	serverStates <-chan tls.ConnectionState,
+	wantClientMLKEM bool,
 	wantCurve tls.CurveID,
 	dialOpts ...DialOption,
 ) {
@@ -85,6 +89,27 @@ func assertTLSHandshakeAndExchange(
 	const wantPayload = "my-instance"
 	if string(data) != wantPayload {
 		t.Fatalf("unexpected response payload: want = %q, got = %q", wantPayload, string(data))
+	}
+
+	select {
+	case gotCurves := <-clientCurves:
+		if gotHasMLKEM := slices.Contains(gotCurves, tls.X25519MLKEM768); gotHasMLKEM != wantClientMLKEM {
+			t.Fatalf("ClientHello SupportedCurves = %v: contains X25519MLKEM768 (0x%04x) = %v, want %v",
+				gotCurves, uint16(tls.X25519MLKEM768), gotHasMLKEM, wantClientMLKEM)
+		}
+		if !wantClientMLKEM {
+			for _, pqGroup := range []tls.CurveID{tls.SecP256r1MLKEM768, tls.SecP384r1MLKEM1024} {
+				if slices.Contains(gotCurves, pqGroup) {
+					t.Fatalf("ClientHello SupportedCurves = %v: unexpected hybrid group %v (0x%04x) when ML-KEM is disabled",
+						gotCurves, pqGroup, uint16(pqGroup))
+				}
+			}
+		}
+		if !slices.Contains(gotCurves, tls.X25519) {
+			t.Fatalf("ClientHello SupportedCurves = %v: expected classical X25519 fallback curve", gotCurves)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for server ClientHello SupportedCurves")
 	}
 
 	select {
@@ -138,6 +163,7 @@ func TestDialerPQCDefaultHandshake(t *testing.T) {
 				"my-project", "my-region", "my-instance",
 				tc.instOpts...,
 			)
+			clientCurves := make(chan []tls.CurveID, 1)
 			serverStates := make(chan tls.ConnectionState, 1)
 			d := setupDialer(t, setupConfig{
 				testInstance: inst,
@@ -146,6 +172,12 @@ func TestDialerPQCDefaultHandshake(t *testing.T) {
 					mock.CreateEphemeralSuccess(inst, 1),
 				},
 				serverProxyOptions: []mock.ServerProxyOption{
+					mock.WithServerClientHelloHook(func(chi *tls.ClientHelloInfo) {
+						select {
+						case clientCurves <- slices.Clone(chi.SupportedCurves):
+						default:
+						}
+					}),
 					mock.WithServerConnectionStateHook(func(st tls.ConnectionState) {
 						select {
 						case serverStates <- st:
@@ -156,7 +188,7 @@ func TestDialerPQCDefaultHandshake(t *testing.T) {
 			})
 			t.Cleanup(func() { _ = d.Close() })
 
-			assertTLSHandshakeAndExchange(t, d, inst, serverStates, tls.X25519MLKEM768, tc.dialOpts...)
+			assertTLSHandshakeAndExchange(t, d, inst, clientCurves, serverStates, true, tls.X25519MLKEM768, tc.dialOpts...)
 		})
 	}
 }
@@ -184,6 +216,7 @@ func TestDialerPQCClassicalServerFallback(t *testing.T) {
 			inst := mock.NewFakeCSQLInstance(
 				"my-project", "my-region", "my-instance",
 			)
+			clientCurves := make(chan []tls.CurveID, 1)
 			serverStates := make(chan tls.ConnectionState, 1)
 			d := setupDialer(t, setupConfig{
 				testInstance: inst,
@@ -193,6 +226,12 @@ func TestDialerPQCClassicalServerFallback(t *testing.T) {
 				},
 				serverProxyOptions: []mock.ServerProxyOption{
 					mock.WithServerCurvePreferences(tc.serverCurves...),
+					mock.WithServerClientHelloHook(func(chi *tls.ClientHelloInfo) {
+						select {
+						case clientCurves <- slices.Clone(chi.SupportedCurves):
+						default:
+						}
+					}),
 					mock.WithServerConnectionStateHook(func(st tls.ConnectionState) {
 						select {
 						case serverStates <- st:
@@ -203,23 +242,28 @@ func TestDialerPQCClassicalServerFallback(t *testing.T) {
 			})
 			t.Cleanup(func() { _ = d.Close() })
 
-			assertTLSHandshakeAndExchange(t, d, inst, serverStates, tc.wantCurve)
+			assertTLSHandshakeAndExchange(t, d, inst, clientCurves, serverStates, true, tc.wantCurve)
 		})
 	}
 }
 
 func TestDialerPQCOptOutWithGODEBUG(t *testing.T) {
-	// Configure the mock server with explicit CurvePreferences including
-	// X25519MLKEM768 so the server continues offering PQC even when process-wide
-	// GODEBUG=tlsmlkem=0 is set to test client opt-out.
+	// Note: In Go 1.26+, crypto/tls filters Config.CurvePreferences against
+	// defaultCurvePreferences(), so a process-wide GODEBUG=tlsmlkem=0 strips
+	// ML-KEM groups from an in-process tls.Server as well as the client.
+	// To verify client opt-out non-vacuously, assertTLSHandshakeAndExchange
+	// inspects the raw ClientHelloInfo.SupportedCurves wire list captured via
+	// GetConfigForClient before server-side curve filtering, alongside
+	// verifying classical X25519 handshake completion.
 	serverCurves := []tls.CurveID{tls.X25519MLKEM768, tls.X25519, tls.CurveP256}
 
-	t.Run("negotiates X25519 when GODEBUG=tlsmlkem=0", func(t *testing.T) {
+	t.Run("omits ML-KEM groups and negotiates X25519 when GODEBUG=tlsmlkem=0", func(t *testing.T) {
 		t.Setenv("GODEBUG", "tlsmlkem=0")
 
 		inst := mock.NewFakeCSQLInstance(
 			"my-project", "my-region", "my-instance",
 		)
+		clientCurves := make(chan []tls.CurveID, 1)
 		serverStates := make(chan tls.ConnectionState, 1)
 		d := setupDialer(t, setupConfig{
 			testInstance: inst,
@@ -229,6 +273,12 @@ func TestDialerPQCOptOutWithGODEBUG(t *testing.T) {
 			},
 			serverProxyOptions: []mock.ServerProxyOption{
 				mock.WithServerCurvePreferences(serverCurves...),
+				mock.WithServerClientHelloHook(func(chi *tls.ClientHelloInfo) {
+					select {
+					case clientCurves <- slices.Clone(chi.SupportedCurves):
+					default:
+					}
+				}),
 				mock.WithServerConnectionStateHook(func(st tls.ConnectionState) {
 					select {
 					case serverStates <- st:
@@ -239,15 +289,16 @@ func TestDialerPQCOptOutWithGODEBUG(t *testing.T) {
 		})
 		t.Cleanup(func() { _ = d.Close() })
 
-		assertTLSHandshakeAndExchange(t, d, inst, serverStates, tls.X25519)
+		assertTLSHandshakeAndExchange(t, d, inst, clientCurves, serverStates, false, tls.X25519)
 	})
 
-	t.Run("negotiates X25519MLKEM768 when GODEBUG=tlsmlkem=1", func(t *testing.T) {
+	t.Run("advertises and negotiates X25519MLKEM768 when GODEBUG=tlsmlkem=1", func(t *testing.T) {
 		t.Setenv("GODEBUG", "tlsmlkem=1")
 
 		inst := mock.NewFakeCSQLInstance(
 			"my-project", "my-region", "my-instance",
 		)
+		clientCurves := make(chan []tls.CurveID, 1)
 		serverStates := make(chan tls.ConnectionState, 1)
 		d := setupDialer(t, setupConfig{
 			testInstance: inst,
@@ -257,6 +308,12 @@ func TestDialerPQCOptOutWithGODEBUG(t *testing.T) {
 			},
 			serverProxyOptions: []mock.ServerProxyOption{
 				mock.WithServerCurvePreferences(serverCurves...),
+				mock.WithServerClientHelloHook(func(chi *tls.ClientHelloInfo) {
+					select {
+					case clientCurves <- slices.Clone(chi.SupportedCurves):
+					default:
+					}
+				}),
 				mock.WithServerConnectionStateHook(func(st tls.ConnectionState) {
 					select {
 					case serverStates <- st:
@@ -267,6 +324,6 @@ func TestDialerPQCOptOutWithGODEBUG(t *testing.T) {
 		})
 		t.Cleanup(func() { _ = d.Close() })
 
-		assertTLSHandshakeAndExchange(t, d, inst, serverStates, tls.X25519MLKEM768)
+		assertTLSHandshakeAndExchange(t, d, inst, clientCurves, serverStates, true, tls.X25519MLKEM768)
 	})
 }
