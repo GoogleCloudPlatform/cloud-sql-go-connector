@@ -257,8 +257,10 @@ func fetchEphemeralCert(
 	}
 	if tp != nil {
 		// Adjust the certificate's expiration to be the earliest of
-		// the token's expiration or the certificate's expiration.
-		if tok.Expiry.Before(clientCert.NotAfter) {
+		// the token's expiration or the certificate's expiration. A
+		// token without an expiration (a static token, for example)
+		// leaves the certificate's expiration unchanged.
+		if !tok.Expiry.IsZero() && tok.Expiry.Before(clientCert.NotAfter) {
 			clientCert.NotAfter = tok.Expiry
 		}
 	}

@@ -251,14 +251,21 @@ func TestRefreshAdjustsCertExpiry(t *testing.T) {
 			},
 			wantExpiry: certExpiry,
 		},
+		{
+			desc: "when the token has no expiration",
+			resps: []tokenResp{
+				{tok: &auth.Token{}},
+			},
+			wantExpiry: certExpiry,
+		},
 	}
 	cn := testInstanceConnName()
 	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance",
 		mock.WithCertExpiry(certExpiry))
 	client, cleanup, err := mock.NewSQLAdminService(
 		context.Background(),
-		mock.InstanceGetSuccess(inst, 2),
-		mock.CreateEphemeralSuccess(inst, 2),
+		mock.InstanceGetSuccess(inst, 3),
+		mock.CreateEphemeralSuccess(inst, 3),
 	)
 	if err != nil {
 		t.Fatalf("failed to create test SQL admin service: %s", err)
