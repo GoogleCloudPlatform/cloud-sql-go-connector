@@ -1448,6 +1448,13 @@ func (d *Dialer) connectionInfoCache(
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
+	// Close closes the cached entries under this lock and does not run
+	// again, so an entry created after it would refresh forever. Refuse to
+	// create one once Close has started.
+	if d.closing.Load() {
+		return nil, ErrDialerClosed
+	}
+
 	// Recheck to ensure instance wasn't created or changed between locks
 	c, ok = d.cache[k]
 
