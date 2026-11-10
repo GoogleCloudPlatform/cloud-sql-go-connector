@@ -843,31 +843,61 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 		return nil, err
 	}
 
-	// The stream is up: record the attempt as a successful sql_data
-	// connection. The database engine is not known on this path (no
-	// connection info is fetched), so the recorder's engine stays unknown.
-	latency := time.Since(startTime).Milliseconds()
-	openTime := time.Now()
-	attrs.DialStatus = tel.ConnectSuccess
-	attrs.ConnectionPart = ""
-	attrs.AttemptStatus = tel.ConnectSuccess
-	mr.RecordOpenConnection(ctx, attrs)
-	mr.RecordConnectLatencies(ctx, attrs, latency)
-	mr.RecordOpenConnectionCount(ctx, attrs)
-	// recordClosed is shared by the connection's Close and by the fallback
-	// path, and runs at most once: whichever ends the sql_data connection
-	// first accounts for it.
-	var closeOnce sync.Once
+	// In gRPC bidirectional streaming, StreamSqlData and Send(StartSession)
+	// buffer frames locally and return before GFE or SFEv3 sends response
+	// headers, and PostgreSQL is client-speaks-first so Dial cannot block on
+	// Recv. Defer recording the sql_data attempt outcome until the first Read
+	// result (or Close if closed before reading) so GFE rejections such as
+	// ResourceExhausted or InvalidArgument are recorded with their true error
+	// status rather than as successful dials. The database engine is not known
+	// on this path (no connection info is fetched), so the recorder's engine
+	// stays unknown.
+	var (
+		attemptOnce sync.Once
+		opened      atomic.Bool
+		openTime    time.Time
+		closeOnce   sync.Once
+	)
+	recordSuccess := func() {
+		attemptOnce.Do(func() {
+			openTime = time.Now()
+			opened.Store(true)
+			latency := openTime.Sub(startTime).Milliseconds()
+			okAttrs := attrs
+			okAttrs.DialStatus = tel.ConnectSuccess
+			okAttrs.ConnectionPart = ""
+			okAttrs.AttemptStatus = tel.ConnectSuccess
+			mr.RecordOpenConnection(context.Background(), okAttrs)
+			mr.RecordConnectLatencies(context.Background(), okAttrs, latency)
+			mr.RecordOpenConnectionCount(context.Background(), okAttrs)
+		})
+	}
+	recordFailure := func(err error) {
+		attemptOnce.Do(func() {
+			recordDialFailure(context.Background(), mr, attrs, startTime, err)
+		})
+	}
 	recordClosed := func() {
+		// If the caller closes the connection before any Read completed and no
+		// failure occurred, account for the dial and its closure once.
+		recordSuccess()
+		if !opened.Load() {
+			return
+		}
 		closeOnce.Do(func() {
-			mr.RecordClosedConnection(context.Background(), attrs)
-			mr.RecordClosedConnectionCount(context.Background(), attrs)
-			mr.RecordConnectionDuration(context.Background(), attrs, time.Since(openTime).Seconds())
+			okAttrs := attrs
+			okAttrs.DialStatus = tel.ConnectSuccess
+			okAttrs.ConnectionPart = ""
+			okAttrs.AttemptStatus = tel.ConnectSuccess
+			mr.RecordClosedConnection(context.Background(), okAttrs)
+			mr.RecordClosedConnectionCount(context.Background(), okAttrs)
+			mr.RecordConnectionDuration(context.Background(), okAttrs, time.Since(openTime).Seconds())
 		})
 	}
 
 	// This creates a fallback connection, and marks the connection
 	// as permanently needing to fallback to direct IP.
+	var lastFallbackErr atomic.Value
 	fb := func() (net.Conn, error) {
 		d.lock.RLock()
 		state, ok := d.sqlDataConnState[key]
@@ -877,23 +907,34 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 			state.allowed = false
 			state.mu.Unlock()
 		}
-		// The sql_data connection is being replaced by a direct-IP one,
-		// which records its own metrics (connectInstanceIP returns an
-		// instrumentedConn). Close out the sql_data accounting and time the
-		// fallback as its own attempt.
-		recordClosed()
+		// The sql_data stream was rejected as unsupported and is being
+		// replaced by a direct-IP connection, which records its own metrics
+		// (connectInstanceIP returns an instrumentedConn). Record the failed
+		// sql_data attempt and time the fallback as its own attempt.
+		if v := lastFallbackErr.Load(); v != nil {
+			recordFailure(v.(error))
+		}
 		return d.connectInstanceIP(ctx, cn, cfg, time.Now(), mr, attrs)
 	}
 
-	// Assuming the connection is successful if Recv doesn't return an error
-	// immediately. The first message might not contain data, so we don't pass
-	// any initialData.
-	fc := newFallbackConn(conn, isSQLDataUnsupportedError, fb)
+	isUnsupported := func(err error) bool {
+		if isSQLDataUnsupportedError(err) {
+			lastFallbackErr.Store(err)
+			return true
+		}
+		return false
+	}
+
+	fc := newFallbackConn(conn, isUnsupported, fb)
 	return &metricsConn{
 		Conn: &resourceExhaustedTrackingConn{
 			Conn:                fc,
 			onResourceExhausted: onResourceExhausted,
-			onSuccess:           onSuccess,
+			onSuccess: func() {
+				onSuccess()
+				recordSuccess()
+			},
+			onInitialError: recordFailure,
 		},
 		onClose: recordClosed,
 	}, nil
@@ -1562,13 +1603,14 @@ type resourceExhaustedTrackingConn struct {
 	net.Conn
 	onResourceExhausted func(error)
 	onSuccess           func()
+	onInitialError      func(error)
 	firstReadDone       bool
 	mu                  sync.Mutex
 }
 
 func (c *resourceExhaustedTrackingConn) Read(b []byte) (int, error) {
 	n, err := c.Conn.Read(b)
-	if err == nil {
+	if err == nil || errors.Is(err, io.EOF) {
 		c.mu.Lock()
 		if !c.firstReadDone {
 			c.firstReadDone = true
@@ -1577,16 +1619,34 @@ func (c *resourceExhaustedTrackingConn) Read(b []byte) (int, error) {
 		} else {
 			c.mu.Unlock()
 		}
-	} else if isResourceExhaustedError(err) {
-		c.onResourceExhausted(err)
+	} else {
+		if isResourceExhaustedError(err) {
+			c.onResourceExhausted(err)
+		}
+		c.mu.Lock()
+		first := !c.firstReadDone
+		c.firstReadDone = true
+		c.mu.Unlock()
+		if first && c.onInitialError != nil {
+			c.onInitialError(err)
+		}
 	}
 	return n, err
 }
 
 func (c *resourceExhaustedTrackingConn) Write(b []byte) (int, error) {
 	n, err := c.Conn.Write(b)
-	if err != nil && isResourceExhaustedError(err) {
-		c.onResourceExhausted(err)
+	if err != nil {
+		if isResourceExhaustedError(err) {
+			c.onResourceExhausted(err)
+		}
+		c.mu.Lock()
+		first := !c.firstReadDone
+		c.firstReadDone = true
+		c.mu.Unlock()
+		if first && c.onInitialError != nil {
+			c.onInitialError(err)
+		}
 	}
 	return n, err
 }

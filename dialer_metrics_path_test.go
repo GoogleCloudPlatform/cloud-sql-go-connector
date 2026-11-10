@@ -34,6 +34,8 @@ import (
 	sqlpb "cloud.google.com/go/sql/apiv1beta4/sqlpb"
 	"go.opencensus.io/stats/view"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // countingRecorder is a tel.MetricRecorder that remembers every call, so
@@ -231,13 +233,13 @@ func TestSQLDataPathRecordsFailures(t *testing.T) {
 	if len(rec.openCount) != 1 || len(rec.latencies) != 1 {
 		t.Fatalf("want 1 attempt and 1 latency sample, got %d and %d", len(rec.openCount), len(rec.latencies))
 	}
-	if a := rec.openCount[0]; a.DialStatus != tel.ConnectError || tel.IPTypeValue(a.IPType) != tel.IPTypeSQLData {
-		t.Errorf("attempt = %+v, want error status with sql_data ip type", a)
+	if a := rec.openCount[0]; a.DialStatus != tel.ConnectError || a.AttemptStatus != tel.StatusAPICallFailed || a.ConnectionPart != tel.PartClientToProxy || tel.IPTypeValue(a.IPType) != tel.IPTypeSQLData {
+		t.Errorf("attempt = %+v, want api_call_failed error status with sql_data ip type", a)
 	}
 }
 
 // TestSQLDataCooldownRecordsFailure verifies that a dial refused by the
-// resource-exhausted cooldown is recorded as a failed attempt.
+// resource-exhausted cooldown is recorded as a resource_exhausted attempt.
 func TestSQLDataCooldownRecordsFailure(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
@@ -261,8 +263,132 @@ func TestSQLDataCooldownRecordsFailure(t *testing.T) {
 	}
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
-	if len(rec.openCount) != 1 || rec.openCount[0].DialStatus != tel.ConnectError {
-		t.Errorf("want 1 failed attempt, got %+v", rec.openCount)
+	if len(rec.openCount) != 1 || rec.openCount[0].DialStatus != tel.ConnectError || rec.openCount[0].AttemptStatus != tel.StatusResourceExhausted || rec.openCount[0].ConnectionPart != tel.PartClientToProxy {
+		t.Errorf("want 1 resource_exhausted failed attempt, got %+v", rec.openCount)
+	}
+}
+
+// TestSQLDataStreamErrorOnFirstReadRecordsFailure verifies that GFE or
+// SqlDataService errors surfaced on the first stream Read (after StreamSqlData
+// and Send(StartSession) buffered locally) are recorded with their classified
+// error status rather than as successful dials, and never increment open or
+// closed connection counts.
+func TestSQLDataStreamErrorOnFirstReadRecordsFailure(t *testing.T) {
+	tcs := []struct {
+		desc       string
+		code       codes.Code
+		msg        string
+		wantStatus string
+		cooldown   bool
+	}{
+		{
+			desc:       "GFE ResourceExhausted on Try 1 and cooldown on Try 2",
+			code:       codes.ResourceExhausted,
+			msg:        "GFE >50 QPS",
+			wantStatus: tel.StatusResourceExhausted,
+			cooldown:   true,
+		},
+		{
+			desc:       "GFE InvalidArgument (missing header)",
+			code:       codes.InvalidArgument,
+			msg:        "missing x-goog-request-params header",
+			wantStatus: tel.StatusAPICallFailed,
+		},
+		{
+			desc:       "wrong GAPIC endpoint Unimplemented",
+			code:       codes.Unimplemented,
+			msg:        "unknown service",
+			wantStatus: tel.StatusAPICallFailed,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			addr, cleanup := startMockServer(t, func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
+				_, _ = stream.Recv()
+				return status.Error(tc.code, tc.msg)
+			})
+			defer cleanup()
+
+			ctx := context.Background()
+			d, err := newTestDialer(ctx, addr, 5*time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			rec := &countingRecorder{}
+			installRecorder(t, d, "proj:reg:inst", rec)
+
+			conn, err := d.Dial(ctx, "proj:reg:inst", WithSQLData())
+			if err == nil {
+				if _, rErr := conn.Read(make([]byte, 1)); rErr == nil {
+					t.Fatal("expected first Read to fail")
+				}
+				_ = conn.Close()
+			}
+
+			wantAttempts := 1
+			if tc.cooldown {
+				// Immediate retry during cooldown must also record resource_exhausted.
+				if _, cErr := d.Dial(ctx, "proj:reg:inst", WithSQLData()); cErr == nil {
+					t.Fatal("expected cooldown Dial to fail")
+				}
+				wantAttempts = 2
+			}
+
+			rec.mu.Lock()
+			defer rec.mu.Unlock()
+			if rec.open != 0 {
+				t.Errorf("open connections = %d, want 0", rec.open)
+			}
+			if len(rec.closedCount) != 0 || len(rec.durations) != 0 {
+				t.Errorf("failed stream must not record closed connection or duration, got %d closed and %d durations", len(rec.closedCount), len(rec.durations))
+			}
+			if len(rec.openCount) != wantAttempts || len(rec.latencies) != wantAttempts {
+				t.Fatalf("want %d failed attempt(s) and latency sample(s), got %d and %d", wantAttempts, len(rec.openCount), len(rec.latencies))
+			}
+			for i, a := range rec.openCount {
+				if a.AttemptStatus != tc.wantStatus || a.ConnectionPart != tel.PartClientToProxy || tel.IPTypeValue(a.IPType) != tel.IPTypeSQLData {
+					t.Errorf("attempt[%d] = %+v, want status=%q part=%q ip=%q", i, a, tc.wantStatus, tel.PartClientToProxy, tel.IPTypeSQLData)
+				}
+			}
+		})
+	}
+}
+
+// TestSQLDataCloseBeforeReadRecordsOnce verifies that a sql_data connection
+// closed before any Read is still accounted for once and leaves open
+// connections balanced at zero.
+func TestSQLDataCloseBeforeReadRecordsOnce(t *testing.T) {
+	addr, cleanup := startMockServer(t, echoHandler)
+	defer cleanup()
+
+	ctx := context.Background()
+	d, err := newTestDialer(ctx, addr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	rec := &countingRecorder{}
+	installRecorder(t, d, "proj:reg:inst", rec)
+
+	conn, err := d.Dial(ctx, "proj:reg:inst", WithSQLData())
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	_ = conn.Close()
+	_ = conn.Close()
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.open != 0 {
+		t.Errorf("open connections = %d, want 0", rec.open)
+	}
+	if len(rec.openCount) != 1 || len(rec.closedCount) != 1 {
+		t.Fatalf("want 1 openCount and 1 closedCount, got %d and %d", len(rec.openCount), len(rec.closedCount))
+	}
+	if rec.openCount[0].AttemptStatus != tel.ConnectSuccess {
+		t.Errorf("attempt status = %q, want %q", rec.openCount[0].AttemptStatus, tel.ConnectSuccess)
 	}
 }
 
