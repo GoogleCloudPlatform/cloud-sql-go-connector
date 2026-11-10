@@ -17,6 +17,8 @@ package cloudsql
 import (
 	"context"
 	"crypto/rsa"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,13 +34,13 @@ type LazyRefreshCache struct {
 	connName        instance.ConnName
 	logger          debug.ContextLogger
 	r               adminAPIClient
+	refreshTimeout  time.Duration
 	mu              sync.Mutex
 	useIAMAuthNDial bool
+	dialFunc        func(ctx context.Context, ci ConnectionInfo) (net.Conn, error)
+	iamPrincipals   []pgPrincipal
 	needsRefresh    bool
 	cached          ConnectionInfo
-	// refreshTimeout bounds a refresh operation, as it does for the
-	// refresh-ahead cache.
-	refreshTimeout time.Duration
 }
 
 // NewLazyRefreshCache initializes a new LazyRefreshCache.
@@ -51,6 +53,7 @@ func NewLazyRefreshCache(
 	tp auth.TokenProvider,
 	dialerID string,
 	useIAMAuthNDial bool,
+	dialFunc func(ctx context.Context, ci ConnectionInfo) (net.Conn, error),
 ) *LazyRefreshCache {
 	return &LazyRefreshCache{
 		connName: cn,
@@ -64,7 +67,17 @@ func NewLazyRefreshCache(
 		),
 		refreshTimeout:  refreshTimeout,
 		useIAMAuthNDial: useIAMAuthNDial,
+		dialFunc:        dialFunc,
 	}
+}
+
+// RecordIAMPrincipal records a PostgreSQL (user, database) pair observed on an
+// active Auto-IAM connection so that subsequent refresh probes can send a
+// StartupMessage and update PgBouncer's cached pool credentials.
+func (c *LazyRefreshCache) RecordIAMPrincipal(user, database string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.iamPrincipals = appendIAMPrincipal(c.iamPrincipals, user, database)
 }
 
 // ConnectionInfo returns connection info for the associated instance. New
@@ -113,6 +126,18 @@ func (c *LazyRefreshCache) ConnectionInfo(
 			err,
 		)
 		return ConnectionInfo{}, err
+	}
+	if c.useIAMAuthNDial && len(c.iamPrincipals) > 0 && strings.HasPrefix(ci.DBVersion, "POSTGRES") {
+		if probeErr := probeInstanceConnection(
+			ctx, ci, c.refreshTimeout, c.dialFunc, c.iamPrincipals, c.logger,
+		); probeErr != nil {
+			c.logger.Debugf(
+				ctx,
+				"[%v] Proactive IAM token refresh probe encountered error: %v",
+				c.connName.String(),
+				probeErr,
+			)
+		}
 	}
 	c.logger.Debugf(
 		ctx,
