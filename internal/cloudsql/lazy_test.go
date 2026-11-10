@@ -16,6 +16,9 @@ package cloudsql
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +26,8 @@ import (
 	"cloud.google.com/go/auth"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
+	"google.golang.org/api/option"
+	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 func TestLazyRefreshCacheConnectionInfo(t *testing.T) {
@@ -163,4 +168,44 @@ func TestLazyRefreshCacheUpdateRefresh(t *testing.T) {
 
 func ptr[T any](val T) *T {
 	return &val
+}
+
+func TestLazyRefreshCacheHonorsRefreshTimeout(t *testing.T) {
+	cn, _ := instance.ParseConnName("my-project:my-region:my-instance")
+	// An Admin API that never answers until the test lets it.
+	release := make(chan struct{})
+	stalled := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		<-release
+	}))
+	defer stalled.Close()
+	defer close(release)
+	client, err := sqladmin.NewService(context.Background(),
+		option.WithHTTPClient(stalled.Client()), option.WithEndpoint(stalled.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const refreshTimeout = 100 * time.Millisecond
+	c := NewLazyRefreshCache(cn, nullLogger{}, client, RSAKey, refreshTimeout, nil, "", false)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.ConnectionInfo(context.Background())
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("ConnectionInfo() err = nil, want a refresh error from the stalled API")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("ConnectionInfo() did not return within 5s with refreshTimeout = %v", refreshTimeout)
+	}
+
+	// A caller whose context ended while waiting is not served.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.ConnectionInfo(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ConnectionInfo() with a canceled context err = %v, want %v", err, context.Canceled)
+	}
 }

@@ -36,6 +36,9 @@ type LazyRefreshCache struct {
 	useIAMAuthNDial bool
 	needsRefresh    bool
 	cached          ConnectionInfo
+	// refreshTimeout bounds a refresh operation, as it does for the
+	// refresh-ahead cache.
+	refreshTimeout time.Duration
 }
 
 // NewLazyRefreshCache initializes a new LazyRefreshCache.
@@ -44,7 +47,7 @@ func NewLazyRefreshCache(
 	l debug.ContextLogger,
 	client *sqladmin.Service,
 	key *rsa.PrivateKey,
-	_ time.Duration,
+	refreshTimeout time.Duration,
 	tp auth.TokenProvider,
 	dialerID string,
 	useIAMAuthNDial bool,
@@ -59,6 +62,7 @@ func NewLazyRefreshCache(
 			tp,
 			dialerID,
 		),
+		refreshTimeout:  refreshTimeout,
 		useIAMAuthNDial: useIAMAuthNDial,
 	}
 }
@@ -72,6 +76,10 @@ func (c *LazyRefreshCache) ConnectionInfo(
 ) (ConnectionInfo, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// The caller may have waited on the mutex past its own deadline.
+	if err := ctx.Err(); err != nil {
+		return ConnectionInfo{}, err
+	}
 	// strip monotonic clock with UTC()
 	now := time.Now().UTC()
 	// Pad expiration with a bufferPool to give the client plenty of time to
@@ -91,6 +99,11 @@ func (c *LazyRefreshCache) ConnectionInfo(
 		"[%v] Connection info refresh operation started",
 		c.connName.String(),
 	)
+	if c.refreshTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.refreshTimeout)
+		defer cancel()
+	}
 	ci, err := c.r.ConnectionInfo(ctx, c.connName, c.useIAMAuthNDial)
 	if err != nil {
 		c.logger.Debugf(
