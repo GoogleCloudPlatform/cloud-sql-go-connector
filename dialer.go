@@ -139,7 +139,7 @@ type connectionInfoCache interface {
 	ConnectionInfo(context.Context) (cloudsql.ConnectionInfo, error)
 	UpdateRefresh(*bool)
 	ForceRefresh()
-	RecordIAMPrincipal(user, database string)
+	RecordIAMPrincipal(user, database, ipType string)
 	io.Closer
 }
 
@@ -995,7 +995,13 @@ func (d *Dialer) connectInstanceIP(ctx context.Context, cn instance.ConnName, cf
 		netConn = cloudsql.NewMDXConn(tlsConn, cn.String(), mdxReq, d.logger)
 	}
 	if cfg.useIAMAuthN && strings.HasPrefix(ci.DBVersion, "POSTGRES") {
-		netConn = cloudsql.NewPostgresConn(netConn, c.RecordIAMPrincipal)
+		ipType := resolvedIPType
+		if ipType == "" {
+			ipType = cfg.connectionType
+		}
+		netConn = cloudsql.NewPostgresConn(netConn, func(user, database string) {
+			c.RecordIAMPrincipal(user, database, ipType)
+		})
 	}
 
 	latency := time.Since(startTime).Milliseconds()
@@ -1473,8 +1479,12 @@ func (d *Dialer) connectionInfoCache(
 	if err != nil {
 		return nil, err
 	}
-	dialFunc := func(ctx context.Context, ci cloudsql.ConnectionInfo) (net.Conn, error) {
-		conn, _, err := d.connect(ctx, cn, ci, d.defaultDialConfig)
+	dialFunc := func(ctx context.Context, ci cloudsql.ConnectionInfo, ipType string) (net.Conn, error) {
+		probeCfg := d.defaultDialConfig
+		if ipType != "" {
+			probeCfg.connectionType = ipType
+		}
+		conn, _, err := d.connect(ctx, cn, ci, probeCfg)
 		return conn, err
 	}
 	var cache connectionInfoCache

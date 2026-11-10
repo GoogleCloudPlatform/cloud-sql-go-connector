@@ -44,6 +44,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"cloud.google.com/go/cloudsqlconn/internal/tel"
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
+	"github.com/jackc/pgx/v5/pgproto3"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
@@ -944,7 +945,7 @@ func (s *spyConnectionInfoCache) ForceRefresh() {
 
 func (s *spyConnectionInfoCache) UpdateRefresh(*bool) {}
 
-func (s *spyConnectionInfoCache) RecordIAMPrincipal(string, string) {}
+func (s *spyConnectionInfoCache) RecordIAMPrincipal(string, string, string) {}
 
 func (s *spyConnectionInfoCache) Close() error {
 	s.mu.Lock()
@@ -2828,5 +2829,169 @@ func TestComputePlatformsMatchesInternalSet(t *testing.T) {
 	got[0] = "tampered"
 	if ComputePlatforms()[0] == "tampered" {
 		t.Fatal("ComputePlatforms must return a copy")
+	}
+}
+
+func TestDialer_IAMProbePreservesPerDialIPType(t *testing.T) {
+	ctx := context.Background()
+	const (
+		publicIP  = "203.0.113.10"
+		privateIP = "10.0.0.10"
+	)
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "priv-probe",
+		mock.WithEngineVersion("POSTGRES_15"),
+		mock.WithPublicIP(publicIP),
+		mock.WithPrivateIP(privateIP),
+	)
+	svc, cleanup, err := mock.NewSQLAdminService(
+		ctx,
+		mock.InstanceGetSuccess(inst, 2),
+		mock.CreateEphemeralSuccess(inst, 2),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Errorf("SQLAdmin mock cleanup: %v", err)
+		}
+	}()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	tlsLn := tls.NewListener(ln, &tls.Config{
+		Certificates: []tls.Certificate{{
+			Certificate: [][]byte{inst.Cert.Raw},
+			PrivateKey:  inst.Key,
+		}},
+	})
+	defer tlsLn.Close()
+
+	var probeMode atomic.Bool
+	seedDoneCh := make(chan struct{}, 1)
+	probeUserCh := make(chan string, 1)
+	go func() {
+		for {
+			c, err := tlsLn.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+				backend := pgproto3.NewBackend(c, c)
+				msg, err := backend.ReceiveStartupMessage()
+				if err != nil {
+					return
+				}
+				sm, ok := msg.(*pgproto3.StartupMessage)
+				if !ok {
+					return
+				}
+				if !probeMode.Load() {
+					select {
+					case seedDoneCh <- struct{}{}:
+					default:
+					}
+					var buf [16]byte
+					_, _ = c.Read(buf[:])
+					return
+				}
+				backend.Send(&pgproto3.AuthenticationOk{})
+				backend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
+				_ = backend.Flush()
+				_, _ = backend.Receive()
+				select {
+				case probeUserCh <- sm.Parameters["user"]:
+				default:
+				}
+			}(c)
+		}
+	}()
+
+	var mu sync.Mutex
+	var probeDials []string
+	token := &oauth2.Token{AccessToken: "tok", Expiry: time.Now().Add(time.Hour)}
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := NewDialer(
+		ctx,
+		WithIAMAuthN(),
+		WithIAMAuthNTokenSources(oauth2.StaticTokenSource(token), oauth2.StaticTokenSource(token)),
+		WithRSAKey(rsaKey),
+		WithBuiltInMetrics(false),
+		WithRefreshTimeout(2*time.Second),
+		WithDialFunc(func(dctx context.Context, network, addr string) (net.Conn, error) {
+			if probeMode.Load() {
+				mu.Lock()
+				probeDials = append(probeDials, addr)
+				mu.Unlock()
+			}
+			host, _, _ := net.SplitHostPort(addr)
+			if host == publicIP {
+				t.Errorf("unexpected dial to public IP %s when connection used WithPrivateIP", addr)
+				return nil, errors.New("public IP must not be dialed")
+			}
+			return (&net.Dialer{}).DialContext(dctx, network, tlsLn.Addr().String())
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.sqladmin = svc
+	defer d.Close()
+
+	// Dialer defaults to PublicIP, while this call overrides per-Dial with WithPrivateIP().
+	conn, err := d.Dial(ctx, "my-project:my-region:priv-probe", WithDialIAMAuthN(true), WithPrivateIP())
+	if err != nil {
+		t.Fatalf("Dial(WithPrivateIP) failed: %v", err)
+	}
+	startupPkt, err := (&pgproto3.StartupMessage{
+		ProtocolVersion: pgproto3.ProtocolVersion30,
+		Parameters: map[string]string{
+			"user":     "iam-priv@example.com",
+			"database": "privdb",
+		},
+	}).Encode(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(startupPkt); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+
+	select {
+	case <-seedDoneCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for seed connection startup")
+	}
+	probeMode.Store(true)
+
+	// Force a background refresh via a transient one-off dial failure.
+	_, _ = d.Dial(ctx, "my-project:my-region:priv-probe", WithPrivateIP(), WithOneOffDialFunc(func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("trigger ForceRefresh")
+	}))
+
+	select {
+	case gotUser := <-probeUserCh:
+		if gotUser != "iam-priv@example.com" {
+			t.Fatalf("probed user = %q, want %q", gotUser, "iam-priv@example.com")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for ForceRefresh probe over PRIVATE IP")
+	}
+
+	mu.Lock()
+	dials := append([]string(nil), probeDials...)
+	mu.Unlock()
+	if len(dials) != 1 || dials[0] != net.JoinHostPort(privateIP, serverProxyPort) {
+		t.Fatalf("probe dialed %v, want [%s]", dials, net.JoinHostPort(privateIP, serverProxyPort))
 	}
 }

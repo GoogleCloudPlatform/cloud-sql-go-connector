@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -644,7 +645,7 @@ func TestRefreshAheadCache_ProbeConnection_Success(t *testing.T) {
 		close(probed)
 	}()
 
-	dialFunc := func(ctx context.Context, ci ConnectionInfo) (net.Conn, error) {
+	dialFunc := func(ctx context.Context, ci ConnectionInfo, _ string) (net.Conn, error) {
 		var d net.Dialer
 		conn, err := d.DialContext(ctx, "tcp", ln.Addr().String())
 		if err != nil {
@@ -670,7 +671,7 @@ func TestRefreshAheadCache_ProbeConnection_Success(t *testing.T) {
 		t.Fatalf("failed to retrieve connection info: %v", err)
 	}
 
-	i.RecordIAMPrincipal("iam-user@example.com", "mydb")
+	i.RecordIAMPrincipal("iam-user@example.com", "mydb", "")
 	i.ForceRefresh()
 	_, err = i.ConnectionInfo(ctx)
 	if err != nil {
@@ -699,7 +700,7 @@ func TestRefreshAheadCache_ProbeConnection_DialErrorDoesNotFailRefresh(t *testin
 	defer cleanup()
 
 	dialed := make(chan struct{}, 1)
-	dialFunc := func(_ context.Context, _ ConnectionInfo) (net.Conn, error) {
+	dialFunc := func(_ context.Context, _ ConnectionInfo, _ string) (net.Conn, error) {
 		select {
 		case dialed <- struct{}{}:
 		default:
@@ -723,7 +724,7 @@ func TestRefreshAheadCache_ProbeConnection_DialErrorDoesNotFailRefresh(t *testin
 	default:
 	}
 
-	i.RecordIAMPrincipal("iam-user@example.com", "mydb")
+	i.RecordIAMPrincipal("iam-user@example.com", "mydb", "")
 	i.ForceRefresh()
 	ci, err := i.ConnectionInfo(ctx)
 	if err != nil {
@@ -776,7 +777,7 @@ func TestRefreshAheadCache_ProbeConnection_SkipsZeroPrincipalsAndNonPostgres(t *
 			defer cleanup()
 
 			dialed := make(chan struct{}, 1)
-			dialFunc := func(_ context.Context, _ ConnectionInfo) (net.Conn, error) {
+			dialFunc := func(_ context.Context, _ ConnectionInfo, _ string) (net.Conn, error) {
 				select {
 				case dialed <- struct{}{}:
 				default:
@@ -795,7 +796,7 @@ func TestRefreshAheadCache_ProbeConnection_SkipsZeroPrincipalsAndNonPostgres(t *
 				t.Fatalf("ConnectionInfo failed: %v", err)
 			}
 			if tc.recordPrincipal {
-				i.RecordIAMPrincipal("iam-user@example.com", "mydb")
+				i.RecordIAMPrincipal("iam-user@example.com", "mydb", "")
 				i.ForceRefresh()
 				if _, err := i.ConnectionInfo(ctx); err != nil {
 					t.Fatalf("refreshed ConnectionInfo failed: %v", err)
@@ -811,7 +812,7 @@ func TestRefreshAheadCache_ProbeConnection_SkipsZeroPrincipalsAndNonPostgres(t *
 	}
 
 	t.Run("probeInstanceConnection skips non-postgres directly", func(t *testing.T) {
-		dialFunc := func(_ context.Context, _ ConnectionInfo) (net.Conn, error) {
+		dialFunc := func(_ context.Context, _ ConnectionInfo, _ string) (net.Conn, error) {
 			t.Fatal("expected 0 probe dials for SQLSERVER")
 			return nil, nil
 		}
@@ -904,7 +905,7 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 		}
 	}()
 
-	dialFunc := func(ctx context.Context, ci ConnectionInfo) (net.Conn, error) {
+	dialFunc := func(ctx context.Context, ci ConnectionInfo, _ string) (net.Conn, error) {
 		var d net.Dialer
 		conn, err := d.DialContext(ctx, "tcp", ln.Addr().String())
 		if err != nil {
@@ -941,7 +942,9 @@ func TestRefreshAheadCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 			}
 		}
 	}()
-	pgConn := NewPostgresConn(c1, i.RecordIAMPrincipal)
+	pgConn := NewPostgresConn(c1, func(user, database string) {
+		i.RecordIAMPrincipal(user, database, "")
+	})
 	// Write SSLRequest followed by StartupMessage using pgproto3
 	sslReq, err := (&pgproto3.SSLRequest{}).Encode(nil)
 	if err != nil {
@@ -1214,5 +1217,160 @@ func TestPostgresConn_PipelinedWrite(t *testing.T) {
 	<-doneReading
 	if !bytes.Equal(received.Bytes(), combined) {
 		t.Fatalf("wire received bytes mismatch: got %d bytes, want %d", received.Len(), len(combined))
+	}
+}
+
+func TestRefreshAheadCache_ProbeConnection_PreservesIPTypeAndDeduplicates(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion("POSTGRES_15"))
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.InstanceGetSuccess(inst, 2),
+		mock.CreateEphemeralSuccess(inst, 2),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	probedIPTypes := make(chan string, 4)
+	dialFunc := func(_ context.Context, _ ConnectionInfo, ipType string) (net.Conn, error) {
+		probedIPTypes <- ipType
+		return nil, errors.New("stop after recording ipType")
+	}
+
+	i := NewRefreshAheadCache(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 5*time.Second, nil, "", true,
+		dialFunc,
+	)
+	defer i.Close()
+
+	if _, err := i.ConnectionInfo(context.Background()); err != nil {
+		t.Fatalf("initial ConnectionInfo failed: %v", err)
+	}
+
+	// Duplicate (user, db, ipType) should deduplicate, while differing ipType must stay distinct.
+	i.RecordIAMPrincipal("u1@example.com", "db1", PrivateIP)
+	i.RecordIAMPrincipal("u1@example.com", "db1", PrivateIP)
+	i.RecordIAMPrincipal("u1@example.com", "db1", PublicIP)
+	i.RecordIAMPrincipal("u2@example.com", "db2", PSC)
+
+	i.ForceRefresh()
+
+	want := []string{PrivateIP, PublicIP, PSC}
+	var got []string
+	for len(got) < len(want) {
+		select {
+		case ipType := <-probedIPTypes:
+			got = append(got, ipType)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for probe dials; got %v, want %v", got, want)
+		}
+	}
+	for idx := range want {
+		if got[idx] != want[idx] {
+			t.Fatalf("dialed ipTypes[%d] = %q, want %q (all=%v)", idx, got[idx], want[idx], got)
+		}
+	}
+	select {
+	case extra := <-probedIPTypes:
+		t.Fatalf("unexpected duplicate probe dial for ipType %q", extra)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestProbeInstanceConnection_BoundedEOFDrainAfterTerminate(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	var mu sync.Mutex
+	var probedUsers []string
+	var heldConns []net.Conn
+	defer func() {
+		mu.Lock()
+		for _, c := range heldConns {
+			_ = c.Close()
+		}
+		mu.Unlock()
+	}()
+
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				backend := pgproto3.NewBackend(c, c)
+				msg, err := backend.ReceiveStartupMessage()
+				if err != nil {
+					_ = c.Close()
+					return
+				}
+				sm, ok := msg.(*pgproto3.StartupMessage)
+				if !ok {
+					_ = c.Close()
+					return
+				}
+				user := sm.Parameters["user"]
+				backend.Send(&pgproto3.AuthenticationOk{})
+				backend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
+				if err := backend.Flush(); err != nil {
+					_ = c.Close()
+					return
+				}
+				if _, err := backend.Receive(); err != nil {
+					_ = c.Close()
+					return
+				}
+				mu.Lock()
+				probedUsers = append(probedUsers, user)
+				if user == "u1@example.com" {
+					// Intentionally keep connection open without TCP FIN.
+					heldConns = append(heldConns, c)
+					mu.Unlock()
+					return
+				}
+				mu.Unlock()
+				_ = c.Close()
+			}(c)
+		}
+	}()
+
+	dialFunc := func(ctx context.Context, _ ConnectionInfo, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", ln.Addr().String())
+	}
+
+	start := time.Now()
+	err = probeInstanceConnection(
+		context.Background(),
+		ConnectionInfo{
+			ConnectionName: testInstanceConnName(),
+			DBVersion:      "POSTGRES_15",
+		},
+		5*time.Second,
+		dialFunc,
+		[]pgPrincipal{
+			{user: "u1@example.com", database: "db1", ipType: PrivateIP},
+			{user: "u2@example.com", database: "db2", ipType: PrivateIP},
+		},
+		nullLogger{},
+	)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("probeInstanceConnection failed: %v", err)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("probeInstanceConnection took %v, expected bounded drain around ~%v without burning 5s budget", elapsed, probeEOFDrainTimeout)
+	}
+
+	mu.Lock()
+	got := append([]string(nil), probedUsers...)
+	mu.Unlock()
+	if len(got) != 2 || got[0] != "u1@example.com" || got[1] != "u2@example.com" {
+		t.Fatalf("probed users = %v, want [u1@example.com u2@example.com]", got)
 	}
 }
