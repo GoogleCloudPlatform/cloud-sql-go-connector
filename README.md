@@ -458,6 +458,30 @@ dsn := "user=test-sa dbname=mydb sslmode=disable"
 [configure-iam-authn]: https://cloud.google.com/sql/docs/postgres/create-edit-iam-instances#configure-iam-db-instance
 [add-iam-user]: https://cloud.google.com/sql/docs/postgres/create-manage-iam-users#creating-a-database-user
 
+### Post-Quantum Cryptography (PQC)
+
+The Cloud SQL Go Connector uses Go's standard `crypto/tls` package with default
+curve preferences for TLS 1.3 mTLS connections—it does not implement custom TLS
+or post-quantum cryptography logic. As a result, PQC behavior comes directly
+from the Go standard library:
+
+- **Default behavior (Go 1.24+):** When built with Go 1.24+ and `go >= 1.24` in
+  your application's main `go.mod` (required by `cloudsqlconn` `v1.19.0+`;
+  `v1.25.3+` requires `go >= 1.26.0`), `crypto/tls` automatically offers hybrid
+  `X25519MLKEM768` alongside classical `X25519` key shares in the TLS 1.3
+  `ClientHello` (Go 1.26+ also advertises `SecP256r1MLKEM768` and
+  `SecP384r1MLKEM1024` in `supported_groups`). If a Cloud SQL instance does not
+  yet support hybrid ML-KEM groups, the TLS 1.3 handshake falls back to
+  classical `X25519` automatically.
+- **Older `go.mod` directives:** If an application pins an older connector
+  release with `go 1.23` or earlier in its main `go.mod`, Go defaults to
+  `tlsmlkem=0` even when compiled with Go 1.24+; update the `go` directive to
+  `1.24+` or set `godebug tlsmlkem=1` to enable it.
+- **Opting out:** To disable all ML-KEM hybrid groups (`X25519MLKEM768`,
+  `SecP256r1MLKEM768`, and `SecP384r1MLKEM1024`) and restrict TLS handshakes to
+  classical curves, set `GODEBUG=tlsmlkem=0` at runtime (or `godebug tlsmlkem=0`
+  in `go.mod` / `//go:debug tlsmlkem=0` in `package main`).
+
 ### Built-in Client Metrics (BETA)
 
 The connector reports client-side connection metrics to [Cloud Monitoring][]

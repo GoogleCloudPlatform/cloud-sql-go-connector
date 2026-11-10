@@ -295,17 +295,71 @@ func GenerateCertWithCommonName(i FakeCSQLInstance, cn string) []byte {
 	return i.certs.generateServerCertWithCn(cn).Raw
 }
 
+// ServerProxyOption configures StartServerProxy.
+type ServerProxyOption func(*serverProxyConfig)
+
+type serverProxyConfig struct {
+	curvePreferences []tls.CurveID
+	onClientHello    func(*tls.ClientHelloInfo)
+	onHandshake      func(tls.ConnectionState)
+}
+
+// WithServerCurvePreferences configures the TLS CurvePreferences used by the
+// fake server proxy. When unset, crypto/tls defaults are used.
+func WithServerCurvePreferences(curves ...tls.CurveID) ServerProxyOption {
+	return func(c *serverProxyConfig) {
+		c.curvePreferences = curves
+	}
+}
+
+// WithServerClientHelloHook registers a callback invoked inside
+// tls.Config.GetConfigForClient before server-side curve filtering.
+func WithServerClientHelloHook(fn func(*tls.ClientHelloInfo)) ServerProxyOption {
+	return func(c *serverProxyConfig) {
+		c.onClientHello = fn
+	}
+}
+
+// WithServerConnectionStateHook registers a callback invoked with the server's
+// tls.ConnectionState after each accepted TLS handshake completes.
+func WithServerConnectionStateHook(fn func(tls.ConnectionState)) ServerProxyOption {
+	return func(c *serverProxyConfig) {
+		c.onHandshake = fn
+	}
+}
+
 // StartServerProxy starts a fake server proxy and listens on the provided port
 // on all interfaces, configured with TLS as specified by the FakeCSQLInstance.
 // Callers should invoke the returned function to clean up all resources.
-func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
-	ln, err := startListenerWithRetries(&tls.Config{
-		Certificates: i.certs.serverChain(i.useStandardTLSValidation),
-		ClientCAs:    i.certs.clientCAPool(),
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-	})
+func StartServerProxy(t *testing.T, i FakeCSQLInstance, opts ...ServerProxyOption) func() {
+	var proxyCfg serverProxyConfig
+	for _, opt := range opts {
+		opt(&proxyCfg)
+	}
+	tlsCfg := &tls.Config{
+		Certificates:     i.certs.serverChain(i.useStandardTLSValidation),
+		ClientCAs:        i.certs.clientCAPool(),
+		ClientAuth:       tls.RequireAndVerifyClientCert,
+		CurvePreferences: proxyCfg.curvePreferences,
+	}
+	if proxyCfg.onClientHello != nil {
+		tlsCfg.GetConfigForClient = func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
+			proxyCfg.onClientHello(chi)
+			return nil, nil
+		}
+	}
+	ln, err := startListenerWithRetries(tlsCfg)
 	if err != nil {
 		t.Fatalf("failed to start listener: %v", err)
+	}
+	var logMu sync.Mutex
+	stopped := false
+	logf := func(format string, args ...any) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		if !stopped {
+			t.Logf(format, args...)
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -325,26 +379,33 @@ func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 					return
 				}
 				if aErr != nil {
-					t.Logf("Fake server accept error: %v", aErr)
+					logf("Fake server accept error: %v", aErr)
 					return
 				}
 
 				go func(c net.Conn) {
+					if proxyCfg.onHandshake != nil {
+						if tlsConn, ok := c.(*tls.Conn); ok {
+							if hErr := tlsConn.Handshake(); hErr == nil {
+								proxyCfg.onHandshake(tlsConn.ConnectionState())
+							}
+						}
+					}
 					csqlBytes := make([]byte, 8)
 					c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 					_, rErr := c.Read(csqlBytes)
 					if errors.Is(err, os.ErrDeadlineExceeded) {
-						t.Logf("Read timeout")
+						logf("Read timeout")
 					} else if rErr != nil {
-						t.Logf("Fake server read error: %v", rErr)
+						logf("Fake server read error: %v", rErr)
 					}
 					var res []byte
 					if bytes.Compare(csqlBytes, []byte("CSQLMDEX")) == 0 {
 						mdxBytes, err := io.ReadAll(c)
 						if err != nil {
-							t.Logf("Error reading MDX message: %v", err)
+							logf("Error reading MDX message: %v", err)
 						}
-						t.Logf("Fake server received metadata exchange request: %v", mdxBytes)
+						logf("Fake server received metadata exchange request: %v", mdxBytes)
 
 						// This is byte-level equivalent of
 						// mdx.MetadataExchangeResponse{Status:OK}
@@ -354,7 +415,7 @@ func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 					res = append(res, []byte(i.name)...)
 					_, wErr := c.Write(res)
 					if wErr != nil {
-						t.Logf("Fake server write error: %v", wErr)
+						logf("Fake server write error: %v", wErr)
 					}
 					_ = c.Close()
 				}(conn)
@@ -362,6 +423,9 @@ func StartServerProxy(t *testing.T, i FakeCSQLInstance) func() {
 		}
 	}()
 	return func() {
+		logMu.Lock()
+		stopped = true
+		logMu.Unlock()
 		cancel()
 		_ = ln.Close()
 	}
