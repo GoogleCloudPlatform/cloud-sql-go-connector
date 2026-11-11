@@ -211,7 +211,7 @@ func TestLazyRefreshCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 		_, _ = backend.Receive()
 	}()
 
-	customDial := func(ctx context.Context, ci ConnectionInfo) (net.Conn, error) {
+	customDial := func(ctx context.Context, ci ConnectionInfo, _ string) (net.Conn, error) {
 		var d net.Dialer
 		conn, err := d.DialContext(ctx, "tcp", ln.Addr().String())
 		if err != nil {
@@ -230,7 +230,7 @@ func TestLazyRefreshCache_ProbeConnection_PostgresStartupPacket(t *testing.T) {
 		RSAKey, 30*time.Second, &spyTokenProvider{}, "", true,
 		customDial,
 	)
-	c.RecordIAMPrincipal("iam-user@example.com", "mydb")
+	c.RecordIAMPrincipal("iam-user@example.com", "mydb", "")
 
 	if _, err := c.ConnectionInfo(context.Background()); err != nil {
 		t.Fatalf("ConnectionInfo failed: %v", err)
@@ -284,7 +284,7 @@ func TestLazyRefreshCache_ProbeConnection_SkipsZeroPrincipalsAndNonPostgres(t *t
 			defer cleanup()
 
 			dialCalls := 0
-			customDial := func(context.Context, ConnectionInfo) (net.Conn, error) {
+			customDial := func(context.Context, ConnectionInfo, string) (net.Conn, error) {
 				dialCalls++
 				t.Fatalf("unexpected probe dial for %s", tc.desc)
 				return nil, nil
@@ -296,7 +296,7 @@ func TestLazyRefreshCache_ProbeConnection_SkipsZeroPrincipalsAndNonPostgres(t *t
 				customDial,
 			)
 			if tc.recordPrincipal {
-				c.RecordIAMPrincipal("iam-user@example.com", "mydb")
+				c.RecordIAMPrincipal("iam-user@example.com", "mydb", "")
 			}
 
 			if _, err := c.ConnectionInfo(context.Background()); err != nil {
@@ -306,6 +306,86 @@ func TestLazyRefreshCache_ProbeConnection_SkipsZeroPrincipalsAndNonPostgres(t *t
 				t.Fatalf("dialCalls = %d, want 0", dialCalls)
 			}
 		})
+	}
+}
+
+func TestLazyRefreshCache_ConnectionInfo_ReleasesLockDuringProbe(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance", mock.WithEngineVersion("POSTGRES_15"))
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.InstanceGetSuccess(inst, 1),
+		mock.CreateEphemeralSuccess(inst, 1),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	probeStarted := make(chan struct{})
+	releaseProbe := make(chan struct{})
+	customDial := func(_ context.Context, _ ConnectionInfo, _ string) (net.Conn, error) {
+		close(probeStarted)
+		select {
+		case <-releaseProbe:
+		case <-time.After(5 * time.Second):
+		}
+		return nil, context.DeadlineExceeded
+	}
+
+	c := NewLazyRefreshCache(
+		testInstanceConnName(), nullLogger{}, client,
+		RSAKey, 5*time.Second, nil, "", true,
+		customDial,
+	)
+	c.RecordIAMPrincipal("iam-user@example.com", "mydb", PrivateIP)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var err1 error
+	go func() {
+		defer wg.Done()
+		_, err1 = c.ConnectionInfo(context.Background())
+	}()
+
+	select {
+	case <-probeStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for probe to start")
+	}
+
+	// While the slow probe is running, concurrent ConnectionInfo, RecordIAMPrincipal,
+	// and ForceRefresh calls must not block waiting for c.mu.Lock().
+	doneConcurrent := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		_, err := c.ConnectionInfo(ctx)
+		if err != nil {
+			doneConcurrent <- err
+			return
+		}
+		c.RecordIAMPrincipal("iam-user2@example.com", "mydb2", PublicIP)
+		c.ForceRefresh()
+		doneConcurrent <- nil
+	}()
+
+	select {
+	case err := <-doneConcurrent:
+		if err != nil {
+			close(releaseProbe)
+			wg.Wait()
+			t.Fatalf("concurrent cache operations failed while probing: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		close(releaseProbe)
+		wg.Wait()
+		t.Fatal("concurrent ConnectionInfo/RecordIAMPrincipal/ForceRefresh blocked behind c.mu during probe")
+	}
+
+	close(releaseProbe)
+	wg.Wait()
+	if err1 != nil {
+		t.Fatalf("first ConnectionInfo failed: %v", err1)
 	}
 }
 

@@ -112,7 +112,7 @@ type RefreshAheadCache struct {
 
 	mu              sync.RWMutex
 	useIAMAuthNDial bool
-	dialFunc        func(ctx context.Context, ci ConnectionInfo) (net.Conn, error)
+	dialFunc        func(ctx context.Context, ci ConnectionInfo, ipType string) (net.Conn, error)
 	iamPrincipals   []pgPrincipal
 	// cur represents the current refreshOperation that will be used to
 	// create connections. If a valid complete refreshOperation isn't
@@ -131,16 +131,17 @@ type RefreshAheadCache struct {
 type pgPrincipal struct {
 	user     string
 	database string
+	ipType   string
 }
 
-func appendIAMPrincipal(principals []pgPrincipal, user, database string) []pgPrincipal {
+func appendIAMPrincipal(principals []pgPrincipal, user, database, ipType string) []pgPrincipal {
 	if user == "" {
 		return principals
 	}
 	if database == "" {
 		database = user
 	}
-	principal := pgPrincipal{user: user, database: database}
+	principal := pgPrincipal{user: user, database: database, ipType: ipType}
 	for _, existing := range principals {
 		if existing == principal {
 			return principals
@@ -149,13 +150,14 @@ func appendIAMPrincipal(principals []pgPrincipal, user, database string) []pgPri
 	return append(principals, principal)
 }
 
-// RecordIAMPrincipal records a PostgreSQL (user, database) pair observed on an
-// active Auto-IAM connection so that subsequent background refresh probes can
-// send a StartupMessage and update PgBouncer's cached pool credentials.
-func (i *RefreshAheadCache) RecordIAMPrincipal(user, database string) {
+// RecordIAMPrincipal records a PostgreSQL (user, database, ipType) tuple
+// observed on an active Auto-IAM connection so that subsequent background
+// refresh probes can send a StartupMessage over the same IP preference and
+// update PgBouncer's cached pool credentials.
+func (i *RefreshAheadCache) RecordIAMPrincipal(user, database, ipType string) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	i.iamPrincipals = appendIAMPrincipal(i.iamPrincipals, user, database)
+	i.iamPrincipals = appendIAMPrincipal(i.iamPrincipals, user, database, ipType)
 }
 
 // NewRefreshAheadCache initializes a new Instance given an instance connection name
@@ -168,7 +170,7 @@ func NewRefreshAheadCache(
 	tp auth.TokenProvider,
 	dialerID string,
 	useIAMAuthNDial bool,
-	dialFunc func(ctx context.Context, ci ConnectionInfo) (net.Conn, error),
+	dialFunc func(ctx context.Context, ci ConnectionInfo, ipType string) (net.Conn, error),
 ) *RefreshAheadCache {
 	ctx, cancel := context.WithCancel(context.Background())
 	i := &RefreshAheadCache{
@@ -605,7 +607,10 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 	return r
 }
 
-const maxPgStartupPacketLen = 10000
+const (
+	maxPgStartupPacketLen = 10000
+	probeEOFDrainTimeout  = 500 * time.Millisecond
+)
 
 func (i *RefreshAheadCache) probeConnection(ctx context.Context, ci ConnectionInfo) error {
 	if !strings.HasPrefix(ci.DBVersion, "POSTGRES") {
@@ -627,7 +632,7 @@ func probeInstanceConnection(
 	ctx context.Context,
 	ci ConnectionInfo,
 	refreshTimeout time.Duration,
-	dialFunc func(ctx context.Context, ci ConnectionInfo) (net.Conn, error),
+	dialFunc func(ctx context.Context, ci ConnectionInfo, ipType string) (net.Conn, error),
 	principals []pgPrincipal,
 	logger debug.ContextLogger,
 ) error {
@@ -661,7 +666,7 @@ func probeInstanceConnection(
 func probeSinglePrincipal(
 	ctx context.Context,
 	ci ConnectionInfo,
-	dialFunc func(ctx context.Context, ci ConnectionInfo) (net.Conn, error),
+	dialFunc func(ctx context.Context, ci ConnectionInfo, ipType string) (net.Conn, error),
 	principal pgPrincipal,
 	logger debug.ContextLogger,
 ) error {
@@ -669,7 +674,7 @@ func probeSinglePrincipal(
 		return nil
 	}
 	logger.Debugf(ctx, "[%v] Probing IAM token refresh", ci.ConnectionName.String())
-	conn, err := dialFunc(ctx, ci)
+	conn, err := dialFunc(ctx, ci, principal.ipType)
 	if err != nil {
 		return fmt.Errorf("failed to dial probe connection: %w", err)
 	}
@@ -697,9 +702,20 @@ func probeSinglePrincipal(
 		_, _ = frontend.Receive()
 		frontend.Send(&pgproto3.Terminate{})
 		_ = frontend.Flush()
-		// Wait for server EOF so PgBouncer terminates cleanly without server-side unexpected EOF warning
+		// Wait briefly for server EOF so PgBouncer terminates cleanly without a
+		// server-side unexpected EOF warning, without letting a slow-to-FIN peer
+		// exhaust the refresh budget for remaining principals.
+		drainDeadline := time.Now().Add(probeEOFDrainTimeout)
+		if dl, ok := ctx.Deadline(); ok && dl.Before(drainDeadline) {
+			drainDeadline = dl
+		}
+		_ = conn.SetReadDeadline(drainDeadline)
 		var discard [128]byte
-		_, _ = conn.Read(discard[:])
+		for {
+			if _, err := conn.Read(discard[:]); err != nil {
+				break
+			}
+		}
 	}
 
 	return nil
