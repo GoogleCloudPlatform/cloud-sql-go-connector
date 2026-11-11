@@ -3,11 +3,11 @@ module cloud.google.com/go/cloudsqlconn
 go 1.26.0
 
 require (
-	cloud.google.com/go/auth v0.24.1
-	cloud.google.com/go/auth/oauth2adapt v0.3.0
+	cloud.google.com/go/auth v0.24.4
+	cloud.google.com/go/auth/oauth2adapt v0.3.1
 	cloud.google.com/go/compute/metadata v0.10.0
-	cloud.google.com/go/monitoring v1.31.0
-	cloud.google.com/go/sql v0.3.0
+	cloud.google.com/go/monitoring v1.32.1
+	cloud.google.com/go/sql v0.7.0
 	// Pinned: v0.61.0+ prints a deprecation notice to the standard logger on
 	// first use, which every application would see once metrics are on by
 	// default. Replace with an OTLP or in-house exporter before bumping.
@@ -15,19 +15,19 @@ require (
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.11.0
+	github.com/jackc/pgx/v5 v5.12.0
 	github.com/microsoft/go-mssqldb v1.11.2
 	go.opencensus.io v0.24.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/metric v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/sdk/metric v1.47.0
-	golang.org/x/net v0.61.0
-	golang.org/x/oauth2 v0.37.0
+	golang.org/x/net v0.62.0
+	golang.org/x/oauth2 v0.38.0
 	golang.org/x/time v0.16.0
-	google.golang.org/api v0.308.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b
-	google.golang.org/grpc v1.84.0
+	google.golang.org/api v0.312.0
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c
+	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12
 )
 
@@ -42,7 +42,7 @@ require (
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/s2a-go v0.1.11 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.24 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.25 // indirect
 	github.com/googleapis/gax-go/v2 v2.27.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
@@ -54,9 +54,9 @@ require (
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
-	google.golang.org/genproto v0.0.0-20261019180522-ce908d29299b // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20261019180522-ce908d29299b // indirect
+	golang.org/x/sync v0.25.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
+	google.golang.org/genproto v0.0.0-20261110000943-09e21b237f2c // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20261110000943-09e21b237f2c // indirect
 )
