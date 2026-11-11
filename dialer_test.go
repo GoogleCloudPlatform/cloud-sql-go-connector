@@ -1024,6 +1024,41 @@ func TestDialerCloseReportsFriendlyError(t *testing.T) {
 	}
 }
 
+// TestDialerCloseRefusesNewInstances guards against a refresh loop that
+// nothing can stop: Close closes the cached entries once, so an entry
+// created afterwards by Warmup, EngineVersion, or a Dial that passed the
+// closed check before Close ran would keep refreshing for the life of the
+// process.
+func TestDialerCloseRefusesNewInstances(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
+	d := setupDialer(t, setupConfig{
+		skipServer: true,
+		// no requests: a closed Dialer must not touch the Admin API
+	})
+	_ = d.Close()
+
+	ctx := context.Background()
+	if err := d.Warmup(ctx, inst.String()); !errors.Is(err, ErrDialerClosed) {
+		t.Errorf("Warmup after Close: want = %v, got = %v", ErrDialerClosed, err)
+	}
+	if _, err := d.EngineVersion(ctx, inst.String()); !errors.Is(err, ErrDialerClosed) {
+		t.Errorf("EngineVersion after Close: want = %v, got = %v", ErrDialerClosed, err)
+	}
+	cn, err := instance.ParseConnName(inst.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.connectionInfoCache(ctx, cn, nil); !errors.Is(err, ErrDialerClosed) {
+		t.Errorf("connectionInfoCache after Close: want = %v, got = %v", ErrDialerClosed, err)
+	}
+	d.lock.RLock()
+	n := len(d.cache)
+	d.lock.RUnlock()
+	if n != 0 {
+		t.Errorf("cache entries after Close = %d, want 0", n)
+	}
+}
+
 // TestDialerIDIsUniquePerDialer guards the client_uid contract: every Dialer
 // owns its own metric counters and export loop, so two Dialers in one
 // process (e.g. an IAM and a non-IAM driver registered side by side) must
