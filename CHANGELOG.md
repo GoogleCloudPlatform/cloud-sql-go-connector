@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.27.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.26.0...v1.27.0) (2026-11-11)
+
+
+### Features
+
+* add WithConnectTunnel dial option and Auto IAM support for SqlDataService ([#1208](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1208)) ([d7d5ff5](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/d7d5ff5c45338483cf4c87eb3466e1343b47ac34))
+
+
+### Bug Fixes
+
+* **metrics:** classify resource_exhausted and api_call_failed dial errors ([#1222](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1222)) ([707f788](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/707f78898fd58bf26c304835a36a3edfc8dd85c6))
+* release lazy lock during probe, preserve per-dial IP type, and cap EOF drain ([#1210](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1210)) ([e549842](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/e5498420ee902086d4155b8dc61ad978d6bf4f1c))
+* send PostgreSQL v3 StartupMessage in proactive IAM refresh probe for MCP ([#1167](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1167)) ([90c4164](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/90c4164764aaeebaf77c86a315c1c95dfe09bc03))
+* update dependencies to latest ([#1220](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1220)) ([46bea00](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/46bea00dfe332ca27b902df8bbe853ff31ccda21))
+
 ## [1.26.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.25.4...v1.26.0) (2026-10-29)
 
 
