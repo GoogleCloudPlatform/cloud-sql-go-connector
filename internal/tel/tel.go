@@ -21,6 +21,8 @@ import (
 	"log"
 	"math"
 	"math/rand/v2"
+	"net"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -39,6 +41,7 @@ import (
 	cmexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/exemplar"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -136,6 +139,31 @@ const (
 	// IPTypeSQLData is the instance_ip_type value for connections through the
 	// SQL Data endpoint.
 	IPTypeSQLData = "sql_data"
+
+	// PartClientToProxy is the connection_part value for errors between the
+	// client connector and the Cloud SQL API / server-side proxy.
+	PartClientToProxy = "client_to_proxy"
+	// PartProxyToServer is the connection_part value for errors between the
+	// proxy and the database server.
+	PartProxyToServer = "proxy_to_server"
+
+	// StatusUserError indicates an invalid caller configuration or request.
+	StatusUserError = "user_error"
+	// StatusAuthError indicates an authentication or authorization failure.
+	StatusAuthError = "auth_error"
+	// StatusRefreshFailedError indicates a failure refreshing instance metadata
+	// or ephemeral certificates via the SQL Admin API.
+	StatusRefreshFailedError = "refresh_failed_error"
+	// StatusDNSLookupError indicates a DNS resolution failure.
+	StatusDNSLookupError = "dns_lookup_error"
+	// StatusResourceExhausted indicates a GFE/API quota or rate-limit rejection
+	// or client-side exponential cooldown after resource exhaustion.
+	StatusResourceExhausted = "resource_exhausted"
+	// StatusAPICallFailed indicates a non-quota API or gRPC failure (e.g. GFE
+	// invalid request headers or a misconfigured GAPIC endpoint).
+	StatusAPICallFailed = "api_call_failed"
+	// StatusUnknownError is the fallback status for unclassified dial errors.
+	StatusUnknownError = "unknown_error"
 )
 
 // Config holds all the necessary information to configure a MetricRecorder.
@@ -339,19 +367,55 @@ func ClassifyDialError(err error) (string, string) {
 	if err == nil {
 		return "", ConnectSuccess
 	}
+	var reErr *errtype.ResourceExhaustedError
+	if errors.As(err, &reErr) {
+		return PartClientToProxy, StatusResourceExhausted
+	}
+	if st, ok := grpcstatus.FromError(err); ok {
+		switch st.Code() {
+		case codes.ResourceExhausted:
+			return PartClientToProxy, StatusResourceExhausted
+		case codes.PermissionDenied, codes.Unauthenticated:
+			return PartClientToProxy, StatusAuthError
+		case codes.InvalidArgument, codes.NotFound, codes.AlreadyExists,
+			codes.FailedPrecondition, codes.Aborted, codes.OutOfRange,
+			codes.Unimplemented, codes.Internal, codes.Unavailable,
+			codes.DataLoss, codes.DeadlineExceeded:
+			return PartClientToProxy, StatusAPICallFailed
+		}
+	}
+	var apiErr *googleapi.Error
+	if errors.As(err, &apiErr) {
+		if apiErr.Code == http.StatusTooManyRequests || isGoogleAPIRateLimit(apiErr) {
+			return PartClientToProxy, StatusResourceExhausted
+		}
+		if apiErr.Code == http.StatusUnauthorized || apiErr.Code == http.StatusForbidden {
+			return PartClientToProxy, StatusAuthError
+		}
+	}
 	var configErr *errtype.ConfigError
 	if errors.As(err, &configErr) {
-		return "client_to_proxy", "user_error"
+		return PartClientToProxy, StatusUserError
 	}
 	var refreshErr *errtype.RefreshError
 	if errors.As(err, &refreshErr) {
-		return "client_to_proxy", "refresh_failed_error"
+		return PartClientToProxy, StatusRefreshFailedError
 	}
-	// TODO: Replace this fallback with structural error tracking across callsites
-	// to accurately map granular status codes and provide more accurate "connection_part"
-	// detection (especially distinguishing errors in the proxy_to_server path)
-	// without relying on string matching.
-	return UnknownValue, "unknown_error"
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return PartClientToProxy, StatusDNSLookupError
+	}
+	return UnknownValue, StatusUnknownError
+}
+
+func isGoogleAPIRateLimit(apiErr *googleapi.Error) bool {
+	for _, e := range apiErr.Errors {
+		switch e.Reason {
+		case "rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded":
+			return true
+		}
+	}
+	return false
 }
 
 // -------------------------------------------------------------------------
