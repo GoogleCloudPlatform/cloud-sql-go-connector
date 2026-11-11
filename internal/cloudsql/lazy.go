@@ -89,6 +89,11 @@ func (c *LazyRefreshCache) ConnectionInfo(
 	ctx context.Context,
 ) (ConnectionInfo, error) {
 	c.mu.Lock()
+	// The caller may have waited on the mutex past its own deadline.
+	if err := ctx.Err(); err != nil {
+		c.mu.Unlock()
+		return ConnectionInfo{}, err
+	}
 	// strip monotonic clock with UTC()
 	now := time.Now().UTC()
 	// Pad expiration with a bufferPool to give the client plenty of time to
@@ -110,7 +115,13 @@ func (c *LazyRefreshCache) ConnectionInfo(
 		"[%v] Connection info refresh operation started",
 		c.connName.String(),
 	)
-	ci, err := c.r.ConnectionInfo(ctx, c.connName, c.useIAMAuthNDial)
+	refreshCtx := ctx
+	if c.refreshTimeout > 0 {
+		var cancel context.CancelFunc
+		refreshCtx, cancel = context.WithTimeout(ctx, c.refreshTimeout)
+		defer cancel()
+	}
+	ci, err := c.r.ConnectionInfo(refreshCtx, c.connName, c.useIAMAuthNDial)
 	if err != nil {
 		c.mu.Unlock()
 		c.logger.Debugf(
