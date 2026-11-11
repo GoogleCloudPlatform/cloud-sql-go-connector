@@ -376,6 +376,9 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	for _, opt := range cfg.dialOpts {
 		opt(&dc)
 	}
+	if dc.setSQLData && dc.setConnectTunnel {
+		return nil, errtype.NewConfigError("cannot specify WithSQLData and WithConnectTunnel at the same time", "")
+	}
 
 	if err := trace.InitMetrics(); err != nil {
 		return nil, err
@@ -736,9 +739,12 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 		d.logger.Debugf(ctx, "resolved instance connection string %s to %s", icn, cn.String())
 	}
 
+	if cfg.setSQLData && cfg.setConnectTunnel {
+		return nil, errtype.NewConfigError("cannot specify WithSQLData and WithConnectTunnel at the same time", cn.String())
+	}
 	// When using NoIP connections, there is no need to retrieve connection
 	// info and instead we may proceed immediately to connecting.
-	if cfg.connectionType == cloudsql.SQLData {
+	if cfg.connectionType == cloudsql.SQLData || cfg.connectionType == cloudsql.ConnectTunnel {
 		key := createKey(cn)
 		d.lock.RLock()
 		state, ok := d.sqlDataConnState[key]
@@ -778,7 +784,7 @@ func (d *Dialer) Dial(ctx context.Context, icn string, opts ...DialOption) (conn
 			// fallback is a separate attempt with its own IP type.
 			recordDialFailure(ctx, mr, attrs, startTime, sdcErr)
 
-			if !isPreconditionFailed(sdcErr) {
+			if cfg.connectionType == cloudsql.ConnectTunnel || !isPreconditionFailed(sdcErr) {
 				return nil, sdcErr
 			}
 			// sdcErr is a PreconditionFailed error. Fall back to direct IP connection.
@@ -835,7 +841,7 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 		state.mu.Unlock()
 	}
 
-	conn, err := d.sqlDataDialer.ConnectSQLDataService(ctx, cn)
+	conn, err := d.sqlDataDialer.ConnectSQLDataService(ctx, cn, cfg.useIAMAuthN)
 	if err != nil {
 		if isResourceExhaustedError(err) {
 			onResourceExhausted(err)
@@ -895,40 +901,42 @@ func (d *Dialer) connectSQLDataService(ctx context.Context, cn instance.ConnName
 		})
 	}
 
-	// This creates a fallback connection, and marks the connection
-	// as permanently needing to fallback to direct IP.
-	var lastFallbackErr atomic.Value
-	fb := func() (net.Conn, error) {
-		d.lock.RLock()
-		state, ok := d.sqlDataConnState[key]
-		d.lock.RUnlock()
-		if ok {
-			state.mu.Lock()
-			state.allowed = false
-			state.mu.Unlock()
+	if cfg.connectionType != cloudsql.ConnectTunnel {
+		// This creates a fallback connection, and marks the connection
+		// as permanently needing to fallback to direct IP.
+		var lastFallbackErr atomic.Value
+		fb := func() (net.Conn, error) {
+			d.lock.RLock()
+			state, ok := d.sqlDataConnState[key]
+			d.lock.RUnlock()
+			if ok {
+				state.mu.Lock()
+				state.allowed = false
+				state.mu.Unlock()
+			}
+			// The sql_data stream was rejected as unsupported and is being
+			// replaced by a direct-IP connection, which records its own metrics
+			// (connectInstanceIP returns an instrumentedConn). Record the failed
+			// sql_data attempt and time the fallback as its own attempt.
+			if v := lastFallbackErr.Load(); v != nil {
+				recordFailure(v.(error))
+			}
+			return d.connectInstanceIP(ctx, cn, cfg, time.Now(), mr, attrs)
 		}
-		// The sql_data stream was rejected as unsupported and is being
-		// replaced by a direct-IP connection, which records its own metrics
-		// (connectInstanceIP returns an instrumentedConn). Record the failed
-		// sql_data attempt and time the fallback as its own attempt.
-		if v := lastFallbackErr.Load(); v != nil {
-			recordFailure(v.(error))
-		}
-		return d.connectInstanceIP(ctx, cn, cfg, time.Now(), mr, attrs)
-	}
 
-	isUnsupported := func(err error) bool {
-		if isSQLDataUnsupportedError(err) {
-			lastFallbackErr.Store(err)
-			return true
+		isUnsupported := func(err error) bool {
+			if isSQLDataUnsupportedError(err) {
+				lastFallbackErr.Store(err)
+				return true
+			}
+			return false
 		}
-		return false
-	}
 
-	fc := newFallbackConn(conn, isUnsupported, fb)
+		conn = newFallbackConn(conn, isUnsupported, fb)
+	}
 	return &metricsConn{
 		Conn: &resourceExhaustedTrackingConn{
-			Conn:                fc,
+			Conn:                conn,
 			onResourceExhausted: onResourceExhausted,
 			onSuccess: func() {
 				onSuccess()

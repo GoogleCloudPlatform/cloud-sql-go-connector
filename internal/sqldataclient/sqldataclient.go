@@ -31,11 +31,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/encoding/protowire"
 )
 
 // Dialer is the interface that wraps the ConnectSQLDataService and Close methods.
 type Dialer interface {
-	ConnectSQLDataService(ctx context.Context, cn instance.ConnName) (conn net.Conn, err error)
+	ConnectSQLDataService(ctx context.Context, cn instance.ConnName, autoIAM bool) (conn net.Conn, err error)
 	Close() error
 }
 
@@ -141,7 +142,7 @@ func (d *GrpcDialer) initSQLDataClient(ctx context.Context) (*sqlgapic.SqlDataCl
 }
 
 // ConnectSQLDataService connects to the SqlDataService for the given connection name.
-func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.ConnName) (conn net.Conn, err error) {
+func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.ConnName, autoIAM bool) (conn net.Conn, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -192,12 +193,24 @@ func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.Conn
 		streamCancel()
 		return nil, err
 	}
+	startSession := &sqlpb.StartSession{
+		LocationId: fmt.Sprintf("locations/%s", cn.Region()),
+		InstanceId: instanceID,
+	}
+	if autoIAM {
+		// TODO: Replace this reflection code with startSession.AuthenticationType = sqlpb.StartSession_AUTO_IAM_AUTHENTICATION
+		// (or startSession.SetAutoIAM(true)) once the published cloud.google.com/go/sql library includes this field.
+		// Field 4: authentication_type (varint) = AUTO_IAM_AUTHENTICATION (2).
+		// Set unknown field so that the wire format includes authentication_type
+		// even if the generated proto struct does not yet expose field 4.
+		raw := startSession.ProtoReflect().GetUnknown()
+		raw = protowire.AppendTag(raw, 4, protowire.VarintType)
+		raw = protowire.AppendVarint(raw, 2)
+		startSession.ProtoReflect().SetUnknown(raw)
+	}
 	err = stream.Send(&sqlpb.StreamSqlDataRequest{
 		Message: &sqlpb.StreamSqlDataRequest_StartSession{
-			StartSession: &sqlpb.StartSession{
-				LocationId: fmt.Sprintf("locations/%s", cn.Region()),
-				InstanceId: instanceID,
-			},
+			StartSession: startSession,
 		},
 	})
 	if err != nil {

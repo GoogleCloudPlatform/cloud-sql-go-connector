@@ -614,6 +614,8 @@ type dialConfig struct {
 	tcpKeepAlive          time.Duration
 	useIAMAuthN           bool
 	mdxClientProtocolType string
+	setSQLData            bool
+	setConnectTunnel      bool
 	// This will be set before options
 	client *sqladmin.Service
 }
@@ -679,6 +681,16 @@ func WithAutoIP() DialOption {
 func WithSQLData() DialOption {
 	return func(cfg *dialConfig) {
 		cfg.connectionType = cloudsql.SQLData
+		cfg.setSQLData = true
+	}
+}
+
+// WithConnectTunnel returns a DialOption that routes traffic through the SQL Data API
+// endpoint without falling back to direct IP connections if the backend fails.
+func WithConnectTunnel() DialOption {
+	return func(cfg *dialConfig) {
+		cfg.connectionType = cloudsql.ConnectTunnel
+		cfg.setConnectTunnel = true
 	}
 }
 
