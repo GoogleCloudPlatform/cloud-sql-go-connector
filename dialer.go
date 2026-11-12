@@ -77,6 +77,9 @@ const (
 	// defaultUniverseDomain is the default value for universe domain.
 	// Universe domain is the default service domain for a given Cloud universe.
 	defaultUniverseDomain = "googleapis.com"
+	// defaultSQLDataEndpoint is the SQL Data API endpoint in the default
+	// universe.
+	defaultSQLDataEndpoint = "sqladmin.googleapis.com:443"
 )
 
 var (
@@ -290,7 +293,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		useragents:                      []string{userAgent},
 		failoverPeriod:                  cloudsql.FailoverPeriod,
 		dnsResolver:                     net.DefaultResolver,
-		sqlDataEndpoint:                 "sqladmin.googleapis.com:443",
+		sqlDataEndpoint:                 defaultSQLDataEndpoint,
 		sqlDataStreamTimeout:            2 * time.Hour,
 		resourceExhaustedCooldownPeriod: 5 * time.Second,
 		applicationName:                 "", // user-declared only; see WithApplicationName
@@ -430,11 +433,19 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 		}
 	}
 
+	// The SQL Data API lives in the same universe as the Admin API, so an
+	// explicit universe domain moves the default endpoint with it. An
+	// explicit WithSQLDataEndpoint always wins.
+	if !cfg.sqlDataEndpointSet && cfg.clientUniverseDomain != "" && cfg.clientUniverseDomain != defaultUniverseDomain {
+		cfg.sqlDataEndpoint = "sqladmin." + cfg.clientUniverseDomain + ":443"
+	}
 	var sqlDataDialer sqldataclient.Dialer
 	if cfg.sqlDataDialer != nil {
 		sqlDataDialer = cfg.sqlDataDialer
 	} else {
-		sqlDataDialer = sqldataclient.NewGrpcDialer(cfg.sqlDataEndpoint, tp, cfg.quotaProject, cfg.logger, false, cfg.sqlDataStreamTimeout, strings.Join(cfg.useragents, " "))
+		gd := sqldataclient.NewGrpcDialer(cfg.sqlDataEndpoint, tp, cfg.quotaProject, cfg.logger, false, cfg.sqlDataStreamTimeout, strings.Join(cfg.useragents, " "))
+		gd.SetUniverseDomain(cfg.clientUniverseDomain)
+		sqlDataDialer = gd
 	}
 
 	// Environment detection for the metric resource labels. All of it is

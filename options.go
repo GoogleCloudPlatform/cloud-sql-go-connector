@@ -59,6 +59,7 @@ type dialerConfig struct {
 	logger                debug.ContextLogger
 	lazyRefresh           bool
 	sqlDataEndpoint       string
+	sqlDataEndpointSet    bool
 	clientUniverseDomain  string
 	quotaProject          string
 	authCredentials       *auth.Credentials
@@ -594,6 +595,7 @@ func WithLazyRefresh() Option {
 func WithSQLDataEndpoint(endpoint string) Option {
 	return func(d *dialerConfig) {
 		d.sqlDataEndpoint = endpoint
+		d.sqlDataEndpointSet = true
 	}
 }
 
