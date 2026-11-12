@@ -25,6 +25,7 @@ import (
 	"cloud.google.com/go/auth"
 	"cloud.google.com/go/cloudsqlconn/debug"
 	"cloud.google.com/go/cloudsqlconn/instance"
+	"golang.org/x/time/rate"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
@@ -41,6 +42,10 @@ type LazyRefreshCache struct {
 	iamPrincipals   []pgPrincipal
 	needsRefresh    bool
 	cached          ConnectionInfo
+	// forced limits refreshes requested by ForceRefresh while the cached
+	// connection info is still valid, with the same budget the refresh-ahead
+	// cache applies to every refresh.
+	forced *rate.Limiter
 }
 
 // NewLazyRefreshCache initializes a new LazyRefreshCache.
@@ -68,6 +73,7 @@ func NewLazyRefreshCache(
 		refreshTimeout:  refreshTimeout,
 		useIAMAuthNDial: useIAMAuthNDial,
 		dialFunc:        dialFunc,
+		forced:          rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
 	}
 }
 
@@ -103,6 +109,18 @@ func (c *LazyRefreshCache) ConnectionInfo(
 			c.connName.String(),
 		)
 		return ci, nil
+	}
+	// A forced refresh of still-valid info, for example after a failed
+	// dial, is rate limited so that a run of dial failures does not turn
+	// into a run of Admin API calls. The refresh stays pending until the
+	// limiter allows it or the info expires.
+	if c.needsRefresh && now.Before(exp) && !c.forced.Allow() {
+		c.logger.Debugf(
+			ctx,
+			"[%v] Forced refresh is rate limited, using cached info",
+			c.connName.String(),
+		)
+		return c.cached, nil
 	}
 
 	c.logger.Debugf(
