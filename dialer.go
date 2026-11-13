@@ -434,7 +434,7 @@ func NewDialer(ctx context.Context, opts ...Option) (*Dialer, error) {
 	if cfg.sqlDataDialer != nil {
 		sqlDataDialer = cfg.sqlDataDialer
 	} else {
-		sqlDataDialer = sqldataclient.NewGrpcDialer(cfg.sqlDataEndpoint, tp, cfg.quotaProject, cfg.logger, false, cfg.sqlDataStreamTimeout, strings.Join(cfg.useragents, " "))
+		sqlDataDialer = sqldataclient.NewGrpcDialer(cfg.sqlDataEndpoint, tp, cfg.quotaProject, cfg.logger, cfg.sqlDataStreamTimeout, strings.Join(cfg.useragents, " "))
 	}
 
 	// Environment detection for the metric resource labels. All of it is

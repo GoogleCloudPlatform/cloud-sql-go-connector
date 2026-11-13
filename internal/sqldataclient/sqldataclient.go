@@ -16,8 +16,10 @@ package sqldataclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,10 +31,21 @@ import (
 	sqlpb "cloud.google.com/go/sql/apiv1beta4/sqlpb"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protowire"
 )
+
+const (
+	// maxMsgSize is the maximum gRPC send/receive message size (100 MiB).
+	maxMsgSize = 100 * 1024 * 1024
+
+	// streamCancelDelay is the grace period before canceling streamCtx on Close,
+	// giving CloseSend() time to flush the closing frame over gRPC.
+	streamCancelDelay = 5 * time.Second
+)
+
+// errDialerClosed is returned when ConnectSQLDataService is called on a closed GrpcDialer.
+var errDialerClosed = errors.New("sql data dialer is closed")
 
 // Dialer is the interface that wraps the ConnectSQLDataService and Close methods.
 type Dialer interface {
@@ -41,15 +54,15 @@ type Dialer interface {
 }
 
 // NewGrpcDialer returns a new GrpcDialer configured to use the given endpoint.
-func NewGrpcDialer(endpoint string, tokenProvider auth.TokenProvider, quotaProject string, logger debug.ContextLogger, useInsecure bool, timeout time.Duration, userAgent string) *GrpcDialer {
+func NewGrpcDialer(endpoint string, tokenProvider auth.TokenProvider, quotaProject string, logger debug.ContextLogger, timeout time.Duration, userAgent string, clientOpts ...option.ClientOption) *GrpcDialer {
 	return &GrpcDialer{
 		endpoint:      endpoint,
 		tokenProvider: tokenProvider,
 		logger:        logger,
-		useInsecure:   useInsecure,
 		timeout:       timeout,
 		quotaProject:  quotaProject,
 		userAgent:     userAgent,
+		clientOpts:    clientOpts,
 	}
 }
 
@@ -58,35 +71,53 @@ type GrpcDialer struct {
 	endpoint      string
 	tokenProvider auth.TokenProvider
 	logger        debug.ContextLogger
-	useInsecure   bool
-	timeout       time.Duration
+	// timeout is the maximum lifetime for the entire gRPC stream, not the
+	// dial handshake timeout. Zero or negative disables the per-stream deadline.
+	timeout time.Duration
 
-	// sqlDataClientMu synchronizes access to the data conn and the client.
+	// sqlDataClientMu synchronizes access to sqlDataClient and closed.
 	sqlDataClientMu sync.RWMutex
 	sqlDataClient   *sqlgapic.SqlDataClient
+	closed          bool
 	quotaProject    string
 	userAgent       string
+	clientOpts      []option.ClientOption
 }
 
 // Close closes the underlying gRPC client connection.
 func (d *GrpcDialer) Close() error {
+	if d == nil {
+		return nil
+	}
 	d.sqlDataClientMu.RLock()
-	c := d.sqlDataClient
+	closed := d.closed
 	d.sqlDataClientMu.RUnlock()
-	if c == nil {
-		// client is already closed or not initialized. Return early.
+	if closed {
+		// client is already closed. Return early.
 		return nil
 	}
 
 	d.sqlDataClientMu.Lock()
 	defer d.sqlDataClientMu.Unlock()
-	return d.sqlDataClient.Close()
+	if d.closed {
+		return nil
+	}
+	d.closed = true
+	if d.sqlDataClient == nil {
+		return nil
+	}
+	err := d.sqlDataClient.Close()
+	d.sqlDataClient = nil
+	return err
 }
 
 func (d *GrpcDialer) initSQLDataClient(ctx context.Context) (*sqlgapic.SqlDataClient, error) {
 	d.sqlDataClientMu.RLock()
-	c := d.sqlDataClient
+	c, closed := d.sqlDataClient, d.closed
 	d.sqlDataClientMu.RUnlock()
+	if closed {
+		return nil, errDialerClosed
+	}
 	if c != nil {
 		// client is already initialized. Return early.
 		return c, nil
@@ -96,6 +127,9 @@ func (d *GrpcDialer) initSQLDataClient(ctx context.Context) (*sqlgapic.SqlDataCl
 	d.sqlDataClientMu.Lock()
 	defer d.sqlDataClientMu.Unlock()
 
+	if d.closed {
+		return nil, errDialerClosed
+	}
 	if c := d.sqlDataClient; c != nil {
 		// Client was initialized between releasing the read lock and acquiring
 		// the write lock.
@@ -105,8 +139,8 @@ func (d *GrpcDialer) initSQLDataClient(ctx context.Context) (*sqlgapic.SqlDataCl
 	var clientOpts []option.ClientOption
 	clientOpts = append(clientOpts,
 		option.WithGRPCDialOption(grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(100*1024*1024),
-			grpc.MaxCallSendMsgSize(100*1024*1024),
+			grpc.MaxCallRecvMsgSize(maxMsgSize),
+			grpc.MaxCallSendMsgSize(maxMsgSize),
 		)),
 	)
 	if d.userAgent != "" {
@@ -115,18 +149,14 @@ func (d *GrpcDialer) initSQLDataClient(ctx context.Context) (*sqlgapic.SqlDataCl
 	if d.quotaProject != "" {
 		clientOpts = append(clientOpts, option.WithQuotaProject(d.quotaProject))
 	}
-	if d.useInsecure {
-		clientOpts = append(clientOpts,
-			option.WithoutAuthentication(),
-			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
-		)
-	} else if d.tokenProvider != nil {
+	if d.tokenProvider != nil {
 		ts := oauth2adapt.TokenSourceFromTokenProvider(d.tokenProvider)
 		clientOpts = append(clientOpts, option.WithTokenSource(ts))
 	}
+	clientOpts = append(clientOpts, d.clientOpts...)
 
 	if d.endpoint != "" {
-		endpoint := d.endpoint
+		endpoint := strings.TrimPrefix(d.endpoint, "https://")
 		if _, _, err := net.SplitHostPort(endpoint); err != nil {
 			endpoint = net.JoinHostPort(endpoint, "443")
 		}
@@ -156,14 +186,26 @@ func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.Conn
 	if err != nil {
 		return nil, err
 	}
-	streamCtx, streamCancel := context.WithCancel(context.Background())
+	// Do not derive streamCtx from ctx: callers frequently cancel the Dial
+	// context (or apply a short dial timeout) once Dial returns a net.Conn,
+	// whereas the gRPC stream must remain alive for the lifetime of the conn.
+	var (
+		streamCtx context.Context
+		cancel    context.CancelFunc
+	)
+	if d.timeout > 0 {
+		d.logger.Debugf(ctx, "Setting timeout: %v", d.timeout)
+		streamCtx, cancel = context.WithTimeout(context.Background(), d.timeout)
+	} else {
+		streamCtx, cancel = context.WithCancel(context.Background())
+	}
 
 	// Linked context will cancel the stream only while Dial is in progress.
 	dialDone := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
-			streamCancel()
+			cancel()
 		case <-dialDone:
 		}
 	}()
@@ -179,18 +221,9 @@ func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.Conn
 		streamCtx = metadata.AppendToOutgoingContext(streamCtx, "x-goog-user-project", d.quotaProject)
 	}
 
-	var timeoutCancel context.CancelFunc
-	if d.timeout > 0 {
-		d.logger.Debugf(streamCtx, "Setting timeout: %v", d.timeout)
-		streamCtx, timeoutCancel = context.WithTimeout(streamCtx, d.timeout)
-	}
-
 	stream, err := c.StreamSqlData(streamCtx)
 	if err != nil {
-		if timeoutCancel != nil {
-			timeoutCancel()
-		}
-		streamCancel()
+		cancel()
 		return nil, err
 	}
 	startSession := &sqlpb.StartSession{
@@ -214,36 +247,28 @@ func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.Conn
 		},
 	})
 	if err != nil {
-		if timeoutCancel != nil {
-			timeoutCancel()
-		}
-		streamCancel()
+		cancel()
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		if timeoutCancel != nil {
-			timeoutCancel()
-		}
-		streamCancel()
+		cancel()
 		return nil, err
 	}
-	d.logger.Debugf(streamCtx, "Dialing via SqlDataService: %v", cn.Name())
+	d.logger.Debugf(ctx, "Dialing via SqlDataService: %v", cn.Name())
 	return &streamConn{
-		stream:        stream,
-		timeoutCancel: timeoutCancel,
-		streamCancel:  streamCancel,
-		logger:        d.logger,
+		stream: stream,
+		cancel: cancel,
+		logger: d.logger,
 	}, nil
 }
 
 // streamConn wraps the gRPC stream to implement net.Conn
 type streamConn struct {
-	stream        sqlpb.SqlDataService_StreamSqlDataClient
-	timeoutCancel context.CancelFunc
-	streamCancel  context.CancelFunc
-	readBuf       []byte
-	readOffset    int
-	logger        debug.ContextLogger
+	stream     sqlpb.SqlDataService_StreamSqlDataClient
+	cancel     context.CancelFunc
+	readBuf    []byte
+	readOffset int
+	logger     debug.ContextLogger
 }
 
 func (c *streamConn) Read(b []byte) (n int, err error) {
@@ -293,13 +318,14 @@ func (c *streamConn) Write(b []byte) (n int, err error) {
 }
 
 func (c *streamConn) Close() error {
-	if c.timeoutCancel != nil {
-		c.timeoutCancel()
+	if c == nil {
+		return nil
 	}
-	if c.streamCancel != nil {
-		c.streamCancel()
+	err := c.stream.CloseSend()
+	if c.cancel != nil {
+		time.AfterFunc(streamCancelDelay, c.cancel)
 	}
-	return c.stream.CloseSend()
+	return err
 }
 
 func (c *streamConn) LocalAddr() net.Addr {
@@ -310,14 +336,19 @@ func (c *streamConn) RemoteAddr() net.Addr {
 	return remoteAddr{}
 }
 
+// SetDeadline is a no-op: gRPC streams do not support per-read/per-write
+// net.Conn deadlines. Overall stream lifetime is bounded instead by the
+// streamCtx deadline (WithSQLDataStreamTimeout).
 func (c *streamConn) SetDeadline(_ time.Time) error {
 	return nil
 }
 
+// SetReadDeadline is a no-op; see SetDeadline.
 func (c *streamConn) SetReadDeadline(_ time.Time) error {
 	return nil
 }
 
+// SetWriteDeadline is a no-op; see SetDeadline.
 func (c *streamConn) SetWriteDeadline(_ time.Time) error {
 	return nil
 }
