@@ -102,13 +102,14 @@ func (c *monitoredCache) Close() error {
 		c.domainNameTicker.Stop()
 	}
 
-	if c.openConnsCount.Load() > 0 {
-		for _, socket := range c.openConns {
-			if !socket.isClosed() {
-				_ = socket.Close() // force socket closed, ok to ignore error.
-			}
+	// Each connection decrements openConnsCount in its own close func,
+	// including the ones forced closed here, so the count must not be
+	// reset: connections not tracked in openConns are still open and would
+	// drive it below zero when they close later.
+	for _, socket := range c.openConns {
+		if !socket.isClosed() {
+			_ = socket.Close() // force socket closed, ok to ignore error.
 		}
-		c.openConnsCount.Store(0)
 	}
 
 	return c.connectionInfoCache.Close()
