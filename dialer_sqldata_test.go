@@ -30,12 +30,22 @@ import (
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"cloud.google.com/go/cloudsqlconn/internal/sqldataclient"
 	sqlpb "cloud.google.com/go/sql/apiv1beta4/sqlpb"
+	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protowire"
 )
+
+func newTestGrpcDialer(addr, quotaProject string, timeout time.Duration, userAgent string) *sqldataclient.GrpcDialer {
+	return sqldataclient.NewGrpcDialer(
+		addr, nil, quotaProject, nullLogger{}, timeout, userAgent,
+		option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+	)
+}
 
 func startMockServer(t *testing.T, handler func(sqlpb.SqlDataService_StreamSqlDataServer) error) (string, func()) {
 	lis, err := net.Listen("tcp", "localhost:0")
@@ -186,7 +196,7 @@ func TestDialerWithSqlData_AutoIAMAuthN(t *testing.T) {
 			ctx := context.Background()
 			d, err := NewDialer(ctx,
 				WithTokenSource(mock.EmptyTokenSource{}),
-				WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, 45*time.Minute, "")),
+				WithSQLDataDialer(newTestGrpcDialer(addr, "", 45*time.Minute, "")),
 			)
 			if err != nil {
 				t.Fatalf("NewDialer failed: %v", err)
@@ -539,7 +549,7 @@ func TestDialerWithSqlData_HeadersAndSequence(t *testing.T) {
 		WithQuotaProject("quotaProj"),
 		WithTokenSource(mock.EmptyTokenSource{}),
 		WithDefaultDialOptions(WithSQLData()),
-		WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "quotaProj", nullLogger{}, true, 45*time.Minute, "userAgent")))
+		WithSQLDataDialer(newTestGrpcDialer(addr, "quotaProj", 45*time.Minute, "userAgent")))
 
 	if err != nil {
 		t.Fatalf("NewDialer failed: %v", err)
@@ -701,7 +711,7 @@ func newTestDialer(ctx context.Context, addr string, dialTimeout time.Duration) 
 	opts := []Option{
 		WithTokenSource(mock.EmptyTokenSource{}),
 		WithDefaultDialOptions(WithSQLData()),
-		WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, dialTimeout, "")),
+		WithSQLDataDialer(newTestGrpcDialer(addr, "", dialTimeout, "")),
 	}
 
 	return NewDialer(ctx, opts...)
@@ -727,7 +737,7 @@ func TestDialerWithSqlData_ResourceExhaustedCooldown(t *testing.T) {
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
 		WithDefaultDialOptions(WithSQLData()),
-		WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, 45*time.Minute, "")),
+		WithSQLDataDialer(newTestGrpcDialer(addr, "", 45*time.Minute, "")),
 		WithResourceExhaustedCooldownPeriod(cooldown),
 	)
 	if err != nil {
@@ -822,7 +832,7 @@ func TestDialerWithSqlData_ResourceExhaustedCooldown_StreamError(t *testing.T) {
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
 		WithDefaultDialOptions(WithSQLData()),
-		WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, 45*time.Minute, "")),
+		WithSQLDataDialer(newTestGrpcDialer(addr, "", 45*time.Minute, "")),
 		WithResourceExhaustedCooldownPeriod(cooldown),
 	)
 	if err != nil {
@@ -949,7 +959,7 @@ func TestDialerWithSqlData_ResourceExhaustedBackoff(t *testing.T) {
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
 		WithDefaultDialOptions(WithSQLData()),
-		WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, 45*time.Minute, "")),
+		WithSQLDataDialer(newTestGrpcDialer(addr, "", 45*time.Minute, "")),
 		WithResourceExhaustedCooldownPeriod(cooldown),
 	)
 	if err != nil {
@@ -1101,7 +1111,7 @@ func TestDialerWithConnectTunnel_NoFallbackOnPreconditionFailed(t *testing.T) {
 	ctx := context.Background()
 	d, err := NewDialer(ctx,
 		WithTokenSource(mock.EmptyTokenSource{}),
-		WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, 45*time.Minute, "")),
+		WithSQLDataDialer(newTestGrpcDialer(addr, "", 45*time.Minute, "")),
 	)
 	if err != nil {
 		t.Fatalf("NewDialer failed: %v", err)
@@ -1147,5 +1157,51 @@ func TestDialerWithSqlDataAndConnectTunnel_Error(t *testing.T) {
 	}
 	if _, err := d.Dial(ctx, "proj:reg:inst", WithConnectTunnel(), WithSQLData()); !errors.As(err, &cfgErr) {
 		t.Fatalf("expected ConfigError when passing WithConnectTunnel and WithSQLData in Dial, got: %v", err)
+	}
+}
+
+func TestGrpcDialerClosePreventsReinit(t *testing.T) {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
+		if _, err := stream.Recv(); err != nil {
+			return err
+		}
+		return nil
+	}
+	addr, cleanup := startMockServer(t, handler)
+	defer cleanup()
+
+	ctx := context.Background()
+	cn, err := instance.ParseConnName("proj:reg:inst")
+	if err != nil {
+		t.Fatalf("ParseConnName failed: %v", err)
+	}
+
+	// Closing before any dial prevents lazy client initialization later.
+	gd1 := newTestGrpcDialer(addr, "", 45*time.Minute, "")
+	if err := gd1.Close(); err != nil {
+		t.Fatalf("Close on uninitialized dialer failed: %v", err)
+	}
+	if err := gd1.Close(); err != nil {
+		t.Fatalf("repeated Close failed: %v", err)
+	}
+	if _, err := gd1.ConnectSQLDataService(ctx, cn, false); err == nil {
+		t.Fatal("expected error calling ConnectSQLDataService after Close, got nil")
+	}
+
+	// Closing after initializing prevents re-initialization and is safe twice.
+	gd2 := newTestGrpcDialer(addr, "", 45*time.Minute, "")
+	conn, err := gd2.ConnectSQLDataService(ctx, cn, false)
+	if err != nil {
+		t.Fatalf("ConnectSQLDataService failed: %v", err)
+	}
+	_ = conn.Close()
+	if err := gd2.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+	if err := gd2.Close(); err != nil {
+		t.Fatalf("second Close failed: %v", err)
+	}
+	if _, err := gd2.ConnectSQLDataService(ctx, cn, false); err == nil {
+		t.Fatal("expected error calling ConnectSQLDataService after Close, got nil")
 	}
 }
