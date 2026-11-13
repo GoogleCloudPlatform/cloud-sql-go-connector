@@ -30,14 +30,15 @@ import (
 	"testing"
 	"time"
 
+	"net/http"
+	"net/http/httptest"
+
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
-	"net/http"
-	"net/http/httptest"
 )
 
 type nullLogger struct{}
