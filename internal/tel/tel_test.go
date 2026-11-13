@@ -21,6 +21,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/oauth2"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
@@ -468,20 +470,42 @@ func TestDetectComputePlatform(t *testing.T) {
 
 func TestClassifyDialError(t *testing.T) {
 	tests := []struct {
+		desc       string
 		err        error
 		wantPart   string
 		wantStatus string
 	}{
-		{nil, "", "success"},
-		{errtype.NewConfigError("invalid instance name", "proj:inst"), "client_to_proxy", "user_error"},
-		{errtype.NewRefreshError("certificate expired", "proj:inst", errors.New("api failed")), "client_to_proxy", "refresh_failed_error"},
-		{errors.New("something weird happened"), "unknown", "unknown_error"},
+		{"nil", nil, "", tel.ConnectSuccess},
+		{"config error", errtype.NewConfigError("invalid instance name", "proj:inst"), tel.PartClientToProxy, tel.StatusUserError},
+		{"client cooldown resource exhausted", errtype.NewResourceExhaustedError("cooldown active", "proj:inst", errors.New("busy")), tel.PartClientToProxy, tel.StatusResourceExhausted},
+		{"gRPC ResourceExhausted", grpcstatus.Error(codes.ResourceExhausted, "GFE >50 QPS"), tel.PartClientToProxy, tel.StatusResourceExhausted},
+		{"wrapped gRPC ResourceExhausted", fmt.Errorf("stream failed: %w", grpcstatus.Error(codes.ResourceExhausted, "quota exceeded")), tel.PartClientToProxy, tel.StatusResourceExhausted},
+		{"gRPC InvalidArgument (missing header)", grpcstatus.Error(codes.InvalidArgument, "missing x-goog-request-params"), tel.PartClientToProxy, tel.StatusAPICallFailed},
+		{"gRPC Unimplemented (wrong GAPIC endpoint)", grpcstatus.Error(codes.Unimplemented, "unknown service"), tel.PartClientToProxy, tel.StatusAPICallFailed},
+		{"gRPC Unavailable", grpcstatus.Error(codes.Unavailable, "connection refused"), tel.PartClientToProxy, tel.StatusAPICallFailed},
+		{"gRPC DeadlineExceeded", grpcstatus.Error(codes.DeadlineExceeded, "context deadline exceeded"), tel.PartClientToProxy, tel.StatusAPICallFailed},
+		{"gRPC PermissionDenied", grpcstatus.Error(codes.PermissionDenied, "denied"), tel.PartClientToProxy, tel.StatusAuthError},
+		{"gRPC Unauthenticated", grpcstatus.Error(codes.Unauthenticated, "bad token"), tel.PartClientToProxy, tel.StatusAuthError},
+		{"gRPC Canceled", grpcstatus.Error(codes.Canceled, "context canceled"), tel.UnknownValue, tel.StatusUnknownError},
+		{"HTTP 429 inside RefreshError", errtype.NewRefreshError("metadata failed", "proj:inst", &googleapi.Error{Code: http.StatusTooManyRequests}), tel.PartClientToProxy, tel.StatusResourceExhausted},
+		{"HTTP 403 rateLimitExceeded inside RefreshError", errtype.NewRefreshError("metadata failed", "proj:inst", &googleapi.Error{
+			Code:   http.StatusForbidden,
+			Errors: []googleapi.ErrorItem{{Reason: "rateLimitExceeded"}},
+		}), tel.PartClientToProxy, tel.StatusResourceExhausted},
+		{"HTTP 403 permission denied inside RefreshError", errtype.NewRefreshError("metadata failed", "proj:inst", &googleapi.Error{Code: http.StatusForbidden}), tel.PartClientToProxy, tel.StatusAuthError},
+		{"HTTP 401 unauthorized inside RefreshError", errtype.NewRefreshError("metadata failed", "proj:inst", &googleapi.Error{Code: http.StatusUnauthorized}), tel.PartClientToProxy, tel.StatusAuthError},
+		{"HTTP 500 inside RefreshError", errtype.NewRefreshError("metadata failed", "proj:inst", &googleapi.Error{Code: http.StatusInternalServerError}), tel.PartClientToProxy, tel.StatusRefreshFailedError},
+		{"plain RefreshError", errtype.NewRefreshError("certificate expired", "proj:inst", errors.New("api failed")), tel.PartClientToProxy, tel.StatusRefreshFailedError},
+		{"DNS lookup error", &net.DNSError{Err: "no such host", Name: "db.example.com"}, tel.PartClientToProxy, tel.StatusDNSLookupError},
+		{"unknown fallback", errors.New("something weird happened"), tel.UnknownValue, tel.StatusUnknownError},
 	}
 	for _, tc := range tests {
-		gotPart, gotStatus := tel.ClassifyDialError(tc.err)
-		if gotPart != tc.wantPart || gotStatus != tc.wantStatus {
-			t.Errorf("ClassifyDialError(%v) = (%q, %q), want (%q, %q)", tc.err, gotPart, gotStatus, tc.wantPart, tc.wantStatus)
-		}
+		t.Run(tc.desc, func(t *testing.T) {
+			gotPart, gotStatus := tel.ClassifyDialError(tc.err)
+			if gotPart != tc.wantPart || gotStatus != tc.wantStatus {
+				t.Errorf("ClassifyDialError(%v) = (%q, %q), want (%q, %q)", tc.err, gotPart, gotStatus, tc.wantPart, tc.wantStatus)
+			}
+		})
 	}
 }
 
@@ -491,46 +515,64 @@ func TestClassifyDialError(t *testing.T) {
 // any of them is a breaking change.
 func TestLabelValuesAreLowercaseSnakeCase(t *testing.T) {
 	want := map[string]string{
-		"UnknownValue":           "unknown",
-		"ConnectorTypeGo":        "go",
-		"ConnectorTypeAuthProxy": "auth_proxy",
-		"PlatformGKE":            "gke",
-		"PlatformCloudRun":       "cloud_run",
-		"PlatformAppEngine":      "app_engine",
-		"PlatformCloudFunctions": "cloud_functions",
-		"PlatformGCE":            "gce",
-		"PlatformAIStudio":       "ai_studio",
-		"EngineMySQL":            "mysql",
-		"EnginePostgreSQL":       "postgresql",
-		"EngineSQLServer":        "sqlserver",
-		"IPTypePublic":           "public",
-		"IPTypePrivate":          "private",
-		"IPTypePSC":              "psc",
-		"IPTypeAuto":             "auto",
-		"IPTypeSQLData":          "sql_data",
-		"ConnectSuccess":         "success",
-		"ConnectError":           "error",
+		"UnknownValue":             "unknown",
+		"ConnectorTypeGo":          "go",
+		"ConnectorTypeAuthProxy":   "auth_proxy",
+		"PlatformGKE":              "gke",
+		"PlatformCloudRun":         "cloud_run",
+		"PlatformAppEngine":        "app_engine",
+		"PlatformCloudFunctions":   "cloud_functions",
+		"PlatformGCE":              "gce",
+		"PlatformAIStudio":         "ai_studio",
+		"EngineMySQL":              "mysql",
+		"EnginePostgreSQL":         "postgresql",
+		"EngineSQLServer":          "sqlserver",
+		"IPTypePublic":             "public",
+		"IPTypePrivate":            "private",
+		"IPTypePSC":                "psc",
+		"IPTypeAuto":               "auto",
+		"IPTypeSQLData":            "sql_data",
+		"ConnectSuccess":           "success",
+		"ConnectError":             "error",
+		"PartClientToProxy":        "client_to_proxy",
+		"PartProxyToServer":        "proxy_to_server",
+		"StatusUserError":          "user_error",
+		"StatusAuthError":          "auth_error",
+		"StatusRefreshFailedError": "refresh_failed_error",
+		"StatusDNSLookupError":     "dns_lookup_error",
+		"StatusResourceExhausted":  "resource_exhausted",
+		"StatusAPICallFailed":      "api_call_failed",
+		"StatusUnknownError":       "unknown_error",
 	}
 	got := map[string]string{
-		"UnknownValue":           tel.UnknownValue,
-		"ConnectorTypeGo":        tel.ConnectorTypeGo,
-		"ConnectorTypeAuthProxy": tel.ConnectorTypeAuthProxy,
-		"PlatformGKE":            tel.PlatformGKE,
-		"PlatformCloudRun":       tel.PlatformCloudRun,
-		"PlatformAppEngine":      tel.PlatformAppEngine,
-		"PlatformCloudFunctions": tel.PlatformCloudFunctions,
-		"PlatformGCE":            tel.PlatformGCE,
-		"PlatformAIStudio":       tel.PlatformAIStudio,
-		"EngineMySQL":            tel.EngineMySQL,
-		"EnginePostgreSQL":       tel.EnginePostgreSQL,
-		"EngineSQLServer":        tel.EngineSQLServer,
-		"IPTypePublic":           tel.IPTypePublic,
-		"IPTypePrivate":          tel.IPTypePrivate,
-		"IPTypePSC":              tel.IPTypePSC,
-		"IPTypeAuto":             tel.IPTypeAuto,
-		"IPTypeSQLData":          tel.IPTypeSQLData,
-		"ConnectSuccess":         tel.ConnectSuccess,
-		"ConnectError":           tel.ConnectError,
+		"UnknownValue":             tel.UnknownValue,
+		"ConnectorTypeGo":          tel.ConnectorTypeGo,
+		"ConnectorTypeAuthProxy":   tel.ConnectorTypeAuthProxy,
+		"PlatformGKE":              tel.PlatformGKE,
+		"PlatformCloudRun":         tel.PlatformCloudRun,
+		"PlatformAppEngine":        tel.PlatformAppEngine,
+		"PlatformCloudFunctions":   tel.PlatformCloudFunctions,
+		"PlatformGCE":              tel.PlatformGCE,
+		"PlatformAIStudio":         tel.PlatformAIStudio,
+		"EngineMySQL":              tel.EngineMySQL,
+		"EnginePostgreSQL":         tel.EnginePostgreSQL,
+		"EngineSQLServer":          tel.EngineSQLServer,
+		"IPTypePublic":             tel.IPTypePublic,
+		"IPTypePrivate":            tel.IPTypePrivate,
+		"IPTypePSC":                tel.IPTypePSC,
+		"IPTypeAuto":               tel.IPTypeAuto,
+		"IPTypeSQLData":            tel.IPTypeSQLData,
+		"ConnectSuccess":           tel.ConnectSuccess,
+		"ConnectError":             tel.ConnectError,
+		"PartClientToProxy":        tel.PartClientToProxy,
+		"PartProxyToServer":        tel.PartProxyToServer,
+		"StatusUserError":          tel.StatusUserError,
+		"StatusAuthError":          tel.StatusAuthError,
+		"StatusRefreshFailedError": tel.StatusRefreshFailedError,
+		"StatusDNSLookupError":     tel.StatusDNSLookupError,
+		"StatusResourceExhausted":  tel.StatusResourceExhausted,
+		"StatusAPICallFailed":      tel.StatusAPICallFailed,
+		"StatusUnknownError":       tel.StatusUnknownError,
 	}
 	for name, w := range want {
 		g, ok := got[name]

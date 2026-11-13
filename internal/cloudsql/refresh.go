@@ -47,6 +47,10 @@ const (
 	// a dataplane network path.
 	SQLData = "SQLData"
 
+	// ConnectTunnel is for access through the SQL Data endpoint without falling
+	// back to direct IP connections on backend failure.
+	ConnectTunnel = "ConnectTunnel"
+
 	// ClientProtocolTCP The value for the TCP client protocol type for MDX.
 	ClientProtocolTCP = "tcp"
 	// ClientProtocolUDS The value for the UDS client protocol type for MDX.

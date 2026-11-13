@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protowire"
 )
 
 func startMockServer(t *testing.T, handler func(sqlpb.SqlDataService_StreamSqlDataServer) error) (string, func()) {
@@ -129,6 +130,108 @@ func TestDialerWithSqlData(t *testing.T) {
 
 	if string(buf) != string(msg) {
 		t.Errorf("Got %q, want %q", string(buf), string(msg))
+	}
+}
+
+func TestDialerWithSqlData_AutoIAMAuthN(t *testing.T) {
+	tcs := []struct {
+		desc        string
+		dialOpts    []DialOption
+		wantAuthVal uint64
+		hasAuthType bool
+	}{
+		{
+			desc:        "Auto IAM enabled via WithDialIAMAuthN(true)",
+			dialOpts:    []DialOption{WithSQLData(), WithDialIAMAuthN(true)},
+			wantAuthVal: 2, // AUTO_IAM_AUTHENTICATION
+			hasAuthType: true,
+		},
+		{
+			desc:        "Auto IAM enabled with WithConnectTunnel and WithDialIAMAuthN(true)",
+			dialOpts:    []DialOption{WithConnectTunnel(), WithDialIAMAuthN(true)},
+			wantAuthVal: 2, // AUTO_IAM_AUTHENTICATION
+			hasAuthType: true,
+		},
+		{
+			desc:        "Auto IAM disabled via WithDialIAMAuthN(false)",
+			dialOpts:    []DialOption{WithSQLData(), WithDialIAMAuthN(false)},
+			wantAuthVal: 0,
+			hasAuthType: false,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			errCh := make(chan error, 1)
+			var gotStartSession *sqlpb.StartSession
+			handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
+				defer close(errCh)
+				req, err := stream.Recv()
+				if err != nil {
+					errCh <- err
+					return err
+				}
+				gotStartSession = req.GetStartSession()
+				if gotStartSession == nil {
+					err := fmt.Errorf("expected StartSession in first message, got %v", req)
+					errCh <- err
+					return err
+				}
+				return nil
+			}
+
+			addr, cleanup := startMockServer(t, handler)
+			defer cleanup()
+
+			ctx := context.Background()
+			d, err := NewDialer(ctx,
+				WithTokenSource(mock.EmptyTokenSource{}),
+				WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, 45*time.Minute, "")),
+			)
+			if err != nil {
+				t.Fatalf("NewDialer failed: %v", err)
+			}
+			defer d.Close()
+
+			conn, err := d.Dial(ctx, "proj:reg:inst", tc.dialOpts...)
+			if err != nil {
+				t.Fatalf("Dial failed: %v", err)
+			}
+			defer conn.Close()
+
+			if err := <-errCh; err != nil {
+				t.Fatalf("server error: %v", err)
+			}
+
+			startSession := gotStartSession
+			if startSession == nil {
+				t.Fatal("expected StartSession message, got nil")
+			}
+
+			// Parse unknown fields from StartSession looking for field 4 (authentication_type)
+			raw := startSession.ProtoReflect().GetUnknown()
+			var gotAuthVal uint64
+			var foundAuthType bool
+			for len(raw) > 0 {
+				num, typ, n := protowire.ConsumeField(raw)
+				if n < 0 {
+					t.Fatalf("failed to parse unknown fields: %v", protowire.ParseError(n))
+				}
+				if num == 4 && typ == protowire.VarintType {
+					val, _ := protowire.ConsumeVarint(raw[protowire.SizeTag(num):])
+					gotAuthVal = val
+					foundAuthType = true
+				}
+				raw = raw[n:]
+			}
+
+			if foundAuthType != tc.hasAuthType {
+				t.Errorf("foundAuthType = %v, want %v", foundAuthType, tc.hasAuthType)
+			}
+			if foundAuthType && gotAuthVal != tc.wantAuthVal {
+				t.Errorf("got authentication_type = %d, want %d", gotAuthVal, tc.wantAuthVal)
+			}
+		})
 	}
 }
 
@@ -982,5 +1085,67 @@ func TestDialerWithSqlData_ResourceExhaustedBackoff(t *testing.T) {
 	}
 	if !cooldownUntil.IsZero() {
 		t.Errorf("expected cooldownUntil to be cleared (zero time), got: %v", cooldownUntil)
+	}
+}
+
+func TestDialerWithConnectTunnel_NoFallbackOnPreconditionFailed(t *testing.T) {
+	handler := func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
+		if _, err := stream.Recv(); err != nil {
+			return err
+		}
+		return status.Error(codes.FailedPrecondition, "Instance does not allow connect tunnel.")
+	}
+	addr, cleanup := startMockServer(t, handler)
+	defer cleanup()
+
+	ctx := context.Background()
+	d, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithSQLDataDialer(sqldataclient.NewGrpcDialer(addr, nil, "", nullLogger{}, true, 45*time.Minute, "")),
+	)
+	if err != nil {
+		t.Fatalf("NewDialer failed: %v", err)
+	}
+	defer d.Close()
+
+	conn, err := d.Dial(ctx, "proj:reg:inst", WithConnectTunnel())
+	if err == nil {
+		defer conn.Close()
+		_, err = conn.Read(make([]byte, 1))
+	}
+	if err == nil {
+		t.Fatal("expected error from FailedPrecondition without fallback, got nil")
+	}
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("got error code %v (%v), want %v", status.Code(err), err, codes.FailedPrecondition)
+	}
+	if !strings.Contains(err.Error(), "Instance does not allow connect tunnel.") {
+		t.Errorf("got error %v, want to contain 'Instance does not allow connect tunnel.'", err)
+	}
+}
+
+func TestDialerWithSqlDataAndConnectTunnel_Error(t *testing.T) {
+	ctx := context.Background()
+
+	_, err := NewDialer(ctx,
+		WithTokenSource(mock.EmptyTokenSource{}),
+		WithDefaultDialOptions(WithSQLData(), WithConnectTunnel()),
+	)
+	var cfgErr *errtype.ConfigError
+	if !errors.As(err, &cfgErr) {
+		t.Fatalf("expected ConfigError when passing WithSQLData and WithConnectTunnel in NewDialer, got: %v", err)
+	}
+
+	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
+	if err != nil {
+		t.Fatalf("NewDialer failed: %v", err)
+	}
+	defer d.Close()
+
+	if _, err := d.Dial(ctx, "proj:reg:inst", WithSQLData(), WithConnectTunnel()); !errors.As(err, &cfgErr) {
+		t.Fatalf("expected ConfigError when passing WithSQLData and WithConnectTunnel in Dial, got: %v", err)
+	}
+	if _, err := d.Dial(ctx, "proj:reg:inst", WithConnectTunnel(), WithSQLData()); !errors.As(err, &cfgErr) {
+		t.Fatalf("expected ConfigError when passing WithConnectTunnel and WithSQLData in Dial, got: %v", err)
 	}
 }
