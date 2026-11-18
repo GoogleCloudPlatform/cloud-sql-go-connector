@@ -18,6 +18,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"math"
+	mathrand "math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -26,12 +29,15 @@ import (
 	"cloud.google.com/go/auth"
 	"cloud.google.com/go/auth/oauth2adapt"
 	"cloud.google.com/go/cloudsqlconn/debug"
+	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	sqlgapic "cloud.google.com/go/sql/apiv1beta4"
 	sqlpb "cloud.google.com/go/sql/apiv1beta4/sqlpb"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protowire"
 )
 
@@ -44,25 +50,41 @@ const (
 	streamCancelDelay = 5 * time.Second
 )
 
+type connStateKey struct {
+	project string
+	region  string
+	name    string
+}
+
+// sqlDataConnState stores per-instance rate-limit cooldown and backoff state.
+type sqlDataConnState struct {
+	mu             sync.Mutex
+	cooldownUntil  time.Time
+	backoffCounter int
+	lastErr        error
+}
+
 // errDialerClosed is returned when ConnectSQLDataService is called on a closed GrpcDialer.
 var errDialerClosed = errors.New("sql data dialer is closed")
 
 // Dialer is the interface that wraps the ConnectSQLDataService and Close methods.
 type Dialer interface {
-	ConnectSQLDataService(ctx context.Context, cn instance.ConnName, autoIAM bool) (conn net.Conn, err error)
+	ConnectSQLDataService(ctx context.Context, cn instance.ConnName, autoIAM bool, onSuccess func(), onError func(error)) (conn net.Conn, err error)
 	Close() error
 }
 
 // NewGrpcDialer returns a new GrpcDialer configured to use the given endpoint.
-func NewGrpcDialer(endpoint string, tokenProvider auth.TokenProvider, quotaProject string, logger debug.ContextLogger, timeout time.Duration, userAgent string, clientOpts ...option.ClientOption) *GrpcDialer {
+func NewGrpcDialer(endpoint string, tokenProvider auth.TokenProvider, quotaProject string, logger debug.ContextLogger, timeout time.Duration, userAgent string, resourceExhaustedCooldownPeriod time.Duration, clientOpts ...option.ClientOption) *GrpcDialer {
 	return &GrpcDialer{
-		endpoint:      endpoint,
-		tokenProvider: tokenProvider,
-		logger:        logger,
-		timeout:       timeout,
-		quotaProject:  quotaProject,
-		userAgent:     userAgent,
-		clientOpts:    clientOpts,
+		endpoint:                        endpoint,
+		tokenProvider:                   tokenProvider,
+		logger:                          logger,
+		timeout:                         timeout,
+		quotaProject:                    quotaProject,
+		userAgent:                       userAgent,
+		resourceExhaustedCooldownPeriod: resourceExhaustedCooldownPeriod,
+		clientOpts:                      clientOpts,
+		sqlDataConnState:                make(map[connStateKey]*sqlDataConnState),
 	}
 }
 
@@ -73,15 +95,17 @@ type GrpcDialer struct {
 	logger        debug.ContextLogger
 	// timeout is the maximum lifetime for the entire gRPC stream, not the
 	// dial handshake timeout. Zero or negative disables the per-stream deadline.
-	timeout time.Duration
+	timeout                         time.Duration
+	resourceExhaustedCooldownPeriod time.Duration
 
-	// sqlDataClientMu synchronizes access to sqlDataClient and closed.
-	sqlDataClientMu sync.RWMutex
-	sqlDataClient   *sqlgapic.SqlDataClient
-	closed          bool
-	quotaProject    string
-	userAgent       string
-	clientOpts      []option.ClientOption
+	// mu synchronizes access to sqlDataClient, closed, and sqlDataConnState.
+	mu               sync.RWMutex
+	sqlDataClient    *sqlgapic.SqlDataClient
+	closed           bool
+	quotaProject     string
+	userAgent        string
+	clientOpts       []option.ClientOption
+	sqlDataConnState map[connStateKey]*sqlDataConnState
 }
 
 // Close closes the underlying gRPC client connection.
@@ -89,16 +113,16 @@ func (d *GrpcDialer) Close() error {
 	if d == nil {
 		return nil
 	}
-	d.sqlDataClientMu.RLock()
+	d.mu.RLock()
 	closed := d.closed
-	d.sqlDataClientMu.RUnlock()
+	d.mu.RUnlock()
 	if closed {
 		// client is already closed. Return early.
 		return nil
 	}
 
-	d.sqlDataClientMu.Lock()
-	defer d.sqlDataClientMu.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.closed {
 		return nil
 	}
@@ -112,9 +136,9 @@ func (d *GrpcDialer) Close() error {
 }
 
 func (d *GrpcDialer) initSQLDataClient(ctx context.Context) (*sqlgapic.SqlDataClient, error) {
-	d.sqlDataClientMu.RLock()
+	d.mu.RLock()
 	c, closed := d.sqlDataClient, d.closed
-	d.sqlDataClientMu.RUnlock()
+	d.mu.RUnlock()
 	if closed {
 		return nil, errDialerClosed
 	}
@@ -124,8 +148,8 @@ func (d *GrpcDialer) initSQLDataClient(ctx context.Context) (*sqlgapic.SqlDataCl
 	}
 
 	// Client is nil. Initialize the client.
-	d.sqlDataClientMu.Lock()
-	defer d.sqlDataClientMu.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	if d.closed {
 		return nil, errDialerClosed
@@ -171,16 +195,78 @@ func (d *GrpcDialer) initSQLDataClient(ctx context.Context) (*sqlgapic.SqlDataCl
 	return c, nil
 }
 
+func stateKey(cn instance.ConnName) connStateKey {
+	return connStateKey{
+		project: cn.Project(),
+		region:  cn.Region(),
+		name:    cn.Name(),
+	}
+}
+
+func (d *GrpcDialer) getOrCreateConnState(cn instance.ConnName) *sqlDataConnState {
+	key := stateKey(cn)
+	d.mu.RLock()
+	state, ok := d.sqlDataConnState[key]
+	d.mu.RUnlock()
+	if ok {
+		return state
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	state, ok = d.sqlDataConnState[key]
+	if !ok {
+		state = &sqlDataConnState{}
+		d.sqlDataConnState[key] = state
+	}
+	return state
+}
+
+func (d *GrpcDialer) recordResourceExhausted(cn instance.ConnName, err error) {
+	state := d.getOrCreateConnState(cn)
+	state.mu.Lock()
+	// Maximum backoff counter is 5.
+	if state.backoffCounter < 5 {
+		state.backoffCounter++
+	}
+	backoff := cooldownBackoff(d.resourceExhaustedCooldownPeriod, state.backoffCounter)
+	state.cooldownUntil = time.Now().Add(backoff)
+	state.lastErr = err
+	state.mu.Unlock()
+}
+
+func (d *GrpcDialer) recordSuccess(cn instance.ConnName) {
+	state := d.getOrCreateConnState(cn)
+	state.mu.Lock()
+	state.backoffCounter = 0
+	state.cooldownUntil = time.Time{}
+	state.mu.Unlock()
+}
+
 // ConnectSQLDataService connects to the SqlDataService for the given connection name.
-func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.ConnName, autoIAM bool) (conn net.Conn, err error) {
+//
+// Error handling details: If this method returns a non-nil error, then the
+// dial failed synchronously and neither callback is invoked.
+// When this method returns `conn, nil`, this **DOES NOT guarantee** that the dial
+// succeeded because streaming gRPC handles IO asynchronously. The first stream
+// operation determines if the dial succeeded:
+//   - On success, GrpcDialer calls onSuccess().
+//   - On error, GrpcDialer calls onError(err).
+func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.ConnName, autoIAM bool, onSuccess func(), onError func(error)) (conn net.Conn, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	// ctx is the context with a 30 second timeout, which would allow the stream to connect.
-	// it should not be used as the context for the grpc stream call, which will run for
-	// more than the initial connection timeout.
-	// We're leaving the ctx argument in for future use.
+	state := d.getOrCreateConnState(cn)
+
+	state.mu.Lock()
+	cooldownUntil := state.cooldownUntil
+	lastErr := state.lastErr
+	state.mu.Unlock()
+
+	if time.Now().Before(cooldownUntil) {
+		cooldownErr := errtype.NewResourceExhaustedError("cooldown active", cn.String(), lastErr)
+		return nil, cooldownErr
+	}
 
 	c, err := d.initSQLDataClient(ctx)
 	if err != nil {
@@ -224,6 +310,9 @@ func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.Conn
 	stream, err := c.StreamSqlData(streamCtx)
 	if err != nil {
 		cancel()
+		if IsResourceExhaustedError(err) {
+			d.recordResourceExhausted(cn, err)
+		}
 		return nil, err
 	}
 	startSession := &sqlpb.StartSession{
@@ -248,6 +337,9 @@ func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.Conn
 	})
 	if err != nil {
 		cancel()
+		if IsResourceExhaustedError(err) {
+			d.recordResourceExhausted(cn, err)
+		}
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -255,10 +347,22 @@ func (d *GrpcDialer) ConnectSQLDataService(ctx context.Context, cn instance.Conn
 		return nil, err
 	}
 	d.logger.Debugf(ctx, "Dialing via SqlDataService: %v", cn.Name())
-	return &streamConn{
-		stream: stream,
-		cancel: cancel,
-		logger: d.logger,
+	return &resourceExhaustedTrackingConn{
+		Conn: &streamConn{
+			stream: stream,
+			cancel: cancel,
+			logger: d.logger,
+		},
+		onResourceExhausted: func(err error) {
+			d.recordResourceExhausted(cn, err)
+		},
+		onSuccess: func() {
+			d.recordSuccess(cn)
+			if onSuccess != nil {
+				onSuccess()
+			}
+		},
+		onError: onError,
 	}, nil
 }
 
@@ -362,3 +466,80 @@ type remoteAddr struct{}
 
 func (ra remoteAddr) Network() string { return "grpc" }
 func (ra remoteAddr) String() string  { return "remote" }
+
+// IsResourceExhaustedError reports whether err is a gRPC ResourceExhausted
+// error or a connector ResourceExhaustedError.
+func IsResourceExhaustedError(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.ResourceExhausted
+	}
+	var reErr *errtype.ResourceExhaustedError
+	return errors.As(err, &reErr)
+}
+
+// resourceExhaustedTrackingConn enables the dialer to register callbacks
+// that respond to the status of the gRPC stream. Because gRPC streams report
+// server-side errors asynchronously, dialOnce ensures at most one dial outcome
+// callback (onSuccess or onError) is invoked across Read and Write calls.
+type resourceExhaustedTrackingConn struct {
+	net.Conn
+	onResourceExhausted func(error)
+	onSuccess           func()
+	onError             func(error)
+	dialOnce            sync.Once
+	cooldownOnce        sync.Once
+}
+
+func (c *resourceExhaustedTrackingConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if err == nil || errors.Is(err, io.EOF) {
+		c.dialOnce.Do(func() {
+			if c.onSuccess != nil {
+				c.onSuccess()
+			}
+		})
+	} else if IsResourceExhaustedError(err) {
+		c.cooldownOnce.Do(func() {
+			if c.onResourceExhausted != nil {
+				c.onResourceExhausted(err)
+			}
+		})
+		c.dialOnce.Do(func() {
+			if c.onError != nil {
+				c.onError(err)
+			}
+		})
+	} else {
+		c.dialOnce.Do(func() {
+			if c.onError != nil {
+				c.onError(err)
+			}
+		})
+	}
+	return n, err
+}
+
+func (c *resourceExhaustedTrackingConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	if err != nil {
+		if IsResourceExhaustedError(err) {
+			c.cooldownOnce.Do(func() {
+				if c.onResourceExhausted != nil {
+					c.onResourceExhausted(err)
+				}
+			})
+		}
+		c.dialOnce.Do(func() {
+			if c.onError != nil {
+				c.onError(err)
+			}
+		})
+	}
+	return n, err
+}
+
+func cooldownBackoff(base time.Duration, attempt int) time.Duration {
+	const multi = 1.618
+	exp := float64(attempt-1) + mathrand.Float64()
+	return time.Duration(float64(base) * math.Pow(multi, exp))
+}

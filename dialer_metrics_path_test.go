@@ -241,20 +241,28 @@ func TestSQLDataPathRecordsFailures(t *testing.T) {
 // TestSQLDataCooldownRecordsFailure verifies that a dial refused by the
 // resource-exhausted cooldown is recorded as a resource_exhausted attempt.
 func TestSQLDataCooldownRecordsFailure(t *testing.T) {
+	addr, cleanup := startMockServer(t, func(stream sqlpb.SqlDataService_StreamSqlDataServer) error {
+		_, _ = stream.Recv()
+		return status.Error(codes.ResourceExhausted, "resource busy")
+	})
+	defer cleanup()
+
 	ctx := context.Background()
-	d, err := NewDialer(ctx, WithTokenSource(mock.EmptyTokenSource{}))
+	d, err := newTestDialer(ctx, addr, 5*time.Second, WithResourceExhaustedCooldownPeriod(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer d.Close()
+
+	// Trigger the cooldown with an initial failed stream read.
+	conn, err := d.Dial(ctx, "proj:reg:inst", WithSQLData())
+	if err == nil {
+		_, _ = conn.Read(make([]byte, 1))
+		_ = conn.Close()
+	}
+
 	rec := &countingRecorder{}
 	installRecorder(t, d, "proj:reg:inst", rec)
-	cn, _ := instance.ParseConnName("proj:reg:inst")
-	d.sqlDataConnState[createKey(cn)] = &sqlDataConnState{
-		allowed:       true,
-		cooldownUntil: time.Now().Add(time.Hour),
-		lastErr:       errors.New("resource busy"),
-	}
 
 	_, err = d.Dial(ctx, "proj:reg:inst", WithSQLData())
 	var reErr *errtype.ResourceExhaustedError
