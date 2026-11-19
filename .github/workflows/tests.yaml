@@ -49,7 +49,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: "1.25"
+          go-version: "1.26"
 
       - id: auth
         name: Authenticate to Google Cloud
@@ -84,6 +84,14 @@ jobs:
             POSTGRES_CUSTOMER_CAS_INVALID_DOMAIN_NAME:${{ vars.GOOGLE_CLOUD_PROJECT }}/POSTGRES_CUSTOMER_CAS_INVALID_DOMAIN_NAME
             POSTGRES_MCP_CONNECTION_NAME:${{ vars.GOOGLE_CLOUD_PROJECT }}/POSTGRES_MCP_CONNECTION_NAME
             POSTGRES_MCP_PASS:${{ vars.GOOGLE_CLOUD_PROJECT }}/POSTGRES_MCP_PASS
+            POSTGRES_AIDE_CONNECTION_NAME:${{ vars.GOOGLE_CLOUD_PROJECT }}/POSTGRES_AIDE_CONNECTION_NAME
+            POSTGRES_AIDE_USER:${{ vars.GOOGLE_CLOUD_PROJECT }}/POSTGRES_AIDE_USER
+            POSTGRES_AIDE_PASS:${{ vars.GOOGLE_CLOUD_PROJECT }}/POSTGRES_AIDE_PASS
+            POSTGRES_AIDE_DB:${{ vars.GOOGLE_CLOUD_PROJECT }}/POSTGRES_AIDE_DB
+            POSTGRES_FALLBACK_CONNECTION_NAME:${{ vars.GOOGLE_CLOUD_PROJECT }}/POSTGRES_FALLBACK_CONNECTION_NAME
+            POSTGRES_FALLBACK_USER:${{ vars.GOOGLE_CLOUD_PROJECT }}/POSTGRES_FALLBACK_USER
+            POSTGRES_FALLBACK_PASS:${{ vars.GOOGLE_CLOUD_PROJECT }}/POSTGRES_FALLBACK_PASS
+            POSTGRES_FALLBACK_DB:${{ vars.GOOGLE_CLOUD_PROJECT }}/POSTGRES_FALLBACK_DB
             SQLSERVER_CONNECTION_NAME:${{ vars.GOOGLE_CLOUD_PROJECT }}/SQLSERVER_CONNECTION_NAME
             SQLSERVER_USER:${{ vars.GOOGLE_CLOUD_PROJECT }}/SQLSERVER_USER
             SQLSERVER_PASS:${{ vars.GOOGLE_CLOUD_PROJECT }}/SQLSERVER_PASS
@@ -112,11 +120,20 @@ jobs:
           POSTGRES_CUSTOMER_CAS_INVALID_DOMAIN_NAME: "${{ steps.secrets.outputs.POSTGRES_CUSTOMER_CAS_INVALID_DOMAIN_NAME }}"
           POSTGRES_MCP_CONNECTION_NAME: "${{ steps.secrets.outputs.POSTGRES_MCP_CONNECTION_NAME }}"
           POSTGRES_MCP_PASS: "${{ steps.secrets.outputs.POSTGRES_MCP_PASS }}"
+          POSTGRES_AIDE_CONNECTION_NAME: "${{ steps.secrets.outputs.POSTGRES_AIDE_CONNECTION_NAME }}"
+          POSTGRES_AIDE_USER: "${{ steps.secrets.outputs.POSTGRES_AIDE_USER }}"
+          POSTGRES_AIDE_PASS: "${{ steps.secrets.outputs.POSTGRES_AIDE_PASS }}"
+          POSTGRES_AIDE_DB: "${{ steps.secrets.outputs.POSTGRES_AIDE_DB }}"
+          POSTGRES_FALLBACK_CONNECTION_NAME: "${{ steps.secrets.outputs.POSTGRES_FALLBACK_CONNECTION_NAME }}"
+          POSTGRES_FALLBACK_USER: "${{ steps.secrets.outputs.POSTGRES_FALLBACK_USER }}"
+          POSTGRES_FALLBACK_PASS: "${{ steps.secrets.outputs.POSTGRES_FALLBACK_PASS }}"
+          POSTGRES_FALLBACK_DB: "${{ steps.secrets.outputs.POSTGRES_FALLBACK_DB }}"
           SQLSERVER_CONNECTION_NAME: "${{ steps.secrets.outputs.SQLSERVER_CONNECTION_NAME }}"
           SQLSERVER_USER: "${{ steps.secrets.outputs.SQLSERVER_USER }}"
           SQLSERVER_PASS: "${{ steps.secrets.outputs.SQLSERVER_PASS }}"
           SQLSERVER_DB: "${{ steps.secrets.outputs.SQLSERVER_DB }}"
           QUOTA_PROJECT: "${{ steps.secrets.outputs.QUOTA_PROJECT }}"
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
         shell: bash
         run: |
@@ -125,8 +142,7 @@ jobs:
       - name: Convert test output to XML
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() }}
         run: |
-          go install github.com/jstemmer/go-junit-report/v2@latest
-          go-junit-report -in test_results.txt -set-exit-code -out integration_sponge_log.xml
+          cp test-results/e2e.xml integration_sponge_log.xml
 
       - name: FlakyBot (Linux)
         # only run flakybot on periodic (schedule) and continuous (push) events
@@ -155,7 +171,7 @@ jobs:
     strategy:
       matrix:
         goarch: ["", "386"]
-        go-version: ["1.25","1.26"]
+        go-version: ["1.26","1.27"]
       fail-fast: false
     permissions:
       contents: read
@@ -186,13 +202,19 @@ jobs:
         shell: bash
         run: |
           go env -w GOTOOLCHAIN=go1.25.0+auto
-          go test -v -race -cover -short ./... | tee test_results.txt
+          go test -v -race -coverprofile=coverage.txt -covermode=atomic -short ./... | tee test_results.txt
+          grep -v -E "\.pb\.go|/mock/" coverage.txt > coverage_filtered.txt
+          echo "=== Filtered Test Coverage ==="
+          go tool cover -func=coverage_filtered.txt
       - name: Run tests (386)
         # 386 archs don't support race detector
         if: matrix.goarch == '386'
         run: |
           go env -w GOTOOLCHAIN=go1.25.0+auto
-          go test -v -cover -short ./...
+          go test -v -coverprofile=coverage.txt -short ./...
+          grep -v -E "\.pb\.go|/mock/" coverage.txt > coverage_filtered.txt
+          echo "=== Filtered Test Coverage ==="
+          go tool cover -func=coverage_filtered.txt
       - name: Convert test output to XML
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() && matrix.goarch == '' }}
         run: |

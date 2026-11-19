@@ -49,6 +49,12 @@ For a quick example, try out the Go Connector in a [Codelab][codelab].
 
 ## Installation
 
+> [!IMPORTANT]
+> **The Cloud SQL Go Connector requires Go 1.26 or later.** Go 1.25 is no
+> longer supported, because required security fixes in `golang.org/x/crypto`
+> (v0.56.0+) and other dependencies need Go 1.26. See [Supported Go
+> Versions](#supported-go-versions).
+
 You can install this repo with `go get`:
 ```sh
 go get cloud.google.com/go/cloudsqlconn
@@ -157,6 +163,13 @@ with host set to the instance connection name. The returned `cleanup` func
 will stop the dialer's background refresh goroutine and so should only be called
 when you're done with the `Dialer`.
 
+> [!NOTE]
+>
+> Keyword/value connection strings follow PostgreSQL `libpq` escaping rules
+> (`pgx` `v5.11.0+`). If your password or other values contain spaces, single
+> quotes (`'`), or backslashes (`\`), wrap the value in single quotes and escape
+> `'` as `\'` and `\` as `\\`.
+
 ``` go
 import (
     "database/sql"
@@ -177,6 +190,12 @@ func connect() {
         "cloudsql-postgres",
         "host=project:region:instance user=myuser password=mypass dbname=mydb sslmode=disable",
     )
+    if err != nil {
+        // ... handle error
+    }
+    // close the pool before cleanup() so that connection-close metrics are
+    // recorded by the Dialer before it shuts down
+    defer db.Close()
     // ... etc
 }
 ```
@@ -439,6 +458,104 @@ dsn := "user=test-sa dbname=mydb sslmode=disable"
 [configure-iam-authn]: https://cloud.google.com/sql/docs/postgres/create-edit-iam-instances#configure-iam-db-instance
 [add-iam-user]: https://cloud.google.com/sql/docs/postgres/create-manage-iam-users#creating-a-database-user
 
+### Post-Quantum Cryptography (PQC)
+
+The Cloud SQL Go Connector uses Go's standard `crypto/tls` package with default
+curve preferences for TLS 1.3 mTLS connections—it does not implement custom TLS
+or post-quantum cryptography logic. As a result, PQC behavior comes directly
+from the Go standard library:
+
+- **Default behavior (Go 1.24+):** When built with Go 1.24+ and `go >= 1.24` in
+  your application's main `go.mod` (required by `cloudsqlconn` `v1.19.0+`;
+  `v1.25.3+` requires `go >= 1.26.0`), `crypto/tls` automatically offers hybrid
+  `X25519MLKEM768` alongside classical `X25519` key shares in the TLS 1.3
+  `ClientHello` (Go 1.26+ also advertises `SecP256r1MLKEM768` and
+  `SecP384r1MLKEM1024` in `supported_groups`). If a Cloud SQL instance does not
+  yet support hybrid ML-KEM groups, the TLS 1.3 handshake falls back to
+  classical `X25519` automatically.
+- **Older `go.mod` directives:** If an application pins an older connector
+  release with `go 1.23` or earlier in its main `go.mod`, Go defaults to
+  `tlsmlkem=0` even when compiled with Go 1.24+; update the `go` directive to
+  `1.24+` or set `godebug tlsmlkem=1` to enable it.
+- **Opting out:** To disable all ML-KEM hybrid groups (`X25519MLKEM768`,
+  `SecP256r1MLKEM768`, and `SecP384r1MLKEM1024`) and restrict TLS handshakes to
+  classical curves, set `GODEBUG=tlsmlkem=0` at runtime (or `godebug tlsmlkem=0`
+  in `go.mod` / `//go:debug tlsmlkem=0` in `package main`).
+
+### Built-in Client Metrics (BETA)
+
+The connector reports client-side connection metrics to [Cloud Monitoring][]
+under the `cloudsql.googleapis.com/client/connector/` prefix, using the
+`cloudsql.googleapis.com/InstanceClient` monitored resource. These metrics
+help you (and Cloud SQL) spot connectivity regressions, for example a rise in
+failed dial attempts or in dial latency. **They are enabled by default.**
+
+| Metric | Description |
+| --- | --- |
+| `open_connection_count` | Dial attempts, labelled with `status` and `connection_part` |
+| `connect_latencies` | Dial latency distribution (ms) |
+| `open_connections` | Currently open connections |
+| `closed_connection_count` | Closed connections |
+| `connection_durations` | Connection lifetime distribution (s) |
+
+Metrics are written to the **Cloud SQL instance's project** using the same
+identity the connector uses for the Cloud SQL Admin API. That identity needs
+the `roles/monitoring.metricWriter` role on that project. If you pass your own
+token source or credentials (`WithTokenSource`, `WithCredentials`, or an
+impersonated credential), they must also carry the
+`https://www.googleapis.com/auth/monitoring.write` (or `cloud-platform`)
+scope; credentials the connector detects itself are scoped automatically.
+Export is strictly fail-open: it never affects connectivity. If the identity
+lacks the role or the scope, the connector logs one line per process
+explaining what to fix and retries with exponential backoff (up to once per
+hour); all further diagnostics go to the [debug logger](#debug-logging) only.
+
+In a non-default Cloud universe (a universe domain other than
+`googleapis.com`), built-in metrics are off unless you pass
+`WithBuiltInMetrics(true)`.
+
+The export is billed to the caller's project (for a service account, the
+project it belongs to), which must have the Cloud Monitoring API enabled.
+`WithQuotaProject` changes the billed project, as it does for the Cloud SQL
+Admin API.
+
+Hermetic tests that construct a `Dialer` against a mock Admin API
+(`WithAdminAPIEndpoint`, `WithHTTPClient`) should pass
+`WithBuiltInMetrics(false)` so the test does not try to reach Cloud
+Monitoring.
+
+To turn built-in metrics off:
+
+```go
+d, err := cloudsqlconn.NewDialer(ctx, cloudsqlconn.WithBuiltInMetrics(false))
+```
+
+Two optional labels can be set by the application:
+
+```go
+d, err := cloudsqlconn.NewDialer(ctx,
+    cloudsqlconn.WithApplicationName("my-service"),                      // application_name
+    cloudsqlconn.WithComputePlatform(cloudsqlconn.ComputePlatformCloudRun), // overrides auto-detection
+)
+```
+
+`application_name` identifies your application and groups its metrics across
+all of its instances. It is only ever the value you set here and is left empty
+otherwise; the connector does not infer it from the environment (instances are
+already told apart by `client_uid`, and `compute_platform` is auto-detected).
+
+`WithComputePlatform` accepts only the `ComputePlatform*` constants. To take
+the platform from a string such as a flag value, use
+`cloudsqlconn.ParseComputePlatform(s)`; `cloudsqlconn.ComputePlatforms()` lists
+the valid values for help text.
+
+Metrics are exported every 60 seconds and flushed when `Dialer.Close()` is
+called, so short-lived processes should close the Dialer before exiting.
+
+These metrics are in **BETA**: label values are documented in the metric
+descriptors and pinned by tests, but the feature is subject to the Cloud SQL
+pre-GA terms.
+
 ### Enabling Metrics and Tracing
 
 This library includes support for metrics and tracing using [OpenCensus][].
@@ -598,6 +715,8 @@ considered unsupported.
 
 We follow the [Go Version Support Policy][go-policy] used by Google Cloud
 Libraries for Go.
+
+The minimum supported Go version is **Go 1.26**, as declared in `go.mod`.
 
 [go-policy]: https://github.com/googleapis/google-cloud-go#go-versions-supported
 

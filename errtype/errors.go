@@ -94,3 +94,26 @@ func (e *DialError) Error() string {
 }
 
 func (e *DialError) Unwrap() error { return e.Err }
+
+// NewResourceExhaustedError initializes a ResourceExhaustedError.
+func NewResourceExhaustedError(msg, cn string, err error) *ResourceExhaustedError {
+	return &ResourceExhaustedError{
+		genericError: &genericError{Message: msg, ConnName: cn},
+		Err:          err,
+	}
+}
+
+// ResourceExhaustedError represents a temporary failure because the service is busy.
+type ResourceExhaustedError struct {
+	*genericError
+	Err error
+}
+
+func (e *ResourceExhaustedError) Error() string {
+	if e.Err == nil {
+		return fmt.Sprintf("resource exhausted: %v", e.genericError)
+	}
+	return fmt.Sprintf("resource exhausted: %v: %v", e.genericError, e.Err)
+}
+
+func (e *ResourceExhaustedError) Unwrap() error { return e.Err }
