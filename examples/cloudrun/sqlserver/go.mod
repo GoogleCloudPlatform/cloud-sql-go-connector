@@ -2,7 +2,7 @@ module cloud.google.com/go-cloudrun/sqlserver
 
 go 1.26.0
 
-require cloud.google.com/go/cloudsqlconn v1.26.0
+require cloud.google.com/go/cloudsqlconn v1.27.0
 
 require (
 	cloud.google.com/go/auth v0.24.4 // indirect
@@ -23,6 +23,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.25 // indirect
 	github.com/googleapis/gax-go/v2 v2.27.0 // indirect
+	github.com/jackc/pgx/v5 v5.13.0 // indirect
 	github.com/microsoft/go-mssqldb v1.11.2 // indirect
 	github.com/shopspring/decimal v1.6.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
