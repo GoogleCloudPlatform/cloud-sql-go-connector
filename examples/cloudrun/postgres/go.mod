@@ -3,8 +3,8 @@ module cloud.google.com/go-cloudrun/postgres
 go 1.26.0
 
 require (
-	cloud.google.com/go/cloudsqlconn v1.26.0
-	github.com/jackc/pgx/v5 v5.12.0
+	cloud.google.com/go/cloudsqlconn v1.27.0
+	github.com/jackc/pgx/v5 v5.13.0
 )
 
 require (
