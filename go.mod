@@ -18,17 +18,13 @@ require (
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/microsoft/go-mssqldb v1.11.2
 	go.opencensus.io v0.24.0
-	go.opentelemetry.io/otel v1.47.0
-	go.opentelemetry.io/otel/metric v1.47.0
-	go.opentelemetry.io/otel/sdk v1.47.0
-	go.opentelemetry.io/otel/sdk/metric v1.47.0
-	golang.org/x/net v0.62.0
-	golang.org/x/oauth2 v0.38.0
-	golang.org/x/time v0.16.0
-	google.golang.org/api v0.312.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c
-	google.golang.org/grpc v1.85.0
-	google.golang.org/protobuf v1.36.12
+	golang.org/x/net v0.54.0
+	golang.org/x/oauth2 v0.36.0
+	golang.org/x/time v0.15.0
+	google.golang.org/api v0.280.0
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa
+	google.golang.org/grpc v1.81.1
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
