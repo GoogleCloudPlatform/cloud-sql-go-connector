@@ -18,6 +18,13 @@
 SCRIPT_DIR=$(cd -P "$(dirname "$0")" >/dev/null 2>&1 && pwd)
 SCRIPT_FILE="${SCRIPT_DIR}/$(basename "$0")"
 
+if [[ -z "${GITHUB_TOKEN:-}" ]] && command -v gh &> /dev/null; then
+  GITHUB_TOKEN=$(gh auth token 2>/dev/null || true)
+  if [[ -n "$GITHUB_TOKEN" ]]; then
+    export GITHUB_TOKEN
+  fi
+fi
+
 ##
 ## Local Development
 ##
@@ -33,12 +40,18 @@ function clean() {
 
 ## generate - Generates all required files, before building
 function generate() {
+  set -x
   get_protoc
+  generated_pb_go=("internal/mdx/metadata_exchange.pb.go")
 
-  pbFile="internal/mdx/metadata_exchange.pb.go"
-  # Delete the old MDX pb file
-  rm "$pbFile"
+  # Delete the old pb files
+  for pbFile in  "${generated_pb_go[@]}" ; do
+    if [[ -f "$pbFile" ]] ; then
+      rm "$pbFile"
+    fi
+  done
 
+  # Generate MDX protos
   PATH="${SCRIPT_DIR}/.tools/protoc/bin:$PATH" "${SCRIPT_DIR}/.tools/protoc/bin/protoc" \
     --proto_path=. \
     --go_out=. \
@@ -47,8 +60,9 @@ function generate() {
     --go_opt=paths=source_relative
 
   # Add the copyright header to the generated protobuf file
-  mv "${pbFile}" "${pbFile}.tmp"
-  cat > "${pbFile}" <<EOF
+  for pbFile in  "${generated_pb_go[@]}" ; do
+    mv "${pbFile}" "${pbFile}.tmp"
+    cat > "${pbFile}" <<EOF
 // Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -64,15 +78,21 @@ function generate() {
 // limitations under the License.
 
 EOF
-  cat "${pbFile}.tmp"  >> "${pbFile}"
-  rm "${pbFile}.tmp"
+    cat "${pbFile}.tmp"  >> "${pbFile}"
+    rm "${pbFile}.tmp"
+  done
 }
 
 # Download the protoc tool if it's not already installed.
 function get_protoc() {
+  headers=()
+  if [[ -n "${GITHUB_TOKEN}" ]]; then
+    headers+=("-H" "Authorization: token ${GITHUB_TOKEN}")
+  fi
   # Find the latest version of protoc
-  protoc_version=$(curl -s "https://api.github.com/repos/protocolbuffers/protobuf/releases/latest" | jq -r '.tag_name' | sed 's/v//')
-  proto_go_version=$(curl -s "https://api.github.com/repos/protocolbuffers/protobuf-go/releases/latest" | jq -r '.tag_name' | sed 's/v//')
+  protoc_version=$(curl -s "${headers[@]}" "https://api.github.com/repos/protocolbuffers/protobuf/releases/latest" | jq -r '.tag_name' | sed 's/v//')
+  proto_go_version=$(curl -s "${headers[@]}" "https://api.github.com/repos/protocolbuffers/protobuf-go/releases/latest" | jq -r '.tag_name' | sed 's/v//')
+  proto_grpc_go_version=$(curl -s "${headers[@]}" "https://api.github.com/repos/grpc/grpc-go/releases" | jq -r '.[].tag_name' | grep cmd/protoc-gen-go-grpc | sed 's|cmd/protoc-gen-go-grpc/v||' | head -n1)
 
   mkdir -p "$SCRIPT_DIR/.tools"
   versioned_cmd="$SCRIPT_DIR/.tools/protoc-$protoc_version"
@@ -89,9 +109,11 @@ function get_protoc() {
   if [[ "$os" == "darwin" && "$arch" == "arm64" ]] ; then
     protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-osx-aarch_64.zip"
     protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${protoc_go_arch}.tar.gz"
+    protoc_go_grpc_url="https://github.com/grpc/grpc-go/releases/download/cmd%2Fprotoc-gen-go-grpc%2Fv${proto_grpc_go_version}/protoc-gen-go-grpc.v${proto_grpc_go_version}.${os}.${protoc_go_arch}.tar.gz"
   elif [[ "$os" == "linux" ]] ; then
     protoc_url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-${os}-${arch}.zip"
     protoc_go_url="https://github.com/protocolbuffers/protobuf-go/releases/download/v${proto_go_version}/protoc-gen-go.v${proto_go_version}.${os}.${protoc_go_arch}.tar.gz"
+    protoc_go_grpc_url="https://github.com/grpc/grpc-go/releases/download/cmd%2Fprotoc-gen-go-grpc%2Fv${proto_grpc_go_version}/protoc-gen-go-grpc.v${proto_grpc_go_version}.${os}.${protoc_go_arch}.tar.gz"
   else
     echo "Unsupported protoc platform : $os $arch"
     exit 1
@@ -109,18 +131,30 @@ function get_protoc() {
   tar -zxf proto-go.tar.gz -C "$versioned_cmd/bin"
   rm -rf proto-go.tar.gz
 
+  echo "Downloading protoc-go-grpc v$proto_go_version..."
+  curl -v -sSL "$protoc_go_grpc_url" -o proto-go-grpc.tar.gz
+  mkdir -p "$versioned_cmd"
+  tar -zxf proto-go-grpc.tar.gz -C "$versioned_cmd/bin"
+  rm -rf proto-go-grpc.tar.gz
+
   ln -sf "$versioned_cmd" ".tools/protoc"
 }
 
 ## build - Builds the project without running tests.
 function build() {
   generate
-  go build ./...
+  go build -buildvcs=false ./...
 }
 
 ## test - Runs local unit tests.
 function test() {
-  go test -v -race -cover -short
+  # Install go tools
+  get_golang_tool 'go-junit-report' 'jstemmer/go-junit-report' 'github.com/jstemmer/go-junit-report/v2'
+  mkdir -p test-results
+
+  go test -v -race -cover -short -json "$@" \
+    | .tools/go-junit-report -iocopy -parser gojson -out test-results/unit.xml \
+          | jq -j 'select(.Output) | .Output'
 }
 
 ## e2e - Runs end-to-end integration tests.
@@ -135,7 +169,15 @@ function e2e() {
 # e2e_ci - Run end-to-end integration tests in the CI system.
 #   This assumes that the secrets in the env vars are already set.
 function e2e_ci() {
-  go test -v -race -cover ./e2e_mysql_test.go ./e2e_postgres_test.go ./e2e_sqlserver_test.go | tee test_results.txt
+  get_golang_tool 'go-junit-report' 'jstemmer/go-junit-report' 'github.com/jstemmer/go-junit-report/v2'
+  mkdir -p test-results
+
+  # Package mode (not explicit files) so that every e2e_*_test.go runs,
+  # including the built-in metrics e2e tests; the -run filter keeps the unit
+  # tests out of this job.
+  go test -v -race -cover -run '^Test(MySQL|Postgres|SqlServer|MetricsE2E)' . -json \
+    | .tools/go-junit-report -iocopy -parser gojson -out test-results/e2e.xml \
+    | jq -j 'select(.Output) | .Output '
 }
 
 # Download a tool using `go install`
@@ -143,9 +185,14 @@ function get_golang_tool() {
   name="$1"
   github_repo="$2"
   package="$3"
+  set -x
 
+  headers=()
+  if [[ -n "${GITHUB_TOKEN}" ]]; then
+    headers+=("-H" "Authorization: token ${GITHUB_TOKEN}")
+  fi
   # Download goimports tool
-  version=$(curl -s "https://api.github.com/repos/$github_repo/tags" | jq -r '.[].name' | head -n 1)
+  version=$(curl -s "${headers[@]}" "https://api.github.com/repos/$github_repo/tags" | jq -r '.[].name' | head -n 1)
   mkdir -p "$SCRIPT_DIR/.tools"
   cmd="$SCRIPT_DIR/.tools/$name"
   versioned_cmd="$SCRIPT_DIR/.tools/$name-$version"
@@ -157,6 +204,7 @@ function get_golang_tool() {
     fi
     ln -s "$versioned_cmd" "$cmd"
   fi
+  set +x
 }
 
 ## fix - Fixes code format.
@@ -223,6 +271,14 @@ function write_e2e_env(){
     POSTGRES_CUSTOMER_CAS_INVALID_DOMAIN_NAME=POSTGRES_CUSTOMER_CAS_INVALID_DOMAIN_NAME
     POSTGRES_MCP_CONNECTION_NAME=POSTGRES_MCP_CONNECTION_NAME
     POSTGRES_MCP_PASS=POSTGRES_MCP_PASS
+    POSTGRES_AIDE_CONNECTION_NAME=POSTGRES_AIDE_CONNECTION_NAME
+    POSTGRES_AIDE_USER=POSTGRES_AIDE_USER
+    POSTGRES_AIDE_PASS=POSTGRES_AIDE_PASS
+    POSTGRES_AIDE_DB=POSTGRES_AIDE_DB
+    POSTGRES_FALLBACK_CONNECTION_NAME=POSTGRES_FALLBACK_CONNECTION_NAME
+    POSTGRES_FALLBACK_USER=POSTGRES_FALLBACK_USER
+    POSTGRES_FALLBACK_PASS=POSTGRES_FALLBACK_PASS
+    POSTGRES_FALLBACK_DB=POSTGRES_FALLBACK_DB
     SQLSERVER_CONNECTION_NAME=SQLSERVER_CONNECTION_NAME
     SQLSERVER_USER=SQLSERVER_USER
     SQLSERVER_PASS=SQLSERVER_PASS
@@ -245,11 +301,40 @@ function write_e2e_env(){
     val=$(gcloud secrets versions access latest --project "$TEST_PROJECT" --secret="$secret_name")
     echo "export $env_var_name='$val'"
   done
-  echo "export MYSQL_USER_IAM='$(whoami)'"
-  echo "export POSTGRES_USER_IAM='$(whoami)@google.com'"
+  echo "export MYSQL_USER_IAM='$(iam_user_mysql)'"
+  echo "export POSTGRES_USER_IAM='$(iam_user_pg)'"
   } > "$1"
+}
 
+function iam_user_pg() {
+  # Call iam_user_email
+  # Truncate the suffix `.iam.gserviceaccount.com` if it exists. Otherwise return the email
+  local email
+  local pguser
 
+  email="$(iam_user_email)"
+  pguser="${email%%.gserviceaccount.com}"
+  if [[ -n "$pguser" ]] ; then
+    echo "$pguser"
+  else
+    echo "$email"
+  fi
+
+}
+
+function iam_user_mysql() {
+  # Call iam_user_email
+  # Truncate the part after the @
+  local email
+  local pguser
+
+  email=$(iam_user_email)
+  mysqluser="${email%%@*}"
+  echo "$mysqluser"
+}
+
+function iam_user_email() {
+  gcloud auth list --format json | jq -r '.[] | select (.status == "ACTIVE") | .account'
 }
 
 ## help - prints the help details
@@ -278,3 +363,4 @@ fi
 cd "$SCRIPT_DIR"
 
 "$@"
+

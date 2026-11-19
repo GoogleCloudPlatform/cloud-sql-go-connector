@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"cloud.google.com/go/cloudsqlconn/errtype"
 )
@@ -29,6 +30,8 @@ var (
 	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+)")
 	// The domain name pattern in accordance with RFC 1035, RFC 1123 and RFC 2181.
 	domainNameRegex = regexp.MustCompile(`^(?:[_a-z0-9](?:[_a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?)?$`)
+
+	instanceDNSNamePattern = regexp.MustCompile(`^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])\.(sql|sql-psa|sql-psc)\.goog\.?$`)
 )
 
 // ConnName represents the "instance connection name", in the format
@@ -117,4 +120,38 @@ type ConnectionNameResolver interface {
 	// connection string for the name. If the name cannot be resolved, returns
 	// an error.
 	Resolve(ctx context.Context, name string) (ConnName, error)
+}
+
+// ParseInstanceDNSName parses a DNS name into its constituent parts.
+// Instance DNS names follow this template:
+// {instance-dns-label}.{project-dns-label}.{cloud-region}.{dns-suffix}
+// Suffix is one of: sql.goog, sql-psa.goog, sql-psc.goog (with optional trailing dot).
+// This returns ok == false when the region is "global"
+func ParseInstanceDNSName(dnsName string) (instanceLabel, projectLabel, region, suffix string, ok bool) {
+	dnsName = strings.ToLower(dnsName)
+	m := instanceDNSNamePattern.FindStringSubmatch(dnsName)
+	if m == nil {
+		return "", "", "", "", false
+	}
+	instanceLabel = m[1]
+	projectLabel = m[2]
+	region = m[3]
+	suffix = m[4] + ".goog"
+
+	if region == "global" {
+		return "", "", "", "", false
+	}
+
+	return instanceLabel, projectLabel, region, suffix, true
+}
+
+// IsInstanceDNSName returns true if the domain name matches the well-known
+// Cloud SQL instance DNS name pattern.
+func IsInstanceDNSName(dnsName string) bool {
+	dnsName = strings.ToLower(dnsName)
+	m := instanceDNSNamePattern.FindStringSubmatch(dnsName)
+	if m == nil {
+		return false
+	}
+	return m[3] != "global"
 }

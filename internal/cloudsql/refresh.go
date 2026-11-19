@@ -21,6 +21,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"sort"
 	"strings"
 
 	"cloud.google.com/go/auth"
@@ -42,6 +43,14 @@ const (
 	// IP.
 	AutoIP = "AutoIP"
 
+	// SQLData is for access through the SQL Data endpoint and does not require
+	// a dataplane network path.
+	SQLData = "SQLData"
+
+	// ConnectTunnel is for access through the SQL Data endpoint without falling
+	// back to direct IP connections on backend failure.
+	ConnectTunnel = "ConnectTunnel"
+
 	// ClientProtocolTCP The value for the TCP client protocol type for MDX.
 	ClientProtocolTCP = "tcp"
 	// ClientProtocolUDS The value for the UDS client protocol type for MDX.
@@ -53,7 +62,7 @@ const (
 // metadata contains information about a Cloud SQL instance needed to create
 // connections.
 type metadata struct {
-	ipAddrs            map[string]string
+	ipAddrs            map[string][]string
 	serverCACert       []*x509.Certificate
 	serverCAMode       string
 	dnsName            string
@@ -96,13 +105,13 @@ func fetchMetadata(
 	}
 
 	// parse any ip addresses that might be used to connect
-	ipAddrs := make(map[string]string)
+	ipAddrs := make(map[string][]string)
 	for _, ip := range db.IpAddresses {
 		switch ip.Type {
 		case "PRIMARY":
-			ipAddrs[PublicIP] = ip.IpAddress
+			ipAddrs[PublicIP] = []string{ip.IpAddress}
 		case "PRIVATE":
-			ipAddrs[PrivateIP] = ip.IpAddress
+			ipAddrs[PrivateIP] = []string{ip.IpAddress}
 		}
 	}
 
@@ -110,23 +119,27 @@ func fetchMetadata(
 	// Note that we have to check for PSC enablement first because CAS instances also set the DnsName.
 	if db.PscEnabled {
 		// Search the dns_names field for the PSC DNS Name.
-		pscDNSName := ""
+		var pscDNSNames []string
 		for _, dnm := range db.DnsNames {
 			if dnm.Name != "" &&
 				dnm.ConnectionType == "PRIVATE_SERVICE_CONNECT" && dnm.DnsScope == "INSTANCE" {
-				pscDNSName = dnm.Name
-				break
+				// trim . from end of dns name
+				name := strings.TrimSuffix(dnm.Name, ".")
+				pscDNSNames = append(pscDNSNames, name)
 			}
 		}
 
 		// If the psc dns name was not found, use the legacy dns_name field
-		if pscDNSName == "" && db.DnsName != "" {
-			pscDNSName = db.DnsName
+		if len(pscDNSNames) == 0 && db.DnsName != "" {
+			// trim . from end of dns name
+			name := strings.TrimSuffix(db.DnsName, ".")
+			pscDNSNames = append(pscDNSNames, name)
 		}
 
 		// If the psc dns name was found, add it to the ipaddrs map.
-		if pscDNSName != "" {
-			ipAddrs[PSC] = pscDNSName
+		if len(pscDNSNames) > 0 {
+			sortPSCDNSNames(pscDNSNames)
+			ipAddrs[PSC] = pscDNSNames
 		}
 	}
 
@@ -161,7 +174,9 @@ func fetchMetadata(
 	// name in the list may be used to validate the server TLS certificate.
 	// Fall back to legacy dns_name field if necessary.
 	var serverName string
-	if len(db.DnsNames) > 0 {
+	if len(ipAddrs[PSC]) > 0 {
+		serverName = ipAddrs[PSC][0]
+	} else if len(db.DnsNames) > 0 {
 		serverName = db.DnsNames[0].Name
 	}
 	if serverName == "" {
@@ -377,4 +392,22 @@ func supportsAutoIAMAuthN(version string) error {
 	default:
 		return fmt.Errorf("%s does not support Auto IAM DB Authentication", version)
 	}
+}
+
+// sortPSCDNSNames sorts PSC DNS names alphabetically, putting the names
+// that end with `.sql-psc.goog.` first.
+func sortPSCDNSNames(names []string) {
+	sort.SliceStable(names, func(i, j int) bool {
+		nameI := strings.TrimSuffix(strings.ToLower(names[i]), ".")
+		nameJ := strings.TrimSuffix(strings.ToLower(names[j]), ".")
+		iIsPsc := strings.HasSuffix(nameI, ".sql-psc.goog")
+		jIsPsc := strings.HasSuffix(nameJ, ".sql-psc.goog")
+		if iIsPsc && !jIsPsc {
+			return true // i comes first
+		}
+		if !iIsPsc && jIsPsc {
+			return false // j comes first
+		}
+		return names[i] < names[j]
+	})
 }
