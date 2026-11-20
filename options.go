@@ -114,7 +114,12 @@ func WithSQLDataStreamTimeout(timeout time.Duration) Option {
 	}
 }
 
-// WithResourceExhaustedCooldownPeriod sets the cooldown period after a ResourceExhausted error.
+// WithResourceExhaustedCooldownPeriod sets the base cooldown period after a
+// gRPC ResourceExhausted error when using WithSQLData or WithConnectTunnel.
+// During an active cooldown, Dial calls for that instance fail immediately before
+// contacting the SQL Data API; consecutive ResourceExhausted errors apply
+// exponential backoff with jitter (capped at 5 attempts), and the backoff resets
+// after a successful read. Defaults to 5s.
 func WithResourceExhaustedCooldownPeriod(period time.Duration) Option {
 	return func(d *dialerConfig) {
 		d.resourceExhaustedCooldownPeriod = period
