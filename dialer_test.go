@@ -1024,6 +1024,44 @@ func TestDialerCloseReportsFriendlyError(t *testing.T) {
 	}
 }
 
+// TestDialerSQLDataEndpointFollowsUniverseDomain guards the SQL Data API
+// endpoint: it must live in the configured universe, like the Admin API, unless
+// an endpoint was given explicitly.
+func TestDialerSQLDataEndpointFollowsUniverseDomain(t *testing.T) {
+	for _, tc := range []struct {
+		desc string
+		opts []Option
+		want string
+	}{
+		{
+			desc: "default universe",
+			want: "sqladmin.googleapis.com:443",
+		},
+		{
+			desc: "custom universe",
+			opts: []Option{WithUniverseDomain("example.universe.test")},
+			want: "sqladmin.example.universe.test:443",
+		},
+		{
+			desc: "explicit endpoint wins",
+			opts: []Option{WithUniverseDomain("example.universe.test"), WithSQLDataEndpoint("localhost:1234")},
+			want: "localhost:1234",
+		},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			opts := append([]Option{WithTokenSource(mock.EmptyTokenSource{})}, tc.opts...)
+			d, err := NewDialer(context.Background(), opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			if d.sqlDataEndpoint != tc.want {
+				t.Errorf("sqlDataEndpoint = %q, want %q", d.sqlDataEndpoint, tc.want)
+			}
+		})
+	}
+}
+
 // TestDialerIDIsUniquePerDialer guards the client_uid contract: every Dialer
 // owns its own metric counters and export loop, so two Dialers in one
 // process (e.g. an IAM and a non-IAM driver registered side by side) must

@@ -53,13 +53,22 @@ func NewGrpcDialer(endpoint string, tokenProvider auth.TokenProvider, quotaProje
 	}
 }
 
+// SetUniverseDomain sets the universe domain passed to the SQL Data client.
+// It has no effect once the client has been created.
+func (d *GrpcDialer) SetUniverseDomain(ud string) {
+	d.universeDomain = ud
+}
+
 // GrpcDialer is a Dialer that connects to the SqlDataService via gRPC.
 type GrpcDialer struct {
-	endpoint      string
-	tokenProvider auth.TokenProvider
-	logger        debug.ContextLogger
-	useInsecure   bool
-	timeout       time.Duration
+	endpoint string
+	// universeDomain, when set, is passed to the SQL Data client so that
+	// credentials are validated against the same universe as the endpoint.
+	universeDomain string
+	tokenProvider  auth.TokenProvider
+	logger         debug.ContextLogger
+	useInsecure    bool
+	timeout        time.Duration
 
 	// sqlDataClientMu synchronizes access to the data conn and the client.
 	sqlDataClientMu sync.RWMutex
@@ -114,6 +123,9 @@ func (d *GrpcDialer) initSQLDataClient(ctx context.Context) (*sqlgapic.SqlDataCl
 	}
 	if d.quotaProject != "" {
 		clientOpts = append(clientOpts, option.WithQuotaProject(d.quotaProject))
+	}
+	if d.universeDomain != "" {
+		clientOpts = append(clientOpts, option.WithUniverseDomain(d.universeDomain))
 	}
 	if d.useInsecure {
 		clientOpts = append(clientOpts,
