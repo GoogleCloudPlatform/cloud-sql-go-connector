@@ -1388,3 +1388,77 @@ func TestProbeInstanceConnection_BoundedEOFDrainAfterTerminate(t *testing.T) {
 		t.Fatalf("probed users = %v, want [u1@example.com u2@example.com]", got)
 	}
 }
+
+// TestRefreshAheadCacheSupersededOperationDoesNotReschedule guards against a
+// second refresh chain: an operation that UpdateRefresh replaced while it was
+// in flight must neither install its result nor schedule a successor.
+func TestRefreshAheadCacheSupersededOperationDoesNotReschedule(t *testing.T) {
+	cn := testInstanceConnName()
+	inst := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name())
+	// Exactly two refreshes: the initial one and the one UpdateRefresh
+	// schedules. A superseded operation that still refreshes would add a
+	// third pair and fail the mock.
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.InstanceGetSuccess(inst, 2),
+		mock.CreateEphemeralSuccess(inst, 2),
+	)
+	if err != nil {
+		t.Fatalf("failed to create test SQL admin service: %s", err)
+	}
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}()
+
+	i := NewRefreshAheadCache(cn, nullLogger{}, client, RSAKey, 30*time.Second, nil, "", false, nil)
+	defer i.Close()
+	if _, err := i.ConnectionInfo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stand in for a refresh that has already started: UpdateRefresh cannot
+	// stop its timer, so it keeps running while a replacement is scheduled.
+	i.mu.Lock()
+	inflight := i.scheduleRefresh(time.Hour)
+	i.cur, i.next = inflight, inflight
+	i.mu.Unlock()
+
+	useIAMAuthN := true
+	i.UpdateRefresh(&useIAMAuthN)
+	i.mu.RLock()
+	replacement := i.next
+	i.mu.RUnlock()
+	if replacement == inflight {
+		t.Fatal("UpdateRefresh did not schedule a replacement")
+	}
+	// Let the replacement finish and schedule its own successor.
+	if _, err := i.ConnectionInfo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var successor *refreshOperation
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		i.mu.RLock()
+		successor = i.next
+		i.mu.RUnlock()
+		if successor != replacement {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if successor == replacement {
+		t.Fatal("the replacement did not schedule a successor")
+	}
+
+	// Now the superseded operation runs to completion.
+	inflight.timer.Reset(0)
+	<-inflight.ready
+
+	i.mu.RLock()
+	next := i.next
+	i.mu.RUnlock()
+	if next != successor {
+		t.Errorf("a superseded refresh replaced the scheduled operation: got %p, want %p", next, successor)
+	}
+}

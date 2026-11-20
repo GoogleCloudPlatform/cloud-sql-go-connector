@@ -455,6 +455,14 @@ func refreshDuration(now, certExpiry time.Time) time.Duration {
 	return d / 2
 }
 
+// superseded reports whether r is no longer the operation the cache is
+// waiting on, because UpdateRefresh or ForceRefresh replaced it.
+func (i *RefreshAheadCache) superseded(r *refreshOperation) bool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.next != r
+}
+
 // scheduleRefresh schedules a refresh operation to be triggered after a given
 // duration. The returned refreshOperation can be used to either Cancel or Wait
 // for the operation's completion.
@@ -470,6 +478,17 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 				i.connName.String(),
 			)
 			r.err = err
+			close(r.ready)
+			return
+		}
+		// The operation was replaced before it ran; the replacement runs
+		// its own chain.
+		if i.superseded(r) {
+			r.err = errtype.NewDialError(
+				"refresh operation was superseded",
+				i.connName.String(),
+				nil,
+			)
 			close(r.ready)
 			return
 		}
@@ -538,6 +557,19 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		defer i.mu.Unlock()
 
 		close(r.ready)
+
+		// UpdateRefresh may have replaced this operation while it was in
+		// flight. Its replacement already runs a chain of its own, so
+		// installing this result or scheduling a successor here would
+		// leave two chains refreshing until Close.
+		if i.next != r {
+			i.logger.Debugf(
+				ctx,
+				"[%v] Connection info refresh operation was superseded",
+				i.connName.String(),
+			)
+			return
+		}
 
 		// if failed, scheduled the next refresh immediately
 		if r.err != nil {
