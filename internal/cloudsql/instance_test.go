@@ -30,10 +30,15 @@ import (
 	"testing"
 	"time"
 
+	"net/http"
+	"net/http/httptest"
+
 	"cloud.google.com/go/cloudsqlconn/errtype"
 	"cloud.google.com/go/cloudsqlconn/instance"
 	"cloud.google.com/go/cloudsqlconn/internal/mock"
 	"github.com/jackc/pgx/v5/pgproto3"
+	"google.golang.org/api/option"
+	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 type nullLogger struct{}
@@ -1386,5 +1391,49 @@ func TestProbeInstanceConnection_BoundedEOFDrainAfterTerminate(t *testing.T) {
 	mu.Unlock()
 	if len(got) != 2 || got[0] != "u1@example.com" || got[1] != "u2@example.com" {
 		t.Fatalf("probed users = %v, want [u1@example.com u2@example.com]", got)
+	}
+}
+
+// TestRefreshAheadCacheClosedWhileWaitingReturnsDialError guards the error a
+// caller sees when the cache is closed under it (Dialer.Close, a removed
+// entry, or a DNS failover) while its own context is still live: a dial error
+// it can classify, not a bare context error it would attribute to itself.
+func TestRefreshAheadCacheClosedWhileWaitingReturnsDialError(t *testing.T) {
+	cn := testInstanceConnName()
+	release := make(chan struct{})
+	stalled := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		<-release
+	}))
+	defer stalled.Close()
+	defer close(release)
+	client, err := sqladmin.NewService(context.Background(),
+		option.WithHTTPClient(stalled.Client()), option.WithEndpoint(stalled.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	i := NewRefreshAheadCache(cn, nullLogger{}, client, RSAKey, 30*time.Second, nil, "", false, nil)
+	done := make(chan error, 1)
+	go func() {
+		_, err := i.ConnectionInfo(context.Background())
+		done <- err
+	}()
+	// Give the caller time to start waiting on the first refresh.
+	time.Sleep(100 * time.Millisecond)
+	if err := i.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ConnectionInfo() did not return after Close()")
+	}
+	var de *errtype.DialError
+	if !errors.As(err, &de) {
+		t.Errorf("ConnectionInfo() err = %T %v, want a *errtype.DialError", err, err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("ConnectionInfo() err = %v, want it to wrap %v", err, context.Canceled)
 	}
 }
