@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.27.1...v1.27.2) (2026-11-27)
+
+
+### Bug Fixes
+
+* update dependencies to latest ([#1254](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1254)) ([3e3ae3d](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/3e3ae3de5322fc8271d1524e612bb150eb03afdd))
+
 ## [1.27.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.27.0...v1.27.1) (2026-11-23)
 
 
