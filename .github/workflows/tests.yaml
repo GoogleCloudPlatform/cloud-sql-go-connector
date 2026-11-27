@@ -38,6 +38,7 @@ jobs:
         os: [macos-latest, windows-latest, ubuntu-latest]
       fail-fast: false
     permissions:
+      actions: read
       contents: "read"
       id-token: "write"
       issues: write
@@ -144,26 +145,40 @@ jobs:
         run: |
           cp test-results/e2e.xml integration_sponge_log.xml
 
+      - name: Resolve job URL
+        id: job-url
+        # only needed for flakybot on periodic (schedule) and continuous (push) events
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() }}
+        uses: ./.github/actions/resolve-job-url
+        with:
+          job-name: integration tests (${{ matrix.os }})
+
       - name: FlakyBot (Linux)
         # only run flakybot on periodic (schedule) and continuous (push) events
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && runner.os == 'Linux' && always() }}
+        env:
+          BUILD_URL: ${{ steps.job-url.outputs.build_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
         run: |
           curl https://github.com/googleapis/repo-automation-bots/releases/download/flakybot-1.1.0/flakybot -o flakybot -s -L
           chmod +x ./flakybot
-          ./flakybot --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
+          ./flakybot --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url "$BUILD_URL"
       - name: FlakyBot (Windows)
         # only run flakybot on periodic (schedule) and continuous (push) events
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && runner.os == 'Windows' && always() }}
+        env:
+          BUILD_URL: ${{ steps.job-url.outputs.build_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
         run: |
           curl https://github.com/googleapis/repo-automation-bots/releases/download/flakybot-1.1.0/flakybot.exe -o flakybot.exe -s -L
-          ./flakybot.exe --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
+          ./flakybot.exe --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url "$env:BUILD_URL"
       - name: FlakyBot (macOS)
         # only run flakybot on periodic (schedule) and continuous (push) events
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && runner.os == 'macOS' && always() }}
+        env:
+          BUILD_URL: ${{ steps.job-url.outputs.build_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
         run: |
           curl https://github.com/googleapis/repo-automation-bots/releases/download/flakybot-1.1.0/flakybot-darwin-amd64 -o flakybot -s -L
           chmod +x ./flakybot
-          ./flakybot --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
+          ./flakybot --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url "$BUILD_URL"
 
   unit:
     name: "unit tests"
@@ -174,6 +189,7 @@ jobs:
         go-version: ["1.26","1.27"]
       fail-fast: false
     permissions:
+      actions: read
       contents: read
       id-token: write
       issues: write
@@ -190,12 +206,15 @@ jobs:
       - id: auth
         name: Authenticate to Google Cloud
         # only needed for Flakybot on periodic (schedule) and continuous (push) events
-        if: ${{ github.event_name == 'schedule' || github.event_name == 'push' }}
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && matrix.goarch == '' }}
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.PROVIDER_NAME }}
           service_account: ${{ vars.SERVICE_ACCOUNT }}
           access_token_lifetime: 600s
+      - name: Test resolve-job-url action
+        if: matrix.goarch == '' && matrix.go-version == '1.26'
+        run: node --test .github/actions/resolve-job-url/resolve-job-url.test.js
       - name: Run tests
         if: matrix.goarch == ''
         # specifying bash shell ensures a failure in a piped process isn't lost by using `set -eo pipefail`
@@ -220,10 +239,19 @@ jobs:
         run: |
           go install github.com/jstemmer/go-junit-report/v2@latest
           go-junit-report -in test_results.txt -set-exit-code -out unit_sponge_log.xml
+      - name: Resolve job URL
+        id: job-url
+        # only needed for flakybot on periodic (schedule) and continuous (push) events
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() && matrix.goarch == '' }}
+        uses: ./.github/actions/resolve-job-url
+        with:
+          job-name: unit tests (${{ matrix.go-version }})
       - name: FlakyBot (Linux)
         # only run flakybot on periodic (schedule) and continuous (push) events
-        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && runner.os == 'Linux' && always() }}
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'push') && always() && matrix.goarch == '' }}
+        env:
+          BUILD_URL: ${{ steps.job-url.outputs.build_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
         run: |
           curl https://github.com/googleapis/repo-automation-bots/releases/download/flakybot-1.1.0/flakybot -o flakybot -s -L
           chmod +x ./flakybot
-          ./flakybot --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url https://github.com/${{github.repository}}/actions/runs/${{github.run_id}}
+          ./flakybot --repo ${{github.repository}} --commit_hash ${{github.sha}} --build_url "$BUILD_URL"
