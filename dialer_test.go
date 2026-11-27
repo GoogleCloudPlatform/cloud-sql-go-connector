@@ -1024,6 +1024,48 @@ func TestDialerCloseReportsFriendlyError(t *testing.T) {
 	}
 }
 
+// TestDialerCloseKeepsOpenConnectionCountConsistent guards the open
+// connection count behind the cloudsqlconn/open_connections gauge: Close must
+// not reset it while connections it does not track are still open, or their
+// own close would drive it below zero.
+func TestDialerCloseKeepsOpenConnectionCountConsistent(t *testing.T) {
+	inst := mock.NewFakeCSQLInstance("my-project", "my-region", "my-instance")
+	d := setupDialer(t, setupConfig{
+		testInstance: inst,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+		},
+	})
+	c1, err := d.Dial(context.Background(), inst.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := d.Dial(context.Background(), inst.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cn, err := instance.ParseConnName(inst.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.lock.RLock()
+	c := d.cache[createKey(cn)]
+	d.lock.RUnlock()
+	if got := c.openConnsCount.Load(); got != 2 {
+		t.Fatalf("open connections after two dials = %d, want 2", got)
+	}
+
+	// The Dialer is closed while the pool still holds both connections,
+	// then the pool closes them.
+	_ = d.Close()
+	_ = c1.Close()
+	_ = c2.Close()
+	if got := c.openConnsCount.Load(); got != 0 {
+		t.Errorf("open connections after closing both = %d, want 0", got)
+	}
+}
+
 // TestDialerIDIsUniquePerDialer guards the client_uid contract: every Dialer
 // owns its own metric counters and export loop, so two Dialers in one
 // process (e.g. an IAM and a non-IAM driver registered side by side) must
