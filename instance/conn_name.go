@@ -27,7 +27,7 @@ var (
 	// Instance connection name is the format <PROJECT>:<REGION>:<INSTANCE>
 	// Additionally, we have to support legacy "domain-scoped" projects
 	// (e.g. "google.com:PROJECT")
-	connNameRegex = regexp.MustCompile("([^:]+(:[^:]+)?):([^:]+):([^:]+)")
+	connNameRegex = regexp.MustCompile(`^([^/:]+(?::[^/:]+)?):([^/:]+):([^/:]+)$`)
 	// The domain name pattern in accordance with RFC 1035, RFC 1123 and RFC 2181.
 	domainNameRegex = regexp.MustCompile(`^(?:[_a-z0-9](?:[_a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?)?$`)
 
@@ -105,8 +105,8 @@ func ParseConnNameWithDomainName(cn string, dn string) (ConnName, error) {
 
 	c := ConnName{
 		project:    string(m[1]),
-		region:     string(m[3]),
-		name:       string(m[4]),
+		region:     string(m[2]),
+		name:       string(m[3]),
 		domainName: dn,
 	}
 	return c, nil

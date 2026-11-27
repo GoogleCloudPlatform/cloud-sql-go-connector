@@ -33,6 +33,26 @@ func TestParseConnName(t *testing.T) {
 			name: "project:instance", // missing region
 			want: ConnName{},
 		},
+		{
+			name: "org/project:region:instance", // slash in project
+			want: ConnName{},
+		},
+		{
+			name: "google.com:org/project:region:instance", // slash in domain-scoped project
+			want: ConnName{},
+		},
+		{
+			name: "google.com:project:region:instance:extra", // extra colon segment
+			want: ConnName{},
+		},
+		{
+			name: "project:region/extra:instance", // slash in region
+			want: ConnName{},
+		},
+		{
+			name: "project:region:instance/extra", // slash in instance
+			want: ConnName{},
+		},
 	}
 
 	for _, tc := range tests {
