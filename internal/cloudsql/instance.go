@@ -430,7 +430,14 @@ func (i *RefreshAheadCache) refreshOperation(ctx context.Context) (*refreshOpera
 	case <-ctx.Done():
 		err = ctx.Err()
 	case <-i.ctx.Done():
-		err = i.ctx.Err()
+		// The cache was closed underneath the caller, whose own context
+		// is still live. Report that as a dial error rather than a bare
+		// context error, which callers would attribute to themselves.
+		err = errtype.NewDialError(
+			"connection info cache was closed before refresh completed",
+			i.connName.String(),
+			i.ctx.Err(),
+		)
 	}
 	if err != nil {
 		return nil, err
