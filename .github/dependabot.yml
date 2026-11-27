@@ -19,8 +19,10 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default-days: 7
+      default-days: 0 # zizmor: ignore[dependabot-cooldown]
     open-pull-requests-limit: 10
+    allow:
+      - dependency-type: "all"
     commit-message:
       prefix: "deps"
     groups:
@@ -44,8 +46,10 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default-days: 7
+      default-days: 0 # zizmor: ignore[dependabot-cooldown]
     open-pull-requests-limit: 5
+    allow:
+      - dependency-type: "all"
     commit-message:
       prefix: "deps"
     groups:
@@ -56,13 +60,17 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # Pinned to v0.60.0: v0.61.0+ prints a deprecation notice to the standard logger on first use.
+      - dependency-name: "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
+        versions: [">= 0.61.0"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "daily"
     cooldown:
-      default-days: 7
+      default-days: 0 # zizmor: ignore[dependabot-cooldown]
     open-pull-requests-limit: 10
     commit-message:
       prefix: "chore"
