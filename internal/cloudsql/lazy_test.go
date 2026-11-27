@@ -392,3 +392,35 @@ func TestLazyRefreshCache_ConnectionInfo_ReleasesLockDuringProbe(t *testing.T) {
 func ptr[T any](val T) *T {
 	return &val
 }
+
+func TestLazyRefreshCacheForceRefreshIsRateLimited(t *testing.T) {
+	cn, _ := instance.ParseConnName("my-project:my-region:my-instance")
+	inst := mock.NewFakeCSQLInstance(cn.Project(), cn.Region(), cn.Name())
+	// One initial refresh plus the burst of forced refreshes the limiter
+	// allows; any further request is unexpected and fails the call.
+	client, cleanup, err := mock.NewSQLAdminService(
+		context.Background(),
+		mock.InstanceGetSuccess(inst, 1+refreshBurst),
+		mock.CreateEphemeralSuccess(inst, 1+refreshBurst),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cleanup(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	c := NewLazyRefreshCache(cn, nullLogger{}, client, RSAKey, 30*time.Second, nil, "", false, nil)
+	if _, err := c.ConnectionInfo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// A run of failed dials forces a refresh before each retry.
+	for i := 0; i < 10; i++ {
+		c.ForceRefresh()
+		if _, err := c.ConnectionInfo(context.Background()); err != nil {
+			t.Fatalf("ConnectionInfo() after forced refresh %d: %v", i+1, err)
+		}
+	}
+}
